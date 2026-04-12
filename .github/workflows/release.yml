@@ -53,7 +53,7 @@ jobs:
             MACOS=$(echo "$MACOS" | jq -c '. + [{"arch":"aarch64","target":"aarch64-apple-darwin","xtask_target":"macos-aarch64","runner":"macos-14"}]')
           fi
           if [ "${{ inputs.macos_x86_64 }}" = "true" ]; then
-            MACOS=$(echo "$MACOS" | jq -c '. + [{"arch":"x86_64","target":"x86_64-apple-darwin","xtask_target":"macos-x86_64","runner":"macos-13"}]')
+            MACOS=$(echo "$MACOS" | jq -c '. + [{"arch":"x86_64","target":"x86_64-apple-darwin","xtask_target":"macos-x86_64","runner":"macos-15-intel"}]')
           fi
           if [ "${{ inputs.windows_x64 }}" = "true" ]; then
             WINDOWS=$(echo "$WINDOWS" | jq -c '. + [{"arch":"x64","target":"x86_64-pc-windows-msvc","xtask_target":"windows-x64","runner":"windows-latest"}]')
