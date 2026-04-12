@@ -83,7 +83,20 @@ cd "$REPO_ROOT"
 
 # 2. Build daemon and CLI
 echo "==> Building hive-daemon and hive-cli..."
-cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
+# ort (ONNX Runtime) does not provide prebuilt binaries for x86_64-apple-darwin,
+# so we skip the onnx feature on Intel Macs and fall back to candle + llama-cpp only.
+if [ "$ARCH" = "x86_64" ]; then
+    cargo build --release --target "$TARGET" -p hive-daemon \
+        --no-default-features \
+        --features "hive-api/candle,hive-api/llama-cpp,service-manager"
+    cargo build --release --target "$TARGET" -p hive-cli \
+        --features "service-manager"
+    cargo build --release --target "$TARGET" -p hive-runtime-worker \
+        --no-default-features \
+        --features "candle,llama-cpp"
+else
+    cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
+fi
 
 # 2b. Sign all CLI binaries.
 #
