@@ -4,10 +4,13 @@
 # Usage: scripts/macos/build-pkg.sh [aarch64|x86_64]
 #
 # The PKG installs shared binaries system-wide:
-#   - /Applications/HiveMind OS.app          (Tauri desktop app)
-#   - /usr/local/bin/hive-daemon      (background daemon)
-#   - /usr/local/bin/hive-cli         (CLI tool)
-#   - /usr/local/bin/hive-runtime-worker (isolated inference worker)
+#   - /Applications/HiveMind OS.app               (Tauri desktop app)
+#   - /usr/local/bin/hive-daemon                  (background daemon)
+#   - /usr/local/bin/hive-cli                     (CLI tool)
+#   - /usr/local/bin/hive-runtime-worker          (isolated inference worker)
+#   - /usr/local/lib/libonnxruntime.<ver>.dylib   (ONNX Runtime; x86_64 only —
+#       ort provides no prebuilt for x86_64-apple-darwin, so we download the
+#       official Microsoft release and bundle it with the package.)
 #
 # Per-user service registration happens on first launch of the desktop app,
 # NOT during install, so each user gets their own daemon instance.
@@ -32,6 +35,32 @@ PKG_ROOT=$(mktemp -d)
 IDENTIFIER="com.hivemind.desktop"
 OUTPUT_DIR="$REPO_ROOT/dist"
 mkdir -p "$OUTPUT_DIR"
+
+# ── ONNX Runtime for x86_64 ──────────────────────────────────────────────────
+# ort v2.0.0-rc.12 ships no prebuilt ONNX Runtime binaries for x86_64-apple-darwin.
+# For this target we download the official Microsoft release, patch its install
+# name to the final installation path (/usr/local/lib), link dynamically at
+# build time, and bundle the dylib inside the PKG payload so it is present at
+# runtime after installation.
+ORT_VERSION="1.24.2"
+if [ "$ARCH" = "x86_64" ]; then
+    ORT_CACHE_DIR="${HOME}/.cache/ort/onnxruntime-osx-x86_64-${ORT_VERSION}"
+    if [ ! -d "$ORT_CACHE_DIR" ]; then
+        echo "==> Downloading ONNX Runtime ${ORT_VERSION} for x86_64-apple-darwin..."
+        mkdir -p "$(dirname "$ORT_CACHE_DIR")"
+        curl -fL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz" \
+            | tar -xz -C "$(dirname "$ORT_CACHE_DIR")"
+        # Patch the dylib's own install name so that any binary linked against it
+        # will look for /usr/local/lib/libonnxruntime.<ver>.dylib at runtime.
+        # This matches the path where the PKG installs the dylib.
+        install_name_tool -id \
+            "/usr/local/lib/libonnxruntime.${ORT_VERSION}.dylib" \
+            "${ORT_CACHE_DIR}/lib/libonnxruntime.${ORT_VERSION}.dylib"
+    fi
+    export ORT_LIB_LOCATION="${ORT_CACHE_DIR}/lib"
+    export ORT_PREFER_DYNAMIC_LINK=1
+fi
 
 # ── Determine code-signing identity ──────────────────────────────────────────
 # Priority: APPLE_APP_CERT_NAME (CI/distribution) > CODESIGN_IDENTITY (dev) > - (ad-hoc)
@@ -83,20 +112,7 @@ cd "$REPO_ROOT"
 
 # 2. Build daemon and CLI
 echo "==> Building hive-daemon and hive-cli..."
-# ort (ONNX Runtime) does not provide prebuilt binaries for x86_64-apple-darwin,
-# so we skip the onnx feature on Intel Macs and fall back to candle + llama-cpp only.
-if [ "$ARCH" = "x86_64" ]; then
-    cargo build --release --target "$TARGET" -p hive-daemon \
-        --no-default-features \
-        --features "hive-api/candle,hive-api/llama-cpp,service-manager"
-    cargo build --release --target "$TARGET" -p hive-cli \
-        --features "service-manager"
-    cargo build --release --target "$TARGET" -p hive-runtime-worker \
-        --no-default-features \
-        --features "candle,llama-cpp"
-else
-    cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
-fi
+cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
 
 # 2b. Sign all CLI binaries.
 #
@@ -124,6 +140,18 @@ sign_binary "$REPO_ROOT/target/$TARGET/release/hive-runtime-worker" \
 echo "==> Assembling PKG payload..."
 mkdir -p "$PKG_ROOT/Applications"
 mkdir -p "$PKG_ROOT/usr/local/bin"
+
+# Bundle the ONNX Runtime dylib on x86_64: ort has no prebuilt for this target,
+# so we ship the Microsoft dylib alongside the other binaries and install it to
+# /usr/local/lib/ so hive-runtime-worker can load it at runtime.
+if [ "$ARCH" = "x86_64" ]; then
+    mkdir -p "$PKG_ROOT/usr/local/lib"
+    cp "${ORT_CACHE_DIR}/lib/libonnxruntime.${ORT_VERSION}.dylib" \
+        "$PKG_ROOT/usr/local/lib/"
+    # Re-sign: install_name_tool above invalidated the original Microsoft signature.
+    sign_binary "$PKG_ROOT/usr/local/lib/libonnxruntime.${ORT_VERSION}.dylib" \
+        "com.hivemind.onnxruntime"
+fi
 
 # Find the .app bundle — Tauri puts it in the target bundle directory
 APP_BUNDLE=$(find "$REPO_ROOT/target/$TARGET/release/bundle" -name "HiveMind OS.app" -type d | head -1)
