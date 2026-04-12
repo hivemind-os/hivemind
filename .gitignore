@@ -1,0 +1,10 @@
+/poc
+/target
+**/target
+test-kg.db
+node_modules
+dist
+config.yaml
+/vendor
+# Playwright MCP browser session artifacts
+.playwright-mcp/

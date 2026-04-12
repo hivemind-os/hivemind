@@ -1,0 +1,112 @@
+[workspace]
+members = [
+    "apps/hivemind-desktop/src-tauri",
+    "crates/hive-agent-kit",
+    "crates/hive-agents",
+    "crates/hive-api",
+    "crates/hive-canvas",
+    "crates/hive-chat",
+    "crates/hive-classification",
+    "crates/hive-connectors",
+    "crates/hive-cli",
+    "crates/hive-context-map",
+    "crates/hive-contracts",
+    "crates/hive-core",
+    "crates/hive-daemon",
+    "crates/hive-inference",
+    "crates/hive-iwork",
+    "crates/hive-knowledge", "crates/hive-local-models", "crates/hive-loop", "crates/hive-mcp",
+    "crates/hive-node-env",
+    "crates/hive-process",
+    "crates/hive-python-env",
+    "crates/hive-sandbox",
+    "crates/hive-workflow",
+    "crates/hive-workflow-service",
+    "crates/hive-model",
+    "crates/hive-risk",
+    "crates/hive-runtime-worker",
+    "crates/hive-scheduler",
+    "crates/hive-skills",
+    "crates/hive-skills-service",
+    "crates/hive-test-utils", "crates/hive-tools",
+    "crates/hive-web-search",
+    "crates/hive-workspace-index",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.85"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1"
+arc-swap = "1"
+axum = { version = "0.8", features = ["macros"] }
+chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+cron = "0.15"
+dirs = "6"
+log = "0.4"
+mime_guess = "2"
+regex = "1"
+glob = "0.3"
+handlebars = "6"
+ignore = "0.4"
+include_dir = "0.7"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+sqlite-vec = "0.1"
+tauri = { version = "2.10.3", features = ["tray-icon", "image-png", "image-ico"] }
+tauri-build = "2.5.6"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+async-stream = "0.3"
+async-trait = "0.1"
+futures-core = "0.3"
+futures-util = "0.3"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "catch-panic"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+urlencoding = "2"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+rmcp = { version = "0.1.5", default-features = false, features = ["base64", "client", "server", "macros", "transport-async-rw", "transport-sse"] }
+
+# Inference runtime dependencies
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+llama-cpp-2 = "0.1"
+encoding_rs = "0.8"
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+ndarray = "0.16"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+gix = { version = "0.74", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "worktree-mutation", "max-performance-safe"] }
+
+# ── Build profiles ──────────────────────────────────────────────
+[profile.dev]
+split-debuginfo = "unpacked"   # macOS: much faster incremental linking
+
+[profile.dev.package."*"]
+opt-level = 2                  # optimise third-party crates; keeps workspace at opt-level 0
+
+[patch.crates-io]
+rmcp = { path = "vendor/rmcp" }
+rmcp-macros = { path = "vendor/rmcp-macros" }

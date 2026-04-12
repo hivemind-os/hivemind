@@ -1,0 +1,182 @@
+daemon:
+  log_level: info
+  event_bus_capacity: 512
+api:
+  bind: 127.0.0.1:57441
+  http_enabled: true
+security:
+  override_policy:
+    internal: prompt
+    confidential: prompt
+    restricted: block
+  prompt_injection:
+    enabled: true
+    action_on_detection: prompt
+    confidence_threshold: 0.7
+    cache_ttl_secs: 3600
+    model_scanning_enabled: false
+    scanner_models: []
+    scan_sources:
+      workspace_files: true
+      clipboard: true
+      messaging_inbound: true
+      web_content: true
+      mcp_responses: true
+      tool_overrides: {}
+    max_payload_tokens: 4096
+    batch_small_payloads: true
+  default_permissions: []
+  command_policy:
+    enabled: true
+    categories: {}
+    custom_patterns: []
+  sandbox:
+    enabled: true
+    extra_read_paths: []
+    extra_write_paths: []
+    allow_network: true
+models:
+  providers:
+  - id: demo-internal
+    name: Demo Internal
+    kind: mock
+    base_url: null
+    auth: none
+    models:
+    - chat-fast
+    model_capabilities:
+      chat-fast:
+      - chat
+    channel_class: internal
+    priority: 100
+    enabled: true
+    options:
+      route: null
+      allow_model_discovery: false
+      default_api_version: null
+      response_prefix: HiveMind OS internal route
+      headers: {}
+  - id: demo-private
+    name: Demo Private
+    kind: mock
+    base_url: null
+    auth: none
+    models:
+    - chat-guard
+    model_capabilities:
+      chat-guard:
+      - chat
+    channel_class: private
+    priority: 90
+    enabled: true
+    options:
+      route: null
+      allow_model_discovery: false
+      default_api_version: null
+      response_prefix: HiveMind OS private route
+      headers: {}
+  - id: demo-local
+    name: Demo Local
+    kind: mock
+    base_url: null
+    auth: none
+    models:
+    - chat-local
+    model_capabilities:
+      chat-local:
+      - chat
+    channel_class: local-only
+    priority: 80
+    enabled: true
+    options:
+      route: null
+      allow_model_discovery: false
+      default_api_version: null
+      response_prefix: HiveMind OS local route
+      headers: {}
+  - id: local
+    name: Local Models
+    kind: local-models
+    base_url: null
+    auth: none
+    models: []
+    channel_class: local-only
+    priority: 50
+    enabled: true
+    options:
+      route: null
+      allow_model_discovery: false
+      default_api_version: null
+      response_prefix: null
+      headers: {}
+local_models:
+  enabled: true
+  storage_path: null
+  max_loaded_models: 2
+  max_download_concurrent: 2
+  auto_evict: true
+  isolate_runtimes: true
+setup_completed: true
+skills:
+  enabled: true
+  sources:
+  - type: github
+    owner: anthropics
+    repo: skills
+    enabled: true
+  - type: github
+    owner: openai
+    repo: skills
+    enabled: true
+  - type: github
+    owner: huggingface
+    repo: skills
+    enabled: true
+compaction:
+  strategy: summarize-only
+  trigger_threshold: 0.75
+  keep_recent_turns: 10
+  summary_max_tokens: 800
+  max_summaries_in_context: 5
+embedding:
+  models:
+  - model_id: bge-small-en-v1.5
+    hub_repo: BAAI/bge-small-en-v1.5
+    filename: onnx/model.onnx
+    dimensions: 384
+    runtime: onnx
+  rules: []
+  default_model: bge-small-en-v1.5
+afk:
+  forward_on:
+  - away
+  - do_not_disturb
+  forward_approvals: true
+  forward_questions: true
+  no_client_grace_period_secs: 300
+python:
+  enabled: true
+  python_version: '3.12'
+  base_packages:
+  - requests
+  - beautifulsoup4
+  - pandas
+  - numpy
+  - pyyaml
+  - python-dateutil
+  - Pillow
+  - matplotlib
+  - jinja2
+  auto_detect_workspace_deps: true
+  uv_version: 0.6.14
+node:
+  enabled: true
+  node_version: 22.16.0
+tool_limits:
+  soft_limit: 25
+  hard_ceiling: 200
+  extension_chunk: 25
+  stall_window: 20
+  stall_threshold: 10
+web_search:
+  provider: none

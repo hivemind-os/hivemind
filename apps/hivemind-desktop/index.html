@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>HiveMind OS</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run HiveMind OS.</noscript>
+    <div id="root">
+      <!-- Inline loading indicator — replaced once SolidJS mounts -->
+      <div id="app-loader" style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background: #1e1e2e;
+        color: #a6adc8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        gap: 1rem;
+      ">
+        <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+          #app-loader .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #313244;
+            border-top-color: #89b4fa;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+          }
+        </style>
+        <div class="spinner"></div>
+        <span style="font-size: 0.85rem; opacity: 0.7;">Loading HiveMind OS…</span>
+      </div>
+    </div>
+    <script src="/src/index.tsx" type="module"></script>
+  </body>
+</html>
