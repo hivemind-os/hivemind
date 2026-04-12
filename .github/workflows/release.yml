@@ -186,6 +186,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # clang-cl targeting aarch64 disables C++ exceptions by default;
+          # llama.cpp uses throw, so we must re-enable them.
+          CMAKE_CXX_FLAGS: /EHsc
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
       - name: Sign executables
