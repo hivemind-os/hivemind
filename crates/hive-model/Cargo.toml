@@ -1,0 +1,24 @@
+[package]
+name = "hive-model"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
+hive-classification = { path = "../hive-classification" }
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+hive-inference = { path = "../hive-inference", default-features = false }
+futures-core.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true

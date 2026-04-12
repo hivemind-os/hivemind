@@ -1,0 +1,70 @@
+[package]
+name = "hive-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+candle = ["hive-chat/candle"]
+llama-cpp = ["hive-chat/llama-cpp"]
+onnx = ["hive-chat/onnx"]
+
+[dependencies]
+anyhow.workspace = true
+arc-swap.workspace = true
+async-trait.workspace = true
+axum = { workspace = true, features = ["ws"] }
+base64 = "0.22"
+dirs.workspace = true
+hive-agent-kit = { path = "../hive-agent-kit" }
+hive-agents = { path = "../hive-agents" }
+hive-canvas = { path = "../hive-canvas" }
+hive-chat = { path = "../hive-chat" }
+hive-classification = { path = "../hive-classification" }
+hive-connectors = { path = "../hive-connectors" }
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+hive-inference = { path = "../hive-inference", default-features = false }
+hive-knowledge = { path = "../hive-knowledge" }
+hive-local-models = { path = "../hive-local-models" }
+hive-mcp = { path = "../hive-mcp" }
+hive-process = { path = "../hive-process" }
+hive-loop = { path = "../hive-loop" }
+hive-model = { path = "../hive-model" }
+hive-node-env = { path = "../hive-node-env" }
+hive-python-env = { path = "../hive-python-env" }
+hive-risk = { path = "../hive-risk" }
+hive-scheduler = { path = "../hive-scheduler" }
+hive-skills = { path = "../hive-skills" }
+hive-skills-service = { path = "../hive-skills-service" }
+hive-tools = { path = "../hive-tools" }
+hive-workflow = { path = "../hive-workflow" }
+hive-workflow-service = { path = "../hive-workflow-service" }
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-core.workspace = true
+async-stream.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+futures-util = "0.3"
+urlencoding.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+hive-model = { path = "../hive-model" }
+hive-test-utils = { path = "../hive-test-utils" }
+hive-tools = { path = "../hive-tools" }
+hive-scheduler = { path = "../hive-scheduler", features = ["test-support", "allow-localhost"] }
+tower.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -1,0 +1,38 @@
+[package]
+name = "hive-loop"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+hive-classification = { path = "../hive-classification" }
+hive-connectors = { path = "../hive-connectors" }
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+hive-model = { path = "../hive-model" }
+hive-risk = { path = "../hive-risk" }
+hive-skills = { path = "../hive-skills" }
+hive-tools = { path = "../hive-tools" }
+arc-swap.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+hive-agents = { path = "../hive-agents" }
+hive-process = { path = "../hive-process" }
+arc-swap.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }

@@ -1,0 +1,71 @@
+name: plan-then-execute
+version: "1.0"
+description: "Two-phase strategy: first generates a plan, then executes each step with tool calling support."
+
+config:
+  max_iterations: 50
+  # max_tool_calls is managed by the adaptive budget (ToolLimitsConfig).
+
+inputs:
+  - name: user_input
+    description: "The user's prompt or task"
+  - name: system_prompt
+    description: "System instructions for the model"
+    required: false
+    default: "You are a helpful assistant that breaks down complex tasks into steps and executes them."
+  - name: planning_prompt
+    description: "Additional instructions for the planning phase"
+    required: false
+    default: "Break this task into a numbered list of concrete steps. Output ONLY the numbered list, nothing else."
+
+steps:
+  - id: plan
+    description: "Ask the model to create a plan"
+    action:
+      type: model_call
+      prompt: "{{planning_prompt}}\n\nTask: {{user_input}}"
+      system_prompt: "{{system_prompt}}"
+      result_var: plan_response
+
+  - id: store_plan
+    description: "Store the plan for reference"
+    action:
+      type: set_variable
+      name: plan
+      value: "{{plan_response.content}}"
+
+  - id: execute
+    description: "Execute the plan with tool calling support"
+    action:
+      type: model_call
+      prompt: "Execute this plan step by step, using available tools as needed:\n\n{{plan}}\n\nOriginal task: {{user_input}}"
+      system_prompt: "{{system_prompt}}"
+      result_var: response
+
+  - id: check_tool_calls
+    description: "Check if tools are needed for execution"
+    action:
+      type: branch
+      condition: "{{response.has_tool_calls}}"
+      then_step: run_tools
+      else_step: return_result
+
+  - id: run_tools
+    description: "Execute requested tool calls"
+    action:
+      type: parallel_tool_calls
+      calls: "{{response.tool_calls}}"
+      result_var: tool_results
+
+  - id: continue_execution
+    description: "Continue execution after tool results"
+    action:
+      type: branch
+      condition: "true"
+      then_step: execute
+
+  - id: return_result
+    description: "Return the final execution result"
+    action:
+      type: return_value
+      value: "{{response.content}}"

@@ -1,0 +1,15 @@
+[package]
+name = "hive-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared DTO types for the HiveMind OS AI agent platform"
+
+[dependencies]
+anyhow.workspace = true
+async-trait = "0.1"
+hive-classification = { path = "../hive-classification" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }

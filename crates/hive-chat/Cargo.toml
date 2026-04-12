@@ -1,0 +1,59 @@
+[package]
+name = "hive-chat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+candle = ["hive-inference/candle"]
+llama-cpp = ["hive-inference/llama-cpp"]
+onnx = ["hive-inference/onnx"]
+
+[dependencies]
+anyhow.workspace = true
+arc-swap.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
+base64 = "0.22"
+chrono.workspace = true
+dashmap = "6"
+hive-agents = { path = "../hive-agents" }
+hive-canvas = { path = "../hive-canvas" }
+hive-classification = { path = "../hive-classification" }
+hive-context-map = { path = "../hive-context-map" }
+hive-connectors = { path = "../hive-connectors" }
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+hive-inference = { path = "../hive-inference", default-features = false }
+hive-iwork = { path = "../hive-iwork" }
+hive-knowledge = { path = "../hive-knowledge" }
+hive-loop = { path = "../hive-loop" }
+hive-mcp = { path = "../hive-mcp" }
+hive-model = { path = "../hive-model" }
+hive-risk = { path = "../hive-risk" }
+hive-skills = { path = "../hive-skills" }
+hive-skills-service = { path = "../hive-skills-service" }
+hive-tools = { path = "../hive-tools" }
+hive-web-search = { path = "../hive-web-search" }
+hive-process = { path = "../hive-process" }
+hive-scheduler = { path = "../hive-scheduler" }
+hive-workflow-service = { path = "../hive-workflow-service" }
+hive-workspace-index = { path = "../hive-workspace-index" }
+futures-core.workspace = true
+parking_lot.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+snap = "1"
+tempfile.workspace = true

@@ -1,0 +1,59 @@
+[package]
+name = "hive-connectors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Connector infrastructure for the HiveMind OS AI agent platform"
+
+[dependencies]
+hive-classification = { path = "../hive-classification" }
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = "0.22"
+chrono = { workspace = true }
+futures-util = { workspace = true }
+glob = { workspace = true }
+imap = "2"
+jsonwebtoken = "9"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+mail-parser = "0.9"
+native-tls = "0.2"
+parking_lot = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tracing = { workspace = true }
+url = "2"
+urlencoding = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["ws"] }
+futures-util = { workspace = true, features = ["sink"] }
+rcgen = "0.13"
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+tracing-subscriber = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDate", "NSError", "NSPredicate", "NSCalendar", "NSTimeZone"] }
+objc2-event-kit = { version = "0.3", features = [
+    "EKEventStore", "EKEvent", "EKCalendarItem", "EKCalendar",
+    "EKObject", "EKTypes", "EKParticipant", "EKStructuredLocation", "EKError",
+] }
+objc2-contacts = { version = "0.3", features = [
+    "CNContactStore", "CNContact", "CNContactFetchRequest",
+    "CNContact_Predicates", "CNContainer", "CNContainer_Predicates",
+    "CNPhoneNumber", "CNLabeledValue", "CNPostalAddress", "CNError",
+] }

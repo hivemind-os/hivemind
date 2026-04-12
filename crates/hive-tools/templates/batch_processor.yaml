@@ -1,0 +1,91 @@
+name: user/batch-processor
+version: "1.0"
+description: "Process a list of items one by one, collecting results"
+mode: chat
+
+variables:
+  type: object
+  properties:
+    results:
+      type: array
+      default: []
+
+steps:
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [items]
+        properties:
+          items:
+            type: array
+            items:
+              type: string
+            description: "List of items to process"
+    next: [process_items]
+
+  - id: process_items
+    type: control_flow
+    control:
+      kind: for_each
+      collection: "{{trigger.items}}"
+      item_var: current_item
+      body: [process_one, save_result]
+    next: [summarize]
+
+  - id: process_one
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: "Process this item and return a brief result: {{variables.current_item}}"
+      timeout_secs: 120
+    outputs:
+      item_result: "{{result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        item_result: "Error processing item"
+    next: [save_result]
+
+  - id: save_result
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: results
+          value: "{{steps.process_one.outputs.item_result}}"
+          operation: append_list
+    next: []
+
+  - id: summarize
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Summarize the results of processing {{trigger.items}} items:
+        {{variables.results}}
+
+        Provide a concise summary of what was processed and any notable findings.
+      timeout_secs: 120
+    outputs:
+      summary: "{{result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        summary: "Processing complete."
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  results: "{{variables.results}}"
+  summary: "{{steps.summarize.outputs.summary}}"
+
+result_message: "{{steps.summarize.outputs.summary}}"

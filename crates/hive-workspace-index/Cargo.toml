@@ -1,0 +1,29 @@
+[package]
+name = "hive-workspace-index"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+hive-classification = { path = "../hive-classification" }
+hive-contracts = { path = "../hive-contracts" }
+hive-inference = { path = "../hive-inference", default-features = false }
+hive-iwork = { path = "../hive-iwork" }
+hive-knowledge = { path = "../hive-knowledge" }
+
+anyhow.workspace = true
+glob = "0.3"
+notify = "7"
+pdf-extract = "0.7"
+quick-xml = "0.37"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio.workspace = true

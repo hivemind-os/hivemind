@@ -101,9 +101,6 @@ jobs:
         run: npm ci
         working-directory: apps/hivemind-desktop
 
-      - name: Fetch models
-        run: cargo xtask fetch-models
-
       - name: Setup code-signing keychain
         if: env.HAS_APPLE_CERT == 'true'
         env:
@@ -184,9 +181,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: apps/hivemind-desktop
-
-      - name: Fetch models
-        run: cargo xtask fetch-models
 
       - name: Build NSIS installer
         env:

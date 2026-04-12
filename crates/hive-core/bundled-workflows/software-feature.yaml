@@ -1,0 +1,457 @@
+name: system/software/major-feature
+version: "1.0"
+description: "Plan, implement, test, and review a software feature with specialized AI agents. Optionally write a spec, do technical research, and update documentation."
+mode: chat
+
+variables:
+  type: object
+  properties:
+    status:
+      type: string
+      default: "pending"
+    spec:
+      type: string
+      default: ""
+    research_findings:
+      type: string
+      default: ""
+    researcher_agent_id:
+      type: string
+      default: ""
+    research_approved:
+      type: string
+      default: ""
+    research_feedback:
+      type: string
+      default: ""
+    plan:
+      type: string
+      default: ""
+    planner_agent_id:
+      type: string
+      default: ""
+    plan_approved:
+      type: string
+      default: ""
+    plan_feedback:
+      type: string
+      default: ""
+    implementation_result:
+      type: string
+      default: ""
+    implementor_agent_id:
+      type: string
+      default: ""
+    impl_approved:
+      type: string
+      default: ""
+    impl_feedback:
+      type: string
+      default: ""
+
+steps:
+  # ── Trigger ──────────────────────────────────────────────────────────
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [feature_description]
+        properties:
+          feature_description:
+            type: string
+            description: "Description of the software feature to build"
+            x-ui:
+              label: "Feature Description"
+              widget: textarea
+          write_spec:
+            type: boolean
+            description: "Write a formal specification first?"
+            default: false
+            x-ui:
+              label: "Write Spec"
+          spec_focus:
+            type: string
+            description: "What aspects need clarification in the spec?"
+            default: ""
+            x-ui:
+              label: "Spec Focus"
+              widget: textarea
+              rows: 2
+              condition:
+                field: write_spec
+                eq: true
+          build_poc:
+            type: boolean
+            description: "Build a proof-of-concept before planning to validate the approach?"
+            default: false
+            x-ui:
+              label: "Build POC"
+          poc_focus:
+            type: string
+            description: "What specific aspect should the proof-of-concept validate?"
+            default: ""
+            x-ui:
+              label: "POC Focus"
+              widget: textarea
+              rows: 2
+              condition:
+                field: build_poc
+                eq: true
+          research_questions:
+            type: string
+            description: "Specific technical questions to investigate during research"
+            default: ""
+            x-ui:
+              label: "Research Questions"
+              widget: textarea
+              rows: 2
+              condition:
+                field: build_poc
+                eq: true
+          update_docs:
+            type: boolean
+            description: "Update documentation after implementation?"
+            default: false
+            x-ui:
+              label: "Update Docs"
+    next: [check_spec]
+
+  # ── Optional: Write Specification ────────────────────────────────────
+  - id: check_spec
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{trigger.write_spec}} == true"
+      then: [write_spec]
+      else: [check_research]
+
+  - id: write_spec
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/spec-writer
+      prompt_id: write-spec
+      agent_name: "Spec Writer"
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        spec_focus: "{{trigger.spec_focus}}"
+    outputs:
+      spec_result: "{{result.result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Specification writing failed: {{error}}"
+    next: [save_spec]
+
+  - id: save_spec
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: spec
+          value: "{{steps.write_spec.outputs.spec_result}}"
+          operation: set
+    next: [check_research]
+
+  # ── Optional: Technical Research / POC (with review loop) ─────────
+  - id: check_research
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{trigger.build_poc}} == true"
+      then: [research_loop]
+      else: [plan_loop]
+
+  - id: research_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.research_approved}} != Approve"
+      body: [do_research, save_research, review_research, process_research_decision]
+    next: [plan_loop]
+
+  - id: do_research
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/researcher
+      prompt_id: build-poc
+      agent_name: "Technical Researcher"
+      target_agent_id: "{{variables.researcher_agent_id}}"
+      auto_create: true
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        spec: "{{variables.spec}}"
+        poc_focus: "{{trigger.poc_focus}}"
+        research_questions: "{{trigger.research_questions}}"
+        revision_feedback: "{{variables.research_feedback}}"
+    outputs:
+      research_result: "{{result.result}}"
+      research_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Technical research failed: {{error}}"
+    next: [save_research]
+
+  - id: save_research
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: research_findings
+          value: "{{steps.do_research.outputs.research_result}}"
+          operation: set
+        - variable: researcher_agent_id
+          value: "{{steps.do_research.outputs.research_agent}}"
+          operation: set
+    next: [review_research]
+
+  - id: review_research
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Research Review
+
+        **Feature:** {{trigger.feature_description}}
+
+        **Research Findings:**
+        {{variables.research_findings}}
+
+        Please review the research findings. You can approve to proceed to planning, or request more research with specific feedback.
+      choices:
+        - "Approve"
+        - "Request More Research"
+      allow_freeform: true
+    outputs:
+      research_decision: "{{result.selected}}"
+      research_user_feedback: "{{result.text}}"
+    next: [process_research_decision]
+
+  - id: process_research_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: research_feedback
+          value: "{{steps.review_research.outputs.research_user_feedback}}"
+          operation: set
+        - variable: research_approved
+          value: "{{steps.review_research.outputs.research_decision}}"
+          operation: set
+
+  # ── Planning (with revision loop)────────────────────────────────────
+  - id: plan_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.plan_approved}} != Approve"
+      body: [plan, save_plan, review_plan, process_plan_decision]
+    next: [implement_loop]
+
+  - id: plan
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/planner
+      prompt_id: plan-feature
+      agent_name: "Feature Planner"
+      target_agent_id: "{{variables.planner_agent_id}}"
+      auto_create: true
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        spec: "{{variables.spec}}"
+        research_findings: "{{variables.research_findings}}"
+        revision_feedback: "{{variables.plan_feedback}}"
+    outputs:
+      plan_result: "{{result.result}}"
+      plan_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Planning failed: {{error}}"
+    next: [save_plan]
+
+  - id: save_plan
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: plan
+          value: "{{steps.plan.outputs.plan_result}}"
+          operation: set
+        - variable: planner_agent_id
+          value: "{{steps.plan.outputs.plan_agent}}"
+          operation: set
+    next: [review_plan]
+
+  - id: review_plan
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Feature Plan Review
+
+        **Feature:** {{trigger.feature_description}}
+
+        **Spec:** {{variables.spec}}
+
+        **Research:** {{variables.research_findings}}
+
+        **Plan:**
+        {{variables.plan}}
+
+        Please review the plan and decide whether to proceed with implementation.
+      choices:
+        - "Approve"
+        - "Reject"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      feedback: "{{result.text}}"
+    next: [process_plan_decision]
+
+  - id: process_plan_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: plan_feedback
+          value: "{{steps.review_plan.outputs.feedback}}"
+          operation: set
+        - variable: plan_approved
+          value: "{{steps.review_plan.outputs.decision}}"
+          operation: set
+
+  # ── Implementation (with rework loop) ────────────────────────────────
+  - id: implement_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.impl_approved}} != Accept"
+      body: [implement, save_impl_result, review_implementation, process_impl_decision]
+    next: [check_docs]
+
+  - id: implement
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/implementor
+      prompt_id: implement-feature
+      agent_name: "Feature Implementor"
+      target_agent_id: "{{variables.implementor_agent_id}}"
+      auto_create: true
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        spec: "{{variables.spec}}"
+        research_findings: "{{variables.research_findings}}"
+        plan: "{{variables.plan}}"
+        feedback: "{{variables.impl_feedback}}"
+    outputs:
+      impl_result: "{{result.result}}"
+      impl_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Implementation failed: {{error}}"
+    next: [save_impl_result]
+
+  - id: save_impl_result
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: implementation_result
+          value: "{{steps.implement.outputs.impl_result}}"
+          operation: set
+        - variable: implementor_agent_id
+          value: "{{steps.implement.outputs.impl_agent}}"
+          operation: set
+    next: [review_implementation]
+
+  - id: review_implementation
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Implementation Review
+
+        **Feature:** {{trigger.feature_description}}
+
+        **Implementation Result:**
+        {{variables.implementation_result}}
+
+        The implementor has completed the feature — writing code, tests (all passing), QA validation, and code review via sub-agents.
+
+        Please review the implementation and decide whether to accept it.
+      choices:
+        - "Accept"
+        - "Request Rework"
+      allow_freeform: true
+    outputs:
+      impl_decision: "{{result.selected}}"
+      impl_feedback: "{{result.text}}"
+    next: [process_impl_decision]
+
+  - id: process_impl_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: impl_feedback
+          value: "{{steps.review_implementation.outputs.impl_feedback}}"
+          operation: set
+        - variable: impl_approved
+          value: "{{steps.review_implementation.outputs.impl_decision}}"
+          operation: set
+
+  # ── Optional: Documentation ──────────────────────────────────────────
+  - id: check_docs
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{trigger.update_docs}} == true"
+      then: [update_docs]
+      else: [mark_completed]
+
+  - id: update_docs
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/documenter
+      prompt_id: update-docs
+      agent_name: "Documentation Writer"
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        plan: "{{variables.plan}}"
+        implementation_result: "{{variables.implementation_result}}"
+    outputs:
+      docs_result: "{{result.result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        docs_result: "Documentation update skipped due to error"
+    next: [mark_completed]
+
+  # ── Terminal states ──────────────────────────────────────────────────
+  - id: mark_completed
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "completed"
+          operation: set
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  status: "{{variables.status}}"
+  plan: "{{variables.plan}}"
+  spec: "{{variables.spec}}"
+  research_findings: "{{variables.research_findings}}"
+
+result_message: "Feature '{{trigger.feature_description}}' — Status: {{variables.status}}"

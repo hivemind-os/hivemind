@@ -1,0 +1,88 @@
+name: user/email-auto-responder
+version: "1.0"
+description: "Monitor emails, draft AI responses, get human approval, then send"
+mode: background
+
+variables:
+  type: object
+  properties:
+    response_style:
+      type: string
+      default: "professional and helpful"
+
+steps:
+  - id: on_new_email
+    type: trigger
+    trigger:
+      type: incoming_message
+      channel_id: my_email_connector   # Replace with your connector ID
+      ignore_replies: true
+    next: [draft_reply]
+
+  - id: draft_reply
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Draft a reply to this email.
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
+        Body: {{trigger.body}}
+
+        Write a {{variables.response_style}} response. Keep it concise.
+        Return ONLY the reply text, no explanations.
+      timeout_secs: 120
+    outputs:
+      draft: "{{result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Failed to draft reply: {{error}}"
+    next: [approval]
+
+  - id: approval
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        New email from {{trigger.from}} about "{{trigger.subject}}".
+
+        Proposed reply:
+        {{steps.draft_reply.outputs.draft}}
+      choices:
+        - "Send as-is"
+        - "Skip (don't reply)"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      edited_text: "{{result.text}}"
+    next: [check_decision]
+
+  - id: check_decision
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.approval.outputs.decision}} == Skip (don't reply)"
+      then: [end]
+      else: [send_reply]
+
+  - id: send_reply
+    type: task
+    task:
+      kind: call_tool
+      tool_id: connector.send_message   # Replace with actual tool ID
+      arguments:
+        channel_id: my_email_connector
+        to: "{{trigger.from}}"
+        subject: "Re: {{trigger.subject}}"
+        body: "{{steps.approval.outputs.edited_text}}"
+    on_error:
+      strategy: retry
+      max_retries: 3
+      delay_secs: 10
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow

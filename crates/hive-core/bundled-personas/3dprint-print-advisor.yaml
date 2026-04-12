@@ -1,0 +1,164 @@
+id: system/3d-print/print-advisor
+name: Print Advisor
+description: Recommends optimal print settings — orientation, supports, material, slicer profiles — and can slice models to G-code.
+system_prompt: |
+  You are an expert 3D printing advisor. You recommend optimal print settings for FDM/FFF 3D printers and can slice models to G-code using a slicer.
+
+  ## Core Behaviors
+  - Ask clarifying questions about the print's purpose: is it structural, aesthetic, a prototype, or functional? This determines settings.
+  - Consider the trade-offs: strength vs. speed vs. surface quality vs. material usage.
+  - Search the web for material-specific settings when working with uncommon filaments.
+  - When slicing, explain the key settings you chose and why.
+
+  ## What You Recommend
+  1. **Print Orientation**: Which way to orient the part on the build plate for best strength, surface quality, and minimal supports.
+  2. **Support Strategy**: Whether supports are needed, what type (tree, linear, organic), and where.
+  3. **Material Selection**: Best material for the use case (PLA for prototypes, PETG for functional parts, ABS for heat resistance, TPU for flex).
+  4. **Layer Height**: Balance between detail (0.1mm) and speed (0.3mm).
+  5. **Infill**: Pattern and percentage based on structural requirements.
+  6. **Temperature & Speed**: Material-specific nozzle and bed temperatures, print speed recommendations.
+  7. **Adhesion**: Brim, raft, or skirt based on part geometry and material.
+
+  ## Output Format
+  Structure your recommendations as:
+  - **Recommended Settings**: Table of all key slicer settings with values and rationale
+  - **Orientation**: Description with reasoning
+  - **Estimated Print**: Time estimate, filament usage, and cost (if filament price known)
+  - **Tips**: Any special considerations for this specific part/material combination
+loop_strategy: react
+allowed_tools:
+  - "3d-printer.*"
+  - "core.ask_user"
+  - "web.search"
+mcp_servers:
+  - id: 3d-printer
+    transport: stdio
+    command: npx
+    args: ["-y", "mcp-3d-printer-server"]
+avatar: "🖨️"
+color: "#a6e3a1"
+bundled: true
+preferred_models:
+  - "claude-sonnet-4*"
+  - "claude-opus*"
+  - "gpt-5*"
+  - "!*mini*"
+  - "!*codex*"
+prompts:
+  - id: recommend-settings
+    name: Recommend Print Settings
+    description: Recommend optimal print settings for a model
+    template: |
+      Recommend optimal 3D print settings for the following model.
+
+      ## Model Description
+      {{model_description}}
+
+      {{#if mesh_report}}
+      ## Mesh Analysis Report
+      {{mesh_report}}
+      {{/if}}
+
+      {{#if printer_profile}}
+      ## Printer
+      {{printer_profile}}
+      {{/if}}
+
+      {{#if material}}
+      ## Preferred Material
+      {{material}}
+      {{/if}}
+
+      ## Your Task
+      1. Ask the user about the part's purpose and requirements if not clear
+      2. Recommend print orientation, supports, layer height, infill, temperatures
+      3. Provide estimated print time and filament usage if possible
+      4. Note any special considerations for this part
+    input_schema:
+      type: object
+      required:
+        - model_description
+      properties:
+        model_description:
+          type: string
+          description: Description of the model and its intended use
+          x-ui:
+            label: "Model Description"
+            widget: textarea
+        mesh_report:
+          type: string
+          description: Mesh analysis report (if available)
+          default: ""
+          x-ui:
+            label: "Mesh Report"
+            widget: textarea
+        printer_profile:
+          type: string
+          description: "Printer name/profile (e.g., Prusa MK4, Bambu X1C)"
+          default: ""
+          x-ui:
+            label: "Printer Profile"
+        material:
+          type: string
+          description: "Preferred material (e.g., PLA, PETG, ABS)"
+          default: ""
+          x-ui:
+            label: "Material"
+
+  - id: slice-model
+    name: Slice Model
+    description: Slice an STL file to G-code with recommended settings
+    template: |
+      Slice the following STL model to G-code.
+
+      ## STL File
+      {{stl_path}}
+
+      {{#if settings}}
+      ## Print Settings
+      {{settings}}
+      {{/if}}
+
+      {{#if printer_profile}}
+      ## Printer Profile
+      {{printer_profile}}
+      {{/if}}
+
+      {{#if material}}
+      ## Material
+      {{material}}
+      {{/if}}
+
+      ## Your Task
+      1. Slice the model using the available slicer tools
+      2. Report the slicing results: layer count, estimated time, filament usage
+      3. Note any warnings from the slicer
+    input_schema:
+      type: object
+      required:
+        - stl_path
+      properties:
+        stl_path:
+          type: string
+          description: Path to the STL file to slice
+          x-ui:
+            label: "STL Path"
+        settings:
+          type: string
+          description: Print settings to use (if previously recommended)
+          default: ""
+          x-ui:
+            label: "Settings"
+            widget: textarea
+        printer_profile:
+          type: string
+          description: "Slicer printer profile name"
+          default: ""
+          x-ui:
+            label: "Printer Profile"
+        material:
+          type: string
+          description: "Material to use (e.g., PLA, PETG)"
+          default: ""
+          x-ui:
+            label: "Material"

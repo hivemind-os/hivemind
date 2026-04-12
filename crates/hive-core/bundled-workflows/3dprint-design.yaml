@@ -1,0 +1,285 @@
+name: system/3d-print/design
+version: "1.0"
+description: "Design a 3D-printable part from a natural language description with iterative feedback, mesh validation, and optional slicing to G-code."
+mode: chat
+
+variables:
+  type: object
+  properties:
+    status:
+      type: string
+      default: "pending"
+    design_result:
+      type: string
+      default: ""
+    mesh_report:
+      type: string
+      default: ""
+    designer_agent_id:
+      type: string
+      default: ""
+    design_approved:
+      type: string
+      default: ""
+    design_feedback:
+      type: string
+      default: ""
+    slice_result:
+      type: string
+      default: ""
+
+steps:
+  # ── Trigger ──────────────────────────────────────────────────────────
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [part_description]
+        properties:
+          part_description:
+            type: string
+            description: "Describe the 3D part you want to design"
+            x-ui:
+              label: "Part Description"
+              widget: textarea
+          constraints:
+            type: string
+            description: "Dimensional constraints, tolerances, or material requirements"
+            default: ""
+            x-ui:
+              label: "Constraints"
+              widget: textarea
+              rows: 2
+          slice_for_print:
+            type: boolean
+            description: "Slice the model to G-code after design approval?"
+            default: false
+            x-ui:
+              label: "Slice for Print"
+          printer_profile:
+            type: string
+            description: "Printer name or slicer profile"
+            default: ""
+            x-ui:
+              label: "Printer Profile"
+              condition:
+                field: slice_for_print
+                eq: true
+          material:
+            type: string
+            description: "Filament material (e.g., PLA, PETG, ABS)"
+            default: "PLA"
+            x-ui:
+              label: "Material"
+              condition:
+                field: slice_for_print
+                eq: true
+    next: [design_loop]
+
+  # ── Design Loop (with revision feedback) ─────────────────────────────
+  - id: design_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.design_approved}} != Approve"
+      body: [cad_design, mesh_analysis, save_results, review_design, process_decision]
+    next: [check_slice]
+
+  - id: cad_design
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/3d-print/cad-designer
+      prompt_id: design-part
+      agent_name: "CAD Designer"
+      target_agent_id: "{{variables.designer_agent_id}}"
+      auto_create: true
+      parameters:
+        part_description: "{{trigger.part_description}}"
+        constraints: "{{trigger.constraints}}"
+        revision_feedback: "{{variables.design_feedback}}"
+    outputs:
+      design_output: "{{result.result}}"
+      design_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "CAD design failed: {{error}}"
+    next: [mesh_analysis]
+
+  - id: mesh_analysis
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/3d-print/mesh-analyst
+      prompt_id: analyze-mesh
+      agent_name: "Mesh Analyst"
+      parameters:
+        stl_path: "Find the .stl file in the workspace that was produced by the CAD Designer. The designer's output was: {{steps.cad_design.outputs.design_output}}"
+        material: "{{trigger.material}}"
+    outputs:
+      mesh_output: "{{result.result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        mesh_output: "Mesh analysis skipped due to error"
+    next: [save_results]
+
+  - id: save_results
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: design_result
+          value: "{{steps.cad_design.outputs.design_output}}"
+          operation: set
+        - variable: mesh_report
+          value: "{{steps.mesh_analysis.outputs.mesh_output}}"
+          operation: set
+        - variable: designer_agent_id
+          value: "{{steps.cad_design.outputs.design_agent}}"
+          operation: set
+    next: [review_design]
+
+  - id: review_design
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Design Review
+
+        **Part:** {{trigger.part_description}}
+
+        **Design Result:**
+        {{variables.design_result}}
+
+        **Mesh Analysis:**
+        {{variables.mesh_report}}
+
+        Please review the design and mesh analysis. You can approve to finalize (or proceed to slicing), or request changes with specific feedback.
+      choices:
+        - "Approve"
+        - "Request Changes"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      feedback: "{{result.text}}"
+    next: [process_decision]
+
+  - id: process_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: design_feedback
+          value: "{{steps.review_design.outputs.feedback}}"
+          operation: set
+        - variable: design_approved
+          value: "{{steps.review_design.outputs.decision}}"
+          operation: set
+
+  # ── Optional: Slice for Printing ─────────────────────────────────────
+  - id: check_slice
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{trigger.slice_for_print}} == true"
+      then: [print_advisory]
+      else: [mark_completed]
+
+  - id: print_advisory
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/3d-print/print-advisor
+      prompt_id: recommend-settings
+      agent_name: "Print Advisor"
+      parameters:
+        model_description: "{{trigger.part_description}}"
+        mesh_report: "{{variables.mesh_report}}"
+        printer_profile: "{{trigger.printer_profile}}"
+        material: "{{trigger.material}}"
+    outputs:
+      settings_output: "{{result.result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Print advisory failed: {{error}}"
+    next: [slice_model]
+
+  - id: slice_model
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/3d-print/print-advisor
+      prompt_id: slice-model
+      agent_name: "Print Advisor"
+      parameters:
+        stl_path: "Find and slice the approved .stl file in the workspace. The design output was: {{variables.design_result}}"
+        settings: "{{steps.print_advisory.outputs.settings_output}}"
+        printer_profile: "{{trigger.printer_profile}}"
+        material: "{{trigger.material}}"
+    outputs:
+      gcode_output: "{{result.result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        gcode_output: "Slicing skipped due to error"
+    next: [save_slice_result]
+
+  - id: save_slice_result
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: slice_result
+          value: "{{steps.slice_model.outputs.gcode_output}}"
+          operation: set
+    next: [review_gcode]
+
+  - id: review_gcode
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Slicing Review
+
+        **Part:** {{trigger.part_description}}
+
+        **Print Settings:**
+        {{steps.print_advisory.outputs.settings_output}}
+
+        **Slicing Result:**
+        {{variables.slice_result}}
+
+        Review the slicing results. The G-code file is ready for your printer.
+      choices:
+        - "Done"
+      allow_freeform: true
+    outputs:
+      slice_decision: "{{result.selected}}"
+    next: [mark_completed]
+
+  # ── Terminal states ──────────────────────────────────────────────────
+  - id: mark_completed
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "completed"
+          operation: set
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  status: "{{variables.status}}"
+  design_result: "{{variables.design_result}}"
+  mesh_report: "{{variables.mesh_report}}"
+  slice_result: "{{variables.slice_result}}"
+
+result_message: "3D Part '{{trigger.part_description}}' — Status: {{variables.status}}"

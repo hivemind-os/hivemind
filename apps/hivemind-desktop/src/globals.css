@@ -1,0 +1,575 @@
+/* ── Tailwind CSS base ──────────────────────────────────────────── */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── solid-ui design tokens (CSS variables) ─────────────────────
+   These define the color palette consumed by Tailwind via
+   tailwind.config.js → theme.extend.colors.
+   The default values below correspond to the "dark" theme.
+   Theme switching is achieved by adding data-theme="<name>"
+   to <html>, which overrides these variables.
+   ────────────────────────────────────────────────────────────── */
+
+@layer base {
+  /* Tailwind preflight is disabled to avoid breaking legacy CSS.
+     Add the minimal reset needed for border utilities to work. */
+  *,
+  ::before,
+  ::after {
+    border-style: solid;
+    border-width: 0;
+    border-color: hsl(var(--border));
+  }
+
+  :root {
+    --background: 215 21% 7%;
+    --foreground: 210 13% 81%;
+
+    --card: 215 21% 7%;
+    --card-foreground: 210 13% 81%;
+
+    --popover: 215 19% 11%;
+    --popover-foreground: 210 13% 81%;
+
+    --primary: 210 13% 81%;
+    --primary-foreground: 215 21% 11%;
+
+    --secondary: 214 14% 16%;
+    --secondary-foreground: 210 13% 81%;
+
+    --muted: 214 14% 16%;
+    --muted-foreground: 212 10% 53%;
+
+    --accent: 214 14% 16%;
+    --accent-foreground: 210 13% 81%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 13% 91%;
+
+    --border: 214 14% 16%;
+    --popover-border: 214 14% 22%;
+    --input: 214 14% 16%;
+    --ring: 212 26% 84%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 215 19% 9%;
+    --sidebar-foreground: 210 13% 81%;
+    --sidebar-primary: 212 92% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 14% 14%;
+    --sidebar-accent-foreground: 210 13% 81%;
+    --sidebar-border: 214 14% 14%;
+    --sidebar-ring: 212 92% 67%;
+
+    /* Legacy variables consumed by styles.css */
+    --bg-primary: #0d1117;
+    --bg-secondary: #010409;
+    --bg-tertiary: #21262d;
+    --bg-card: #0d1117;
+    --bg-hover: #21262d;
+    --text-primary: #c9d1d9;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --border-color: #30363d;
+    --accent-blue: #58a6ff;
+    --color-accent: #58a6ff;
+    --color-accent-hover: #79c0ff;
+    --danger-color: #f85149;
+    --success-color: #3fb950;
+    --warning-color: #d29922;
+    --info-color: #58a6ff;
+    --success-bg: rgba(63, 185, 80, 0.1);
+    --success-border: rgba(63, 185, 80, 0.3);
+    --success-text: #3fb950;
+    --warning-bg: rgba(210, 153, 34, 0.1);
+    --info-bg: rgba(88, 166, 255, 0.1);
+
+    /* Code viewer tokens */
+    --code-bg: #0d1117;
+    --code-fg: #e6edf3;
+    --code-line-number: rgba(255, 255, 255, 0.25);
+    --code-line-hover: rgba(255, 255, 255, 0.04);
+    --code-fold-hover-bg: rgba(255, 255, 255, 0.1);
+    --code-fold-placeholder-bg: rgba(255, 255, 255, 0.06);
+    --code-fold-placeholder-border: rgba(255, 255, 255, 0.1);
+  }
+
+  [data-theme='light'] {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --popover-border: 214.3 31.8% 82%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Legacy variables */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #e9ecef;
+    --bg-card: #ffffff;
+    --bg-hover: #e9ecef;
+    --text-primary: #1a1a2e;
+    --text-secondary: #495057;
+    --text-muted: #6c757d;
+    --border-color: #dee2e6;
+    --accent-blue: #0d6efd;
+    --color-accent: #0d6efd;
+    --color-accent-hover: #0a58ca;
+    --danger-color: #dc3545;
+    --success-color: #198754;
+    --warning-color: #ffc107;
+    --info-color: #0dcaf0;
+    --success-bg: rgba(25, 135, 84, 0.1);
+    --success-border: rgba(25, 135, 84, 0.3);
+    --success-text: #198754;
+    --warning-bg: rgba(255, 193, 7, 0.1);
+    --info-bg: rgba(13, 202, 240, 0.1);
+
+    /* Code viewer tokens */
+    --code-bg: #ffffff;
+    --code-fg: #1f2328;
+    --code-line-number: rgba(0, 0, 0, 0.3);
+    --code-line-hover: rgba(0, 0, 0, 0.04);
+    --code-fold-hover-bg: rgba(0, 0, 0, 0.08);
+    --code-fold-placeholder-bg: rgba(0, 0, 0, 0.04);
+    --code-fold-placeholder-border: rgba(0, 0, 0, 0.12);
+  }
+
+  [data-theme='midnight-blue'] {
+    --background: 224 71% 4%;
+    --foreground: 213 31% 91%;
+
+    --card: 224 71% 4%;
+    --card-foreground: 213 31% 91%;
+
+    --popover: 224 71% 7%;
+    --popover-foreground: 213 31% 91%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 222.2 47.4% 11.2%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 223 47% 11%;
+    --muted-foreground: 215.4 16.3% 56.9%;
+
+    --accent: 216 34% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 216 34% 17%;
+    --popover-border: 216 34% 24%;
+    --input: 216 34% 17%;
+    --ring: 224 64% 33%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 224 71% 6%;
+    --sidebar-foreground: 213 31% 91%;
+    --sidebar-primary: 224 76% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 216 34% 17%;
+    --sidebar-accent-foreground: 213 31% 91%;
+    --sidebar-border: 216 34% 17%;
+    --sidebar-ring: 224 64% 33%;
+
+    /* Legacy variables */
+    --bg-primary: #0a1628;
+    --bg-secondary: #0d1f3c;
+    --bg-tertiary: #1a3a5c;
+    --bg-card: #0d1f3c;
+    --bg-hover: #1a3a5c;
+    --text-primary: #d6deeb;
+    --text-secondary: #7fdbca;
+    --text-muted: #637777;
+    --border-color: #1d3b5a;
+    --accent-blue: #82aaff;
+    --color-accent: #82aaff;
+    --color-accent-hover: #c792ea;
+    --danger-color: #ef5350;
+    --success-color: #22da6e;
+    --warning-color: #ffcb6b;
+    --info-color: #89ddff;
+    --success-bg: rgba(34, 218, 110, 0.1);
+    --success-border: rgba(34, 218, 110, 0.3);
+    --success-text: #22da6e;
+    --warning-bg: rgba(255, 203, 107, 0.1);
+    --info-bg: rgba(137, 221, 255, 0.1);
+  }
+
+  [data-theme='catppuccin-mocha'] {
+    --background: 240 21% 15%;
+    --foreground: 226 64% 88%;
+
+    --card: 240 21% 15%;
+    --card-foreground: 226 64% 88%;
+
+    --popover: 240 21% 18%;
+    --popover-foreground: 226 64% 88%;
+
+    --primary: 267 84% 81%;
+    --primary-foreground: 240 21% 15%;
+
+    --secondary: 240 21% 20%;
+    --secondary-foreground: 226 64% 88%;
+
+    --muted: 240 21% 20%;
+    --muted-foreground: 228 24% 72%;
+
+    --accent: 189 71% 73%;
+    --accent-foreground: 240 21% 15%;
+
+    --destructive: 343 81% 75%;
+    --destructive-foreground: 240 21% 15%;
+
+    --border: 240 21% 22%;
+    --popover-border: 240 21% 28%;
+    --input: 240 21% 22%;
+    --ring: 267 84% 81%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 240 21% 12%;
+    --sidebar-foreground: 226 64% 88%;
+    --sidebar-primary: 267 84% 81%;
+    --sidebar-primary-foreground: 240 21% 15%;
+    --sidebar-accent: 240 21% 20%;
+    --sidebar-accent-foreground: 226 64% 88%;
+    --sidebar-border: 240 21% 22%;
+    --sidebar-ring: 267 84% 81%;
+
+    /* Legacy variables */
+    --bg-primary: #1e1e2e;
+    --bg-secondary: #181825;
+    --bg-tertiary: #313244;
+    --bg-card: #1e1e2e;
+    --bg-hover: #313244;
+    --text-primary: #cdd6f4;
+    --text-secondary: #a6adc8;
+    --text-muted: #6c7086;
+    --border-color: #45475a;
+    --accent-blue: #89b4fa;
+    --color-accent: #cba6f7;
+    --color-accent-hover: #89dceb;
+    --danger-color: #f38ba8;
+    --success-color: #a6e3a1;
+    --warning-color: #f9e2af;
+    --info-color: #89dceb;
+    --success-bg: rgba(166, 227, 161, 0.1);
+    --success-border: rgba(166, 227, 161, 0.3);
+    --success-text: #a6e3a1;
+    --warning-bg: rgba(249, 226, 175, 0.1);
+    --info-bg: rgba(137, 220, 235, 0.1);
+  }
+
+  [data-theme='borg'] {
+    --background: 150 20% 4%;
+    --foreground: 120 12% 85%;
+
+    --card: 150 20% 4%;
+    --card-foreground: 120 12% 85%;
+
+    --popover: 150 20% 7%;
+    --popover-foreground: 120 12% 85%;
+
+    --primary: 120 100% 40%;
+    --primary-foreground: 150 20% 4%;
+
+    --secondary: 150 12% 13%;
+    --secondary-foreground: 120 12% 85%;
+
+    --muted: 150 12% 13%;
+    --muted-foreground: 120 8% 62%;
+
+    --accent: 160 80% 32%;
+    --accent-foreground: 120 12% 92%;
+
+    --destructive: 0 75% 38%;
+    --destructive-foreground: 120 12% 92%;
+
+    --border: 150 15% 19%;
+    --popover-border: 150 15% 26%;
+    --input: 150 15% 17%;
+    --ring: 120 100% 40%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 150 20% 6%;
+    --sidebar-foreground: 120 12% 85%;
+    --sidebar-primary: 120 100% 40%;
+    --sidebar-primary-foreground: 150 20% 4%;
+    --sidebar-accent: 150 12% 14%;
+    --sidebar-accent-foreground: 120 12% 85%;
+    --sidebar-border: 150 15% 19%;
+    --sidebar-ring: 120 100% 40%;
+
+    /* Legacy variables */
+    --bg-primary: #0b120c;
+    --bg-secondary: #080e09;
+    --bg-tertiary: #1a2e1e;
+    --bg-card: #0b120c;
+    --bg-hover: #1a2e1e;
+    --text-primary: #c4d8c4;
+    --text-secondary: #8aad8a;
+    --text-muted: #6a8f6a;
+    --border-color: #2a4430;
+    --accent-blue: #00cc00;
+    --color-accent: #00cc00;
+    --color-accent-hover: #00ff41;
+    --danger-color: #cc3333;
+    --success-color: #00cc00;
+    --warning-color: #ccaa00;
+    --info-color: #00aaaa;
+    --success-bg: rgba(0, 204, 0, 0.1);
+    --success-border: rgba(0, 204, 0, 0.3);
+    --success-text: #00cc00;
+    --warning-bg: rgba(204, 170, 0, 0.1);
+    --info-bg: rgba(0, 170, 170, 0.1);
+  }
+
+  [data-theme='lcars'] {
+    --background: 230 15% 3%;
+    --foreground: 30 15% 88%;
+
+    --card: 230 15% 5%;
+    --card-foreground: 30 15% 88%;
+
+    --popover: 230 15% 7%;
+    --popover-foreground: 30 15% 88%;
+
+    --primary: 24 100% 70%;
+    --primary-foreground: 230 15% 3%;
+
+    --secondary: 270 20% 16%;
+    --secondary-foreground: 30 15% 88%;
+
+    --muted: 260 12% 16%;
+    --muted-foreground: 300 20% 65%;
+
+    --accent: 36 100% 70%;
+    --accent-foreground: 230 15% 3%;
+
+    --destructive: 0 70% 42%;
+    --destructive-foreground: 30 15% 92%;
+
+    --border: 270 15% 20%;
+    --popover-border: 270 15% 28%;
+    --input: 270 15% 18%;
+    --ring: 24 100% 70%;
+    --radius: 0.75rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 230 15% 5%;
+    --sidebar-foreground: 30 15% 88%;
+    --sidebar-primary: 24 100% 70%;
+    --sidebar-primary-foreground: 230 15% 3%;
+    --sidebar-accent: 270 20% 16%;
+    --sidebar-accent-foreground: 30 15% 88%;
+    --sidebar-border: 270 15% 20%;
+    --sidebar-ring: 24 100% 70%;
+
+    /* Legacy variables */
+    --bg-primary: #0a0a10;
+    --bg-secondary: #08080e;
+    --bg-tertiary: #2a1f3a;
+    --bg-card: #0d0d15;
+    --bg-hover: #2a1f3a;
+    --text-primary: #e6d8cc;
+    --text-secondary: #cc99cc;
+    --text-muted: #9977aa;
+    --border-color: #3d2e50;
+    --accent-blue: #ff9966;
+    --color-accent: #ff9966;
+    --color-accent-hover: #ffcc99;
+    --danger-color: #cc6666;
+    --success-color: #99cc66;
+    --warning-color: #ffcc66;
+    --info-color: #9999cc;
+    --success-bg: rgba(153, 204, 102, 0.1);
+    --success-border: rgba(153, 204, 102, 0.3);
+    --success-text: #99cc66;
+    --warning-bg: rgba(255, 204, 102, 0.1);
+    --info-bg: rgba(153, 153, 204, 0.1);
+  }
+
+  [data-theme='catppuccin-latte'] {
+    --background: 220 23% 95%;
+    --foreground: 234 16% 35%;
+
+    --card: 220 23% 95%;
+    --card-foreground: 234 16% 35%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 234 16% 35%;
+
+    --primary: 266 85% 58%;
+    --primary-foreground: 220 23% 95%;
+
+    --secondary: 223 16% 84%;
+    --secondary-foreground: 234 16% 35%;
+
+    --muted: 223 16% 84%;
+    --muted-foreground: 233 10% 47%;
+
+    --accent: 197 97% 46%;
+    --accent-foreground: 220 23% 95%;
+
+    --destructive: 347 87% 44%;
+    --destructive-foreground: 220 23% 95%;
+
+    --border: 223 16% 84%;
+    --popover-border: 223 16% 74%;
+    --input: 223 16% 84%;
+    --ring: 266 85% 58%;
+    --radius: 0.5rem;
+
+    /* Sidebar tokens */
+    --sidebar-background: 220 23% 92%;
+    --sidebar-foreground: 234 16% 35%;
+    --sidebar-primary: 266 85% 58%;
+    --sidebar-primary-foreground: 220 23% 95%;
+    --sidebar-accent: 223 16% 84%;
+    --sidebar-accent-foreground: 234 16% 35%;
+    --sidebar-border: 223 16% 84%;
+    --sidebar-ring: 266 85% 58%;
+
+    /* Legacy variables */
+    --bg-primary: #eff1f5;
+    --bg-secondary: #e6e9ef;
+    --bg-tertiary: #ccd0da;
+    --bg-card: #eff1f5;
+    --bg-hover: #ccd0da;
+    --text-primary: #4c4f69;
+    --text-secondary: #6c6f85;
+    --text-muted: #9ca0b0;
+    --border-color: #ccd0da;
+    --accent-blue: #1e66f5;
+    --color-accent: #8839ef;
+    --color-accent-hover: #04a5e5;
+    --danger-color: #d20f39;
+    --success-color: #40a02b;
+    --warning-color: #df8e1d;
+    --info-color: #04a5e5;
+    --success-bg: rgba(64, 160, 43, 0.1);
+    --success-border: rgba(64, 160, 43, 0.3);
+    --success-text: #40a02b;
+    --warning-bg: rgba(223, 142, 29, 0.1);
+    --info-bg: rgba(4, 165, 229, 0.1);
+
+    /* Code viewer tokens */
+    --code-bg: #eff1f5;
+    --code-fg: #4c4f69;
+    --code-line-number: rgba(0, 0, 0, 0.3);
+    --code-line-hover: rgba(0, 0, 0, 0.04);
+    --code-fold-hover-bg: rgba(0, 0, 0, 0.08);
+    --code-fold-placeholder-bg: rgba(0, 0, 0, 0.04);
+    --code-fold-placeholder-border: rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* ── Scrollbar styling ─────────────────────────────────────────── */
+/* Thin, theme-aware scrollbars for all scrollable elements */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+/* Webkit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ANSI terminal colors (used by ansi_up with use_classes=true) */
+.ansi-black-fg   { color: #555; }
+.ansi-red-fg     { color: #e06c75; }
+.ansi-green-fg   { color: #98c379; }
+.ansi-yellow-fg  { color: #e5c07b; }
+.ansi-blue-fg    { color: #61afef; }
+.ansi-magenta-fg { color: #c678dd; }
+.ansi-cyan-fg    { color: #56b6c2; }
+.ansi-white-fg   { color: #abb2bf; }
+
+.ansi-bright-black-fg   { color: #686868; }
+.ansi-bright-red-fg     { color: #f44747; }
+.ansi-bright-green-fg   { color: #a3d882; }
+.ansi-bright-yellow-fg  { color: #f0d98c; }
+.ansi-bright-blue-fg    { color: #6fc1ff; }
+.ansi-bright-magenta-fg { color: #d388e5; }
+.ansi-bright-cyan-fg    { color: #67d5dc; }
+.ansi-bright-white-fg   { color: #d4d4d4; }
+
+.ansi-black-bg   { background-color: #1e1e1e; }
+.ansi-red-bg     { background-color: #e06c75; }
+.ansi-green-bg   { background-color: #98c379; }
+.ansi-yellow-bg  { background-color: #e5c07b; }
+.ansi-blue-bg    { background-color: #61afef; }
+.ansi-magenta-bg { background-color: #c678dd; }
+.ansi-cyan-bg    { background-color: #56b6c2; }
+.ansi-white-bg   { background-color: #abb2bf; }
+
+.ansi-bold { font-weight: bold; }
+.ansi-dim  { opacity: 0.7; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }

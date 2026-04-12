@@ -1,0 +1,46 @@
+[package]
+name = "hive-inference"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+all-backends = ["candle", "llama-cpp", "onnx"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+llama-cpp = ["dep:llama-cpp-2", "dep:encoding_rs"]
+onnx = ["dep:ort", "dep:tokenizers"]
+
+[dependencies]
+anyhow.workspace = true
+hive-contracts = { path = "../hive-contracts" }
+hive-core = { path = "../hive-core" }
+hive-classification = { path = "../hive-classification" }
+parking_lot.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+tracing.workspace = true
+urlencoding.workspace = true
+
+# Candle runtime (optional)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+
+# LlamaCpp runtime (optional)
+llama-cpp-2 = { workspace = true, optional = true }
+encoding_rs = { workspace = true, optional = true }
+
+# ONNX runtime (optional)
+ort = { workspace = true, optional = true }
+
+# Shared tokenizer (optional, pulled in by candle/onnx features)
+tokenizers = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

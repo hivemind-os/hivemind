@@ -1,0 +1,17 @@
+[package]
+name = "hive-knowledge"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hive-classification = { path = "../hive-classification" }
+rusqlite.workspace = true
+serde.workspace = true
+sqlite-vec.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

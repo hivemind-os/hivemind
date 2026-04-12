@@ -1,0 +1,9 @@
+Test Pricing Document
+=====================
+
+Product A: $49.99/month
+Product B: $99.99/month
+Product C: $199.99/month
+
+Enterprise pricing available on request.
+Volume discounts: 10+ seats get 20% off.

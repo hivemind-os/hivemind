@@ -1,0 +1,148 @@
+name: system/email-triage
+version: "1.0"
+description: "Automatically triage incoming emails: classify, draft responses, and route to the right handler with human approval"
+mode: background
+
+variables:
+  type: object
+  properties:
+    category:
+      type: string
+      default: "uncategorized"
+    priority:
+      type: string
+      default: "normal"
+
+steps:
+  - id: on_email
+    type: trigger
+    trigger:
+      type: incoming_message
+      channel_id: my_email_connector  # Replace with your email connector ID
+      ignore_replies: true
+    next: [classify]
+
+  - id: classify
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Classify this email into a category and priority level.
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
+        Body: {{trigger.body}}
+
+        Return a JSON object with:
+        - "category": one of "support", "sales", "billing", "spam", "other"
+        - "priority": one of "urgent", "normal", "low"
+        - "summary": a one-sentence summary
+      timeout_secs: 60
+    outputs:
+      category: "{{result.category}}"
+      priority: "{{result.priority}}"
+      summary: "{{result.summary}}"
+    on_error:
+      strategy: skip
+      default_output:
+        category: "other"
+        priority: "normal"
+        summary: "Classification failed"
+    next: [save_classification]
+
+  - id: save_classification
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: category
+          value: "{{steps.classify.outputs.category}}"
+          operation: set
+        - variable: priority
+          value: "{{steps.classify.outputs.priority}}"
+          operation: set
+    next: [check_spam]
+
+  - id: check_spam
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{variables.category}} == spam"
+      then: [end]
+      else: [draft_reply]
+
+  - id: draft_reply
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Draft a professional reply to this email.
+        Category: {{variables.category}}
+        Priority: {{variables.priority}}
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
+        Body: {{trigger.body}}
+
+        Write a helpful and appropriate response. Return ONLY the reply text.
+      timeout_secs: 120
+    outputs:
+      draft: "{{result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Failed to draft reply: {{error}}"
+    next: [review]
+
+  - id: review
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        📧 New {{variables.priority}} priority email ({{variables.category}})
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
+        Summary: {{steps.classify.outputs.summary}}
+
+        Proposed reply:
+        {{steps.draft_reply.outputs.draft}}
+      choices:
+        - "Send reply"
+        - "Skip (don't reply)"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      edited_reply: "{{result.text}}"
+    next: [check_send]
+
+  - id: check_send
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.review.outputs.decision}} == Skip (don't reply)"
+      then: [end]
+      else: [send_reply]
+
+  - id: send_reply
+    type: task
+    task:
+      kind: call_tool
+      tool_id: connector.send_message  # Replace with actual send tool
+      arguments:
+        channel_id: my_email_connector
+        to: "{{trigger.from}}"
+        subject: "Re: {{trigger.subject}}"
+        body: "{{steps.review.outputs.edited_reply}}"
+    on_error:
+      strategy: retry
+      max_retries: 3
+      delay_secs: 10
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  category: "{{variables.category}}"
+  priority: "{{variables.priority}}"

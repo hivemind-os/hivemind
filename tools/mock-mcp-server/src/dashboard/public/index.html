@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mock MCP Server — Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🔧 Mock MCP Server</h1>
+    <div id="connection-status" class="status disconnected">
+      <span class="dot"></span>
+      <span class="label">Disconnected</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Global Controls -->
+    <section class="panel" id="controls-panel">
+      <h2>Global Controls</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label for="delay-slider">Response Delay</label>
+          <input type="range" id="delay-slider" min="0" max="10000" step="100" value="0">
+          <span id="delay-value">0 ms</span>
+        </div>
+        <div class="control-group">
+          <label for="fail-rate-slider">Failure Rate</label>
+          <input type="range" id="fail-rate-slider" min="0" max="100" step="1" value="0">
+          <span id="fail-rate-value">0%</span>
+        </div>
+        <div class="control-group">
+          <label for="pause-toggle">Pause Responses</label>
+          <button id="pause-toggle" class="btn">▶ Running</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tool Overrides -->
+    <section class="panel" id="tools-panel">
+      <h2>Tool Response Overrides</h2>
+      <div id="tool-overrides" class="tools-grid">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- MCP Clients -->
+    <section class="panel" id="clients-panel">
+      <h2>Connected Clients</h2>
+      <div id="clients-list" class="clients-list">
+        <p class="empty-state">No clients connected</p>
+      </div>
+    </section>
+
+    <!-- Sandbox Probes -->
+    <section class="panel" id="probes-panel">
+      <h2>Sandbox Probes</h2>
+      <div class="probe-tabs">
+        <button class="probe-tab active" data-tab="fs">📁 File System</button>
+        <button class="probe-tab" data-tab="net">🌐 Network</button>
+      </div>
+
+      <!-- File System Tab -->
+      <div class="probe-content active" id="probe-tab-fs">
+        <div class="probe-form">
+          <div class="probe-row">
+            <label for="fs-operation">Operation</label>
+            <select id="fs-operation">
+              <option value="read">Read File</option>
+              <option value="write">Write File</option>
+              <option value="list">List Directory</option>
+            </select>
+          </div>
+          <div class="probe-row">
+            <label for="fs-path">Path</label>
+            <input type="text" id="fs-path" placeholder="/tmp/test.txt" spellcheck="false">
+          </div>
+          <div class="probe-row" id="fs-content-row" style="display:none">
+            <label for="fs-content">Content</label>
+            <textarea id="fs-content" rows="4" placeholder="Content to write…" spellcheck="false"></textarea>
+          </div>
+          <button id="fs-execute" class="btn btn-accent">Execute</button>
+        </div>
+        <div id="fs-results" class="probe-results">
+          <p class="empty-state">No probe results yet</p>
+        </div>
+      </div>
+
+      <!-- Network Tab -->
+      <div class="probe-content" id="probe-tab-net">
+        <div class="probe-form">
+          <div class="probe-row">
+            <label for="net-method">Method</label>
+            <select id="net-method">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+              <option value="HEAD">HEAD</option>
+            </select>
+          </div>
+          <div class="probe-row">
+            <label for="net-url">URL</label>
+            <input type="text" id="net-url" placeholder="https://httpbin.org/get" spellcheck="false">
+          </div>
+          <div class="probe-row">
+            <label for="net-headers">Headers <span class="hint">(one per line: Key: Value)</span></label>
+            <textarea id="net-headers" rows="2" placeholder="Content-Type: application/json" spellcheck="false"></textarea>
+          </div>
+          <div class="probe-row" id="net-body-row">
+            <label for="net-body">Body</label>
+            <textarea id="net-body" rows="4" placeholder='{"key": "value"}' spellcheck="false"></textarea>
+          </div>
+          <button id="net-execute" class="btn btn-accent">Execute</button>
+        </div>
+        <div id="net-results" class="probe-results">
+          <p class="empty-state">No probe results yet</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Request Log -->
+    <section class="panel" id="log-panel">
+      <h2>
+        Request Log
+        <button id="clear-log" class="btn btn-small">Clear</button>
+      </h2>
+      <div class="table-wrapper">
+        <table id="log-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Tool</th>
+              <th>Arguments</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Response</th>
+            </tr>
+          </thead>
+          <tbody id="log-body">
+          </tbody>
+        </table>
+      </div>
+      <p id="log-empty" class="empty-state">No requests yet</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

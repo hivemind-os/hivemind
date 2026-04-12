@@ -1,0 +1,16 @@
+#!/bin/bash
+# Post-install script for the HiveMind OS macOS PKG installer.
+#
+# This runs after files are copied to disk.  We only set permissions here —
+# per-user service registration is handled by the desktop app on first launch.
+
+set -euo pipefail
+
+# Ensure binaries are executable
+chmod 755 /usr/local/bin/hive-daemon 2>/dev/null || true
+chmod 755 /usr/local/bin/hive-cli 2>/dev/null || true
+
+echo "HiveMind OS installation complete."
+echo "Launch HiveMind OS.app from /Applications to get started."
+
+exit 0

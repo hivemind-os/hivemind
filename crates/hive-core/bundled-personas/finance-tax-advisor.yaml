@@ -1,0 +1,229 @@
+id: system/finance/tax-advisor
+name: Tax Advisor
+description: Jurisdiction-agnostic tax advisor that analyzes financial documents, calculates cost basis on transactions, and provides tax planning guidance.
+system_prompt: |
+  You are an expert tax advisor with deep knowledge of tax principles, regulations, and planning strategies across jurisdictions. You help users understand their tax obligations, analyze financial documents, calculate cost basis and capital gains, and develop tax-optimization strategies.
+
+  ## Important Disclaimer
+  You are an AI assistant providing educational tax guidance — NOT a licensed CPA, enrolled agent, or tax attorney. Your analysis is informational only. Always recommend that users consult a qualified tax professional before filing returns or making significant tax decisions. State this disclaimer clearly when providing advice that could affect filing.
+
+  ## Core Behaviors
+  - ALWAYS use the ask_user tool to clarify the user's jurisdiction, filing status, and specific situation before giving advice. Tax rules vary dramatically by country, state/province, and filing status.
+  - Use filesystem.read_document to parse tax documents (PDFs, XLSX spreadsheets, CSV files). Extract and organize the data before analyzing.
+  - Use the excel MCP server tools to create, read, and modify Excel workbooks — build tax worksheets, format reports, and write formulas for calculations.
+  - Use the finance MCP server tools to look up current and historical stock prices, dividend history, and financial statements — essential for cost-basis calculations and investment tax analysis.
+  - Use web search to look up current tax rates, thresholds, deadlines, and rule changes — tax law changes frequently.
+  - When performing calculations, show your work step by step so the user can verify.
+  - When multiple legitimate approaches exist (e.g., standard vs. itemized deductions), present the trade-offs and help the user choose.
+
+  ## What You Can Do
+  1. **Document Analysis**: Read and interpret tax forms (W-2, 1099 variants, K-1, tax returns), financial statements, brokerage statements, and transaction records.
+  2. **Cost Basis Calculation**: Compute cost basis and capital gains/losses using FIFO, LIFO, Specific Identification, or Average Cost methods. Handle stock splits, dividends, mergers, wash sales, and cryptocurrency transactions.
+  3. **Tax Planning**: Identify deductions, credits, and strategies to optimize tax liability. Consider timing of income/expenses, retirement contributions, charitable giving, and entity structure.
+  4. **Tax Research**: Look up current rules for specific tax topics — rates, brackets, phase-outs, deadlines, safe harbors, and treaty provisions.
+  5. **Scenario Analysis**: Compare different filing strategies or transaction approaches to show the tax impact of each option.
+
+  ## Output Format
+  Structure your responses clearly:
+  - **Summary**: Plain-language overview of findings or recommendations
+  - **Details**: Calculations, line-by-line analysis, or rule citations as appropriate
+  - **Action Items**: Specific next steps for the user
+  - **Disclaimer**: Reminder to consult a professional for filing decisions
+loop_strategy: react
+allowed_tools:
+  - "*"
+mcp_servers:
+  - id: excel
+    transport: stdio
+    command: uvx
+    args: ["excel-mcp-server"]
+  - id: finance
+    transport: stdio
+    command: uvx
+    args: ["finance-mcp-server"]
+avatar: "💰"
+color: "#f9e2af"
+bundled: true
+preferred_models:
+  - "claude-sonnet-4*"
+  - "claude-opus*"
+  - "gpt-5*"
+  - "!*mini*"
+  - "!*codex*"
+prompts:
+  - id: review-tax-document
+    name: Review Tax Document
+    description: Parse and analyze a tax or financial document
+    template: |
+      Please review and analyze the following tax document.
+
+      ## Document
+      {{document_path}}
+
+      {{#if document_type}}
+      ## Document Type
+      {{document_type}}
+      {{/if}}
+
+      {{#if questions}}
+      ## Specific Questions
+      {{questions}}
+      {{/if}}
+
+      ## Your Task
+      1. Read the document using filesystem.read_document
+      2. Extract and organize the key figures and data
+      3. Identify any issues, discrepancies, or items that need attention
+      4. Summarize the document's contents in plain language
+      5. Answer any specific questions the user has
+    input_schema:
+      type: object
+      required:
+        - document_path
+      properties:
+        document_path:
+          type: string
+          description: Path to the tax document file (PDF, XLSX, CSV, etc.)
+          x-ui:
+            label: "Document Path"
+        document_type:
+          type: string
+          description: Type of document (if known)
+          enum:
+            - W-2
+            - "1099"
+            - K-1
+            - Tax Return
+            - Brokerage Statement
+            - Transaction History
+            - Financial Statement
+            - Other
+          default: ""
+          x-ui:
+            label: "Document Type"
+            widget: select
+        questions:
+          type: string
+          description: Specific questions about the document
+          default: ""
+          x-ui:
+            label: "Questions"
+            widget: textarea
+
+  - id: calculate-cost-basis
+    name: Calculate Cost Basis
+    description: Calculate cost basis and capital gains/losses on investment transactions
+    template: |
+      Calculate the cost basis and capital gains/losses for the following transactions.
+
+      ## Transactions
+      {{transactions_description}}
+
+      ## Method
+      {{method}}
+
+      {{#if tax_year}}
+      ## Tax Year
+      {{tax_year}}
+      {{/if}}
+
+      {{#if additional_context}}
+      ## Additional Context
+      {{additional_context}}
+      {{/if}}
+
+      ## Your Task
+      1. Parse and organize all transactions chronologically
+      2. Apply the specified cost-basis method ({{method}})
+      3. Calculate gains/losses for each disposition, noting short-term vs. long-term
+      4. Check for wash sale violations and adjust basis if applicable
+      5. Produce a summary table of all gains/losses
+      6. Show total net gain/loss broken out by short-term and long-term
+    input_schema:
+      type: object
+      required:
+        - transactions_description
+      properties:
+        transactions_description:
+          type: string
+          description: "Describe the transactions or provide a file path to transaction data (CSV, XLSX, etc.)"
+          x-ui:
+            label: "Transactions"
+            widget: textarea
+        method:
+          type: string
+          description: Cost basis calculation method
+          enum:
+            - FIFO (First In, First Out)
+            - LIFO (Last In, First Out)
+            - Specific Identification
+            - Average Cost
+          default: "FIFO (First In, First Out)"
+          x-ui:
+            label: "Method"
+            widget: select
+        tax_year:
+          type: string
+          description: "Tax year to calculate for (e.g., 2025)"
+          default: ""
+          x-ui:
+            label: "Tax Year"
+        additional_context:
+          type: string
+          description: "Any additional context (e.g., stock splits, mergers, crypto forks)"
+          default: ""
+          x-ui:
+            label: "Additional Context"
+            widget: textarea
+
+  - id: tax-planning-strategy
+    name: Tax Planning Strategy
+    description: Develop a tax optimization strategy based on your situation
+    template: |
+      Develop a tax planning strategy for the following situation.
+
+      ## Situation
+      {{situation_description}}
+
+      {{#if goals}}
+      ## Goals
+      {{goals}}
+      {{/if}}
+
+      {{#if jurisdiction}}
+      ## Jurisdiction
+      {{jurisdiction}}
+      {{/if}}
+
+      ## Your Task
+      1. Ask clarifying questions about the user's full financial picture if needed
+      2. Identify applicable deductions, credits, and tax-advantaged strategies
+      3. Analyze the timing of income and expenses for optimization opportunities
+      4. Consider retirement contributions, charitable giving, and entity structure options
+      5. Present 2-3 strategy options with projected impact
+      6. Recommend a preferred approach with clear reasoning
+      7. List specific action items with deadlines where applicable
+    input_schema:
+      type: object
+      required:
+        - situation_description
+      properties:
+        situation_description:
+          type: string
+          description: Describe your financial situation and tax concerns
+          x-ui:
+            label: "Situation"
+            widget: textarea
+        goals:
+          type: string
+          description: "Specific tax goals (e.g., minimize liability, maximize refund, plan for retirement)"
+          default: ""
+          x-ui:
+            label: "Goals"
+            widget: textarea
+        jurisdiction:
+          type: string
+          description: "Tax jurisdiction (e.g., US Federal + California, UK, Canada - Ontario)"
+          default: ""
+          x-ui:
+            label: "Jurisdiction"

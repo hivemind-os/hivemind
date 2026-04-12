@@ -1,0 +1,36 @@
+name: test/scenario2-multi-agent
+description: "Test workflow: multi-agent with ask_user, feedback gate, tool approvals, and persona isolation"
+mode: chat
+steps:
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+    next: [research]
+  - id: research
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: researcher
+      task: "Research the topic and ask the user for their preference"
+    next: [confirm_gate]
+  - id: confirm_gate
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: "The researcher found: {{steps.research.outputs.result}}. Please confirm the direction."
+    next: [execute]
+  - id: execute
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: executor
+      task: "Execute based on research: {{steps.research.outputs.result}} and confirmation: {{steps.confirm_gate.outputs.response}}"
+    next: [done]
+  - id: done
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: final_result
+          value: "{{steps.execute.outputs.result}}"

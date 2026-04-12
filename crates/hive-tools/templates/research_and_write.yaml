@@ -1,0 +1,146 @@
+name: user/research-and-write
+version: "1.0"
+description: "Multi-agent workflow: research a topic, write content, get human feedback"
+mode: chat
+
+variables:
+  type: object
+  properties:
+    revision_count:
+      type: number
+      default: 0
+
+steps:
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [topic]
+        properties:
+          topic:
+            type: string
+            description: "The topic to research and write about"
+          depth:
+            type: string
+            enum: [brief, detailed, comprehensive]
+            default: detailed
+    next: [research]
+
+  - id: research
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Research the following topic thoroughly: {{trigger.topic}}
+        Depth level: {{trigger.depth}}
+
+        Gather key facts, data points, expert opinions, and relevant context.
+        Return a structured research brief with sources.
+      timeout_secs: 300
+    outputs:
+      research_brief: "{{result}}"
+    on_error:
+      strategy: retry
+      max_retries: 2
+      delay_secs: 10
+    next: [write]
+
+  - id: write
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Using the following research brief, write a well-structured article about "{{trigger.topic}}".
+
+        Research: {{steps.research.outputs.research_brief}}
+
+        Requirements:
+        - Clear introduction, body with sections, and conclusion
+        - Cite specific facts from the research
+        - Engaging and professional tone
+      timeout_secs: 300
+    outputs:
+      article: "{{result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Writing agent failed: {{error}}"
+    next: [review]
+
+  - id: review
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        Here's the article about "{{trigger.topic}}":
+
+        {{steps.write.outputs.article}}
+
+        Would you like to approve this or request revisions?
+      choices:
+        - "Approve"
+        - "Request revisions"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      feedback: "{{result.text}}"
+    next: [check_approval]
+
+  - id: check_approval
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.review.outputs.decision}} == Approve"
+      then: [end]
+      else: [increment_revisions]
+
+  - id: increment_revisions
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: revision_count
+          value: "1"
+          operation: set
+    next: [check_revision_limit]
+
+  - id: check_revision_limit
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{variables.revision_count}} > 3"
+      then: [end]
+      else: [revise]
+
+  - id: revise
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Revise this article based on the feedback below.
+
+        Current article: {{steps.write.outputs.article}}
+        Feedback: {{steps.review.outputs.feedback}}
+
+        Make the requested changes while maintaining quality.
+      timeout_secs: 300
+    outputs:
+      article: "{{result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Revision agent failed: {{error}}"
+    next: [review]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  final_article: "{{steps.write.outputs.article}}"
+
+result_message: "Article about '{{trigger.topic}}' is ready!"

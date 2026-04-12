@@ -1,0 +1,113 @@
+name: user/order-processor
+version: "1.0"
+description: "Process incoming orders with validation, fulfillment, and notification"
+mode: background
+
+variables:
+  type: object
+  properties:
+    order_status:
+      type: string
+      default: "received"
+
+steps:
+  - id: on_order
+    type: trigger
+    trigger:
+      type: event_pattern
+      topic: "order.created"
+    next: [validate_order]
+
+  - id: validate_order
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Validate this order data. Check for: valid items, reasonable quantities,
+        correct pricing. Return a JSON object with "valid": true/false and "issues": [].
+
+        Order: {{trigger.payload}}
+      timeout_secs: 60
+    outputs:
+      is_valid: "{{result.valid}}"
+      issues: "{{result.issues}}"
+    on_error:
+      strategy: skip
+      default_output:
+        is_valid: false
+        issues: ["Validation failed due to error"]
+    next: [check_valid]
+
+  - id: check_valid
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.validate_order.outputs.is_valid}} == true"
+      then: [fulfill, notify_customer]
+      else: [notify_rejection]
+
+  # These two steps run in PARALLEL (both listed in then)
+  - id: fulfill
+    type: task
+    task:
+      kind: call_tool
+      tool_id: http.request            # Replace with actual tool ID
+      arguments:
+        method: "POST"
+        url: "https://api.example.com/fulfillment"
+        body: '{"order_id": "{{trigger.order_id}}", "items": {{trigger.items}}}'
+    outputs:
+      fulfillment_id: "{{result.body.fulfillment_id}}"
+    on_error:
+      strategy: retry
+      max_retries: 3
+      delay_secs: 15
+    next: [update_status]
+
+  - id: notify_customer
+    type: task
+    task:
+      kind: signal_agent
+      target:
+        type: session
+        session_id: "{{variables.session_id}}"
+      content: "Order {{trigger.order_id}} is being processed!"
+    on_error:
+      strategy: skip
+      default_output:
+        delivered: false
+    next: [update_status]
+
+  # Join point — waits for BOTH fulfill and notify_customer
+  - id: update_status
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: order_status
+          value: "fulfilled"
+          operation: set
+    next: [end]
+
+  - id: notify_rejection
+    type: task
+    task:
+      kind: signal_agent
+      target:
+        type: session
+        session_id: "{{variables.session_id}}"
+      content: "Order {{trigger.order_id}} was rejected: {{steps.validate_order.outputs.issues}}"
+    on_error:
+      strategy: skip
+      default_output:
+        delivered: false
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  status: "{{variables.order_status}}"
