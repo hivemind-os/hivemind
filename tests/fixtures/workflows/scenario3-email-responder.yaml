@@ -1,0 +1,26 @@
+name: test/scenario3-email-responder
+description: "Test workflow: email trigger launches agent that responds using attachment data"
+mode: background
+steps:
+  - id: trigger
+    type: trigger
+    trigger:
+      type: incoming_message
+      channel_id: test-email
+      subject_filter: "inquiry"
+      mark_as_read: true
+    next: [respond]
+  - id: respond
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: email-responder
+      task: "Read the attached pricing document and respond to the email from {{trigger.from}} about: {{trigger.subject}}. Body: {{trigger.body}}"
+    next: [done]
+  - id: done
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: reply_sent
+          value: "{{steps.respond.outputs.result}}"

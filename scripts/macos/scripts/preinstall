@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre-install script for the HiveMind OS macOS PKG installer.
+#
+# Stops the running daemon and unloads the LaunchAgent before upgrading,
+# so the new binaries aren't fighting with a stale daemon process.
+
+set -euo pipefail
+
+LABEL="com.hivemind.daemon"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+UID_VAL=$(id -u)
+DOMAIN="gui/${UID_VAL}"
+
+# Unload the LaunchAgent if it's loaded
+if launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1; then
+    echo "Stopping existing HiveMind daemon..."
+    launchctl bootout "$DOMAIN" "$PLIST" 2>/dev/null || true
+fi
+
+# Also kill any lingering daemon process (belt and suspenders)
+killall hive-daemon 2>/dev/null || true
+
+# Give the daemon a moment to release its port
+sleep 1
+
+echo "Pre-install cleanup complete."
+exit 0

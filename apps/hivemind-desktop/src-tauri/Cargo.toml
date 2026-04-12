@@ -1,0 +1,55 @@
+[package]
+name = "hivemind-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "HiveMind OS desktop application"
+
+[lib]
+name = "hivemind_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+service-manager = ["hive-core/service-manager"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+hive-contracts = { path = "../../../crates/hive-contracts" }
+hive-core = { path = "../../../crates/hive-core" }
+base64.workspace = true
+log.workspace = true
+mime_guess.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-log.workspace = true
+tauri-plugin-process.workspace = true
+tauri-plugin-updater.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+urlencoding.workspace = true
+open = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString", "NSURL"] }
+
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }
+syn = { version = "2", features = ["full", "visit"] }
+quote = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+clipboard-win = "5"

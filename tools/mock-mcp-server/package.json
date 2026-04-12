@@ -1,0 +1,26 @@
+{
+  "name": "mock-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A mock MCP server for manual testing with a web monitoring dashboard",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mock-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "compile": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/dashboard/public','dist/dashboard/public',{recursive:true})\"",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.0"
+  }
+}

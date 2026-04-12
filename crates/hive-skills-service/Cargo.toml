@@ -1,0 +1,18 @@
+[package]
+name = "hive-skills-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+arc-swap.workspace = true
+hive-contracts = { path = "../hive-contracts" }
+hive-model = { path = "../hive-model" }
+hive-skills = { path = "../hive-skills" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -1,0 +1,23 @@
+name: test/scenario1-agent-question
+description: "Test workflow: agent asks a question via ask_user, result routes through chat"
+mode: chat
+steps:
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+    next: [ask_agent]
+  - id: ask_agent
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: questioner
+      task: "Ask the user what color they prefer and report back their choice"
+    next: [report]
+  - id: report
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: result
+          value: "{{steps.ask_agent.outputs.result}}"

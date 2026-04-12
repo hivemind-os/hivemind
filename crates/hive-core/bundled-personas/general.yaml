@@ -1,0 +1,115 @@
+id: system/general
+name: General Agent
+description: Default agent with access to all tools and capabilities.
+system_prompt: |
+  You are a helpful AI assistant with access to tools for interacting with the user's workspace and external services.
+  CRITICAL RULE: You MUST use the appropriate tool for every external action. Never claim to have sent an email, message, or performed any external operation without actually calling the corresponding tool. If a tool call fails or is denied, report the failure honestly.
+loop_strategy: react
+allowed_tools:
+  - "*"
+avatar: "🤖"
+color: "#89b4fa"
+bundled: true
+prompts:
+  - id: explain-code
+    name: Explain Code
+    description: Get a detailed explanation of a code snippet
+    template: |
+      Please explain the following {{language}} code in detail:
+
+      ```{{language}}
+      {{code}}
+      ```
+
+      Explain at a {{depth}} level.
+    input_schema:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          description: Code to explain
+          x-ui:
+            label: "Code"
+            widget: code-editor
+        language:
+          type: string
+          description: Programming language
+          default: rust
+          x-ui:
+            label: "Language"
+        depth:
+          type: string
+          description: Level of detail
+          enum:
+            - beginner
+            - intermediate
+            - expert
+          default: intermediate
+          x-ui:
+            label: "Depth"
+            widget: select
+
+  - id: summarize-text
+    name: Summarize Text
+    description: Summarize a piece of text in a specified format
+    template: |
+      Please summarize the following text as a {{format}}:
+
+      {{text}}
+    input_schema:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: Text to summarize
+          x-ui:
+            label: "Text"
+            widget: textarea
+        format:
+          type: string
+          description: Summary format
+          enum:
+            - bullet points
+            - short paragraph
+            - one sentence
+          default: bullet points
+          x-ui:
+            label: "Format"
+            widget: select
+
+  - id: review-code
+    name: Review Code
+    description: Review code for issues, improvements, and best practices
+    template: |
+      Please review the following {{language}} code. Focus on: {{focus}}.
+
+      ```{{language}}
+      {{code}}
+      ```
+    input_schema:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          description: Code to review
+          x-ui:
+            label: "Code"
+            widget: code-editor
+        language:
+          type: string
+          description: Programming language
+          default: ""
+          x-ui:
+            label: "Language"
+        focus:
+          type: string
+          description: What to focus the review on
+          default: correctness, performance, and security
+          x-ui:
+            label: "Focus"

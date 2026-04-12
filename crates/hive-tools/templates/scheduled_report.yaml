@@ -1,0 +1,83 @@
+name: user/weekly-report
+version: "1.0"
+description: "Generate and deliver a weekly summary report every Monday"
+mode: background
+
+variables:
+  type: object
+  properties:
+    report_data:
+      type: object
+      default: {}
+
+steps:
+  - id: weekly_schedule
+    type: trigger
+    trigger:
+      type: schedule
+      cron: "0 9 * * MON"
+    next: [fetch_data]
+
+  # Also allow manual trigger for testing
+  - id: manual_start
+    type: trigger
+    trigger:
+      type: manual
+      inputs: []
+    next: [fetch_data]
+
+  - id: fetch_data
+    type: task
+    task:
+      kind: call_tool
+      tool_id: http.request            # Replace with actual tool ID
+      arguments:
+        method: "GET"
+        url: "https://api.example.com/weekly-metrics"
+    outputs:
+      metrics: "{{result.body}}"
+    on_error:
+      strategy: retry
+      max_retries: 3
+      delay_secs: 30
+    next: [analyze]
+
+  - id: analyze
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Analyze this weekly metrics data and write a concise executive summary report.
+        Highlight trends, anomalies, and key takeaways.
+
+        Data: {{steps.fetch_data.outputs.metrics}}
+      timeout_secs: 300
+    outputs:
+      report: "{{result}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Analysis agent failed: {{error}}"
+    next: [deliver_report]
+
+  - id: deliver_report
+    type: task
+    task:
+      kind: signal_agent
+      target:
+        type: session
+        session_id: "{{variables.session_id}}"
+      content: "📊 Weekly Report\n\n{{steps.analyze.outputs.report}}"
+    on_error:
+      strategy: skip
+      default_output:
+        delivered: false
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  report: "{{steps.analyze.outputs.report}}"

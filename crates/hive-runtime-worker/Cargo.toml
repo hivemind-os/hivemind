@@ -1,0 +1,23 @@
+[package]
+name = "hive-runtime-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hive-runtime-worker"
+path = "src/main.rs"
+
+[features]
+default = ["candle", "llama-cpp", "onnx"]
+candle = ["hive-inference/candle"]
+llama-cpp = ["hive-inference/llama-cpp"]
+onnx = ["hive-inference/onnx"]
+
+[dependencies]
+clap.workspace = true
+hive-inference = { path = "../hive-inference", default-features = false }
+hive-core = { path = "../hive-core" }
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

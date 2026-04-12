@@ -1,0 +1,157 @@
+name: system/approval-workflow
+version: "1.0"
+description: "Submit a request, get AI analysis, route through human approval chain"
+mode: chat
+
+variables:
+  type: object
+  properties:
+    status:
+      type: string
+      default: "pending"
+    approver_notes:
+      type: string
+      default: ""
+
+steps:
+  - id: submit_request
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [title, description]
+        properties:
+          title:
+            type: string
+            description: "Request title"
+            x-ui:
+              label: "Title"
+          description:
+            type: string
+            description: "Detailed description of the request"
+            x-ui:
+              label: "Description"
+          urgency:
+            type: string
+            enum: [low, medium, high, critical]
+            default: medium
+            x-ui:
+              label: "Urgency"
+    next: [analyze]
+
+  - id: analyze
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: >
+        Analyze this request and provide a recommendation.
+
+        Title: {{trigger.title}}
+        Description: {{trigger.description}}
+        Urgency: {{trigger.urgency}}
+
+        Evaluate:
+        1. Is the request clear and complete?
+        2. Are there any risks or concerns?
+        3. What is your recommendation? (approve / needs-review / reject)
+
+        Return a structured analysis with your recommendation.
+      timeout_secs: 120
+    outputs:
+      analysis: "{{result}}"
+    on_error:
+      strategy: skip
+      default_output:
+        analysis: "Automated analysis unavailable. Manual review required."
+    next: [approval_gate]
+
+  - id: approval_gate
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        📋 Request: {{trigger.title}}
+        📝 Description: {{trigger.description}}
+        ⚡ Urgency: {{trigger.urgency}}
+
+        🤖 AI Analysis:
+        {{steps.analyze.outputs.analysis}}
+
+        Please review and decide:
+      choices:
+        - "Approve"
+        - "Request changes"
+        - "Reject"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      notes: "{{result.text}}"
+    next: [route_decision]
+
+  - id: route_decision
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.approval_gate.outputs.decision}} == Approve"
+      then: [mark_approved]
+      else: [check_rejected]
+
+  - id: mark_approved
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "approved"
+          operation: set
+        - variable: approver_notes
+          value: "{{steps.approval_gate.outputs.notes}}"
+          operation: set
+    next: [end]
+
+  - id: check_rejected
+    type: control_flow
+    control:
+      kind: branch
+      condition: "{{steps.approval_gate.outputs.decision}} == Reject"
+      then: [mark_rejected]
+      else: [mark_changes_requested]
+
+  - id: mark_rejected
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "rejected"
+          operation: set
+        - variable: approver_notes
+          value: "{{steps.approval_gate.outputs.notes}}"
+          operation: set
+    next: [end]
+
+  - id: mark_changes_requested
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "changes_requested"
+          operation: set
+        - variable: approver_notes
+          value: "{{steps.approval_gate.outputs.notes}}"
+          operation: set
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  status: "{{variables.status}}"
+  notes: "{{variables.approver_notes}}"
+
+result_message: "Request '{{trigger.title}}' — Status: {{variables.status}}"

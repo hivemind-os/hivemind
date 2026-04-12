@@ -1,0 +1,29 @@
+name: test/scenario4-workflow-context
+description: "Test workflow: verifies workflow context injection into session agent prompts"
+mode: chat
+steps:
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+    next: [do_work]
+  - id: do_work
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: worker
+      task: "Process the request and report your findings"
+    next: [review_gate]
+  - id: review_gate
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: "The worker reported: {{steps.do_work.outputs.result}}. Do you approve?"
+    next: [done]
+  - id: done
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: final_result
+          value: "{{steps.review_gate.outputs.response}}"

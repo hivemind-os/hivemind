@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>HiveMind OS needs access to your calendar to read and manage events through the Apple Calendar connector.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>HiveMind OS needs access to your calendar to read and manage events through the Apple Calendar connector.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>HiveMind OS needs access to your contacts to search and manage contacts through the Apple Contacts connector.</string>
+</dict>
+</plist>

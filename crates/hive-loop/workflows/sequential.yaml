@@ -1,0 +1,30 @@
+name: sequential
+version: "1.0"
+description: "Simple sequential model call. Sends the prompt to the model once and returns the response. No tool calling."
+
+config:
+  max_iterations: 1
+  max_tool_calls: 0
+
+inputs:
+  - name: user_input
+    description: "The user's prompt or question"
+  - name: system_prompt
+    description: "System instructions for the model"
+    required: false
+    default: "You are a helpful assistant."
+
+steps:
+  - id: model_call
+    description: "Call the model with the user prompt"
+    action:
+      type: model_call
+      prompt: "{{user_input}}"
+      system_prompt: "{{system_prompt}}"
+      result_var: response
+
+  - id: return_result
+    description: "Return the model response"
+    action:
+      type: return_value
+      value: "{{response.content}}"

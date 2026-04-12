@@ -1,0 +1,59 @@
+name: react
+version: "1.0"
+description: "ReAct (Reason-Act-Observe) agent loop. The model reasons about the task, calls tools as needed, observes results, and iterates until done."
+
+config:
+  max_iterations: 25
+  # max_tool_calls is managed by the adaptive budget (ToolLimitsConfig).
+
+inputs:
+  - name: user_input
+    description: "The user's prompt or question"
+  - name: system_prompt
+    description: "System instructions for the model"
+    required: false
+    default: "You are a helpful assistant. You have access to tools that you can use to help answer questions. When you have enough information, provide a final answer."
+
+steps:
+  - id: init
+    description: "Initialize the conversation with user input"
+    action:
+      type: set_variable
+      name: done
+      value: "false"
+
+  - id: model_call
+    description: "Call the model with current conversation context"
+    action:
+      type: model_call
+      prompt: "{{user_input}}"
+      system_prompt: "{{system_prompt}}"
+      result_var: response
+
+  - id: check_tool_calls
+    description: "Check if the model wants to call any tools"
+    action:
+      type: branch
+      condition: "{{response.has_tool_calls}}"
+      then_step: execute_tools
+      else_step: return_result
+
+  - id: execute_tools
+    description: "Execute all tool calls from the model response"
+    action:
+      type: parallel_tool_calls
+      calls: "{{response.tool_calls}}"
+      result_var: tool_results
+
+  - id: loop_back
+    description: "Continue the conversation with tool results"
+    action:
+      type: branch
+      condition: "true"
+      then_step: model_call
+
+  - id: return_result
+    description: "Return the final model response"
+    action:
+      type: return_value
+      value: "{{response.content}}"

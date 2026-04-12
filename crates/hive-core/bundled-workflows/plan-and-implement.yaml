@@ -1,0 +1,230 @@
+name: system/software/plan-and-implement
+version: "1.0"
+description: "Plan and implement a task with specialized AI agents. A lightweight workflow with plan review and implementation review gates."
+mode: chat
+
+variables:
+  type: object
+  properties:
+    status:
+      type: string
+      default: "pending"
+    plan:
+      type: string
+      default: ""
+    planner_agent_id:
+      type: string
+      default: ""
+    plan_approved:
+      type: string
+      default: ""
+    plan_feedback:
+      type: string
+      default: ""
+    implementation_result:
+      type: string
+      default: ""
+    implementor_agent_id:
+      type: string
+      default: ""
+    impl_approved:
+      type: string
+      default: ""
+    impl_feedback:
+      type: string
+      default: ""
+
+steps:
+  # ── Trigger ──────────────────────────────────────────────────────────
+  - id: start
+    type: trigger
+    trigger:
+      type: manual
+      input_schema:
+        type: object
+        required: [feature_description]
+        properties:
+          feature_description:
+            type: string
+            description: "Description of the task to plan and implement"
+            x-ui:
+              label: "Task Description"
+              widget: textarea
+    next: [plan_loop]
+
+  # ── Planning (with revision loop) ────────────────────────────────────
+  - id: plan_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.plan_approved}} != Approve"
+      body: [plan, save_plan, review_plan, process_plan_decision]
+    next: [implement_loop]
+
+  - id: plan
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/planner
+      prompt_id: plan-feature
+      agent_name: "Feature Planner"
+      target_agent_id: "{{variables.planner_agent_id}}"
+      auto_create: true
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        revision_feedback: "{{variables.plan_feedback}}"
+    outputs:
+      plan_result: "{{result.result}}"
+      plan_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Planning failed: {{error}}"
+    next: [save_plan]
+
+  - id: save_plan
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: plan
+          value: "{{steps.plan.outputs.plan_result}}"
+          operation: set
+        - variable: planner_agent_id
+          value: "{{steps.plan.outputs.plan_agent}}"
+          operation: set
+    next: [review_plan]
+
+  - id: review_plan
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Plan Review
+
+        **Task:** {{trigger.feature_description}}
+
+        **Plan:**
+        {{variables.plan}}
+
+        Please review the plan and decide whether to proceed with implementation.
+      choices:
+        - "Approve"
+        - "Reject"
+      allow_freeform: true
+    outputs:
+      decision: "{{result.selected}}"
+      feedback: "{{result.text}}"
+    next: [process_plan_decision]
+
+  - id: process_plan_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: plan_feedback
+          value: "{{steps.review_plan.outputs.feedback}}"
+          operation: set
+        - variable: plan_approved
+          value: "{{steps.review_plan.outputs.decision}}"
+          operation: set
+
+  # ── Implementation (with rework loop) ────────────────────────────────
+  - id: implement_loop
+    type: control_flow
+    control:
+      kind: while
+      condition: "{{variables.impl_approved}} != Accept"
+      body: [implement, save_impl_result, review_implementation, process_impl_decision]
+    next: [mark_completed]
+
+  - id: implement
+    type: task
+    task:
+      kind: invoke_prompt
+      persona_id: system/software/implementor
+      prompt_id: implement-feature
+      agent_name: "Feature Implementor"
+      target_agent_id: "{{variables.implementor_agent_id}}"
+      auto_create: true
+      parameters:
+        feature_description: "{{trigger.feature_description}}"
+        plan: "{{variables.plan}}"
+        feedback: "{{variables.impl_feedback}}"
+    outputs:
+      impl_result: "{{result.result}}"
+      impl_agent: "{{result.agent_id}}"
+    on_error:
+      strategy: fail_workflow
+      message: "Implementation failed: {{error}}"
+    next: [save_impl_result]
+
+  - id: save_impl_result
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: implementation_result
+          value: "{{steps.implement.outputs.impl_result}}"
+          operation: set
+        - variable: implementor_agent_id
+          value: "{{steps.implement.outputs.impl_agent}}"
+          operation: set
+    next: [review_implementation]
+
+  - id: review_implementation
+    type: task
+    task:
+      kind: feedback_gate
+      prompt: |
+        ## Implementation Review
+
+        **Task:** {{trigger.feature_description}}
+
+        **Implementation Result:**
+        {{variables.implementation_result}}
+
+        The implementor has completed the task — writing code, tests (all passing), QA validation, and code review via sub-agents.
+
+        Please review the implementation and decide whether to accept it.
+      choices:
+        - "Accept"
+        - "Request Rework"
+      allow_freeform: true
+    outputs:
+      impl_decision: "{{result.selected}}"
+      impl_feedback: "{{result.text}}"
+    next: [process_impl_decision]
+
+  - id: process_impl_decision
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: impl_feedback
+          value: "{{steps.review_implementation.outputs.impl_feedback}}"
+          operation: set
+        - variable: impl_approved
+          value: "{{steps.review_implementation.outputs.impl_decision}}"
+          operation: set
+
+  # ── Terminal states ──────────────────────────────────────────────────
+  - id: mark_completed
+    type: task
+    task:
+      kind: set_variable
+      assignments:
+        - variable: status
+          value: "completed"
+          operation: set
+    next: [end]
+
+  - id: end
+    type: control_flow
+    control:
+      kind: end_workflow
+
+output:
+  status: "{{variables.status}}"
+  plan: "{{variables.plan}}"
+
+result_message: "Task '{{trigger.feature_description}}' — Status: {{variables.status}}"

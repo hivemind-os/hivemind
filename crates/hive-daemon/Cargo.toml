@@ -1,0 +1,28 @@
+[package]
+name = "hive-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["inference"]
+inference = ["hive-api/candle", "hive-api/llama-cpp", "hive-api/onnx"]
+service-manager = ["hive-core/service-manager"]
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+hive-api = { path = "../hive-api" }
+hive-classification = { path = "../hive-classification" }
+hive-core = { path = "../hive-core" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSError"] }
+objc2-event-kit = { version = "0.3", features = ["EKEventStore", "EKTypes"] }
+objc2-contacts = { version = "0.3", features = ["CNContactStore"] }

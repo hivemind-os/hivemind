@@ -1,0 +1,37 @@
+[package]
+name = "hive-tools"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+hive-classification = { path = "../hive-classification" }
+hive-connectors = { path = "../hive-connectors" }
+hive-contracts = { path = "../hive-contracts" }
+hive-mcp = { path = "../hive-mcp" }
+hive-process = { path = "../hive-process" }
+hive-sandbox = { path = "../hive-sandbox" }
+hive-scheduler = { path = "../hive-scheduler" }
+hive-workflow-service = { path = "../hive-workflow-service" }
+hive-workspace-index = { path = "../hive-workspace-index" }
+glob.workspace = true
+ignore.workspace = true
+mime_guess.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+rusqlite = { workspace = true }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }
+hive-core = { path = "../hive-core" }
+tokio.workspace = true

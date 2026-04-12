@@ -1,0 +1,36 @@
+[package]
+name = "hive-workflow-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hive-workflow = { path = "../hive-workflow" }
+hive-core = { path = "../hive-core" }
+hive-connectors = { path = "../hive-connectors" }
+parking_lot.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+cron = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+hive-agents = { path = "../hive-agents" }
+hive-classification = { path = "../hive-classification" }
+hive-contracts = { path = "../hive-contracts" }
+hive-loop = { path = "../hive-loop" }
+hive-model = { path = "../hive-model" }
+hive-tools = { path = "../hive-tools" }
+arc-swap = { workspace = true }
+parking_lot.workspace = true
+tokio = { version = "1", features = ["full", "test-util"] }
+tokio-stream = { workspace = true }
+anyhow = { workspace = true }
