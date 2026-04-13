@@ -1917,7 +1917,7 @@ export function StepConfigFields(props: StepConfigFieldsProps) {
           <div style={{ 'margin-top': '8px' }}>
             <div style={labelStyle}>Connector</div>
             <Show when={commsChannels().length > 0} fallback={
-              <div style={{ 'font-size': '0.8em', color: 'hsl(40 90% 84%)', padding: '8px', background: 'hsl(40 90% 84% / 0.1)', 'border-radius': '4px' }}>
+              <div style={{ 'font-size': '0.8em', color: 'var(--warning-color)', padding: '8px', background: 'var(--warning-bg)', 'border-radius': '4px' }}>
                 No connectors with communication enabled. Add or enable one in Settings → Connectors.
               </div>
             }>
