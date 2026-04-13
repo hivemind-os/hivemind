@@ -259,6 +259,8 @@ jobs:
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # Collect platform entries. Each needs a download URL and Ed25519 signature.
+          # Note: GitHub replaces spaces with dots in release asset filenames,
+          # so we must apply the same transformation to the URLs.
           PLATFORMS="{"
 
           # macOS aarch64 (.app.tar.gz produced by tauri build)
@@ -266,6 +268,7 @@ jobs:
           TAR=$(find artifacts/macos-aarch64 -name "*.app.tar.gz" -not -name "*.sig" -type f | head -1)
           if [ -n "$TAR" ] && [ -n "$SIG" ]; then
             TAR_NAME=$(basename "$TAR")
+            TAR_NAME="${TAR_NAME// /.}"
             PLATFORMS="$PLATFORMS\"darwin-aarch64\":{\"url\":\"${BASE_URL}/${TAR_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
@@ -274,6 +277,7 @@ jobs:
           TAR=$(find artifacts/macos-x86_64 -name "*.app.tar.gz" -not -name "*.sig" -type f | head -1)
           if [ -n "$TAR" ] && [ -n "$SIG" ]; then
             TAR_NAME=$(basename "$TAR")
+            TAR_NAME="${TAR_NAME// /.}"
             PLATFORMS="$PLATFORMS\"darwin-x86_64\":{\"url\":\"${BASE_URL}/${TAR_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
@@ -282,6 +286,7 @@ jobs:
           ZIP=$(find artifacts/windows-x64 -name "*.nsis.zip" -not -name "*.sig" -type f | head -1)
           if [ -n "$ZIP" ] && [ -n "$SIG" ]; then
             ZIP_NAME=$(basename "$ZIP")
+            ZIP_NAME="${ZIP_NAME// /.}"
             PLATFORMS="$PLATFORMS\"windows-x86_64\":{\"url\":\"${BASE_URL}/${ZIP_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
@@ -290,6 +295,7 @@ jobs:
           ZIP=$(find artifacts/windows-arm64 -name "*.nsis.zip" -not -name "*.sig" -type f | head -1)
           if [ -n "$ZIP" ] && [ -n "$SIG" ]; then
             ZIP_NAME=$(basename "$ZIP")
+            ZIP_NAME="${ZIP_NAME// /.}"
             PLATFORMS="$PLATFORMS\"windows-aarch64\":{\"url\":\"${BASE_URL}/${ZIP_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
