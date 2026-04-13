@@ -6,7 +6,6 @@ export default withMermaid(
     title: "HiveMind OS",
     description:
       "Privacy-first AI agent that lives on your machine. Your data, your rules.",
-    base: "/hivemind/",
     head: [
       ["link", { rel: "icon", href: "/favicon.png" }],
       ["meta", { name: "theme-color", content: "#7c3aed" }],
