@@ -286,11 +286,12 @@ export default function WorkflowCreationWizard(props: WorkflowCreationWizardProp
   const [templateNewName, setTemplateNewName] = createSignal('user/');
 
   const templateOptions = [
-    { id: 'system/email-triage', label: 'Email Triage', desc: 'Classify, draft response, human review, send' },
-    { id: 'system/scheduled-report', label: 'Scheduled Report', desc: 'Fetch data on schedule, AI analysis, deliver' },
-    { id: 'system/approval-workflow', label: 'Approval Workflow', desc: 'Submit request, AI analysis, human approval' },
-    { id: 'system/data-sync-pipeline', label: 'Data Sync Pipeline', desc: 'Fetch, transform, push with retry' },
-    { id: 'system/event-monitor', label: 'Event Monitor', desc: 'Watch events, AI analysis, notify on action needed' },
+    { id: 'system/email-triage', label: 'Email Triage', desc: 'Classify, draft responses, and route with human approval' },
+    { id: 'system/email-responder', label: 'Email Responder', desc: 'Draft a response to incoming emails, ask before sending' },
+    { id: 'system/approval-workflow', label: 'Approval Workflow', desc: 'Submit request, AI analysis, human approval chain' },
+    { id: 'system/software/major-feature', label: 'Major Feature', desc: 'Plan, implement, test, and review with specialized agents' },
+    { id: 'system/software/plan-and-implement', label: 'Plan & Implement', desc: 'Lightweight plan review and implementation review gates' },
+    { id: 'system/3d-print/design', label: '3D Print Design', desc: 'Design a printable part with iterative feedback and validation' },
   ];
 
   const handleTemplateSelect = async () => {

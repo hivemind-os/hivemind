@@ -1,0 +1,32 @@
+name: system/email-responder
+version: "1.0"
+description: "Automatically draft a response to incoming emails, ask the user before sending."
+mode: background
+
+steps:
+  - id: incoming-email
+    type: trigger
+    trigger:
+      type: incoming_message
+      channel_id: my_email_connector  # Replace with your email connector ID
+      ignore_replies: true
+    next:
+      - invoke_agent
+  - id: invoke_agent
+    type: task
+    task:
+      kind: invoke_agent
+      persona_id: system/general
+      task: |-
+        Read the following email and draft a response as best as you can. Use the ask_user tool to confirm with me before sending.
+
+        To: {{steps.incoming-email.outputs.to}}
+        From: {{steps.incoming-email.outputs.from}}
+        Subject: {{steps.incoming-email.outputs.subject}}
+        External ID: {{steps.incoming-email.outputs.external_id}}
+        Channel ID: {{steps.incoming-email.outputs.channel_id}}
+        Provider: {{steps.incoming-email.outputs.provider}}
+        ---
+        {{steps.incoming-email.outputs.body}}
+      async_exec: false
+      attachments: []

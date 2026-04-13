@@ -88,6 +88,7 @@ fn bundled_skill_dir(persona_id: &str) -> Option<&'static Dir<'static>> {
 /// (workflow_name, yaml_content) pairs for all bundled workflows.
 static BUNDLED_WORKFLOW_YAMLS: &[(&str, &str)] = &[
     ("system/email-triage", include_str!("../bundled-workflows/email-triage.yaml")),
+    ("system/email-responder", include_str!("../bundled-workflows/email-responder.yaml")),
     ("system/approval-workflow", include_str!("../bundled-workflows/approval-workflow.yaml")),
     ("system/software/major-feature", include_str!("../bundled-workflows/software-feature.yaml")),
     (
