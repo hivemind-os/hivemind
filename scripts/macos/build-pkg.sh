@@ -37,12 +37,12 @@ OUTPUT_DIR="$REPO_ROOT/dist"
 mkdir -p "$OUTPUT_DIR"
 
 # ── ONNX Runtime for x86_64 ──────────────────────────────────────────────────
-# ort v2.0.0-rc.12 ships no prebuilt ONNX Runtime binaries for x86_64-apple-darwin.
+# ort v2.0.0-rc.11 ships no prebuilt ONNX Runtime binaries for x86_64-apple-darwin.
 # For this target we download the official Microsoft release, patch its install
 # name to the final installation path (/usr/local/lib), link dynamically at
 # build time, and bundle the dylib inside the PKG payload so it is present at
 # runtime after installation.
-ORT_VERSION="1.24.2"
+ORT_VERSION="1.23.1"
 if [ "$ARCH" = "x86_64" ]; then
     ORT_CACHE_DIR="${HOME}/.cache/ort/onnxruntime-osx-x86_64-${ORT_VERSION}"
     if [ ! -d "$ORT_CACHE_DIR" ]; then
