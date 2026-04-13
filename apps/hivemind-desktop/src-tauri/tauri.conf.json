@@ -18,8 +18,7 @@
         "height": 860,
         "resizable": true,
         "fullscreen": false,
-        "dragDropEnabled": false,
-        "icon": "icons/icon.png"
+        "dragDropEnabled": false
       }
     ],
     "security": {
