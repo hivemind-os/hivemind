@@ -192,22 +192,47 @@ jobs:
           CXXFLAGS: /EHsc
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
-      - name: Sign executables
+      - name: Sign installer and repackage updater bundle
         if: env.HAS_WINDOWS_CERT == 'true'
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
           $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
-          [IO.File]::WriteAllBytes("cert.pfx", $certBytes)
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
 
-          $exes = Get-ChildItem -Recurse -Filter "*.exe" -Path "target/${{ matrix.target }}/release/bundle" |
-                  Where-Object { $_.Name -match "HiveMind|hive-daemon|hive-cli" }
-          foreach ($exe in $exes) {
-            signtool sign /fd SHA256 /t http://timestamp.digicert.com /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD $exe.FullName
+          $nsisDir = "target/${{ matrix.target }}/release/bundle/nsis"
+
+          # 1. Authenticode-sign the NSIS installer exe
+          $setupExe = Get-ChildItem -Path $nsisDir |
+                      Where-Object { $_.Name -like "*-setup.exe" } |
+                      Select-Object -First 1
+          if (-not $setupExe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
+          signtool sign /fd SHA256 /t http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD $setupExe.FullName
+          Write-Host "Authenticode-signed: $($setupExe.Name)"
+
+          # 2. Repackage the .nsis.zip so the updater delivers the signed exe
+          $oldZip = Get-ChildItem -Path $nsisDir |
+                    Where-Object { $_.Name -like "*.nsis.zip" } |
+                    Select-Object -First 1
+          if ($oldZip) {
+            Remove-Item $oldZip.FullName -Force
+            Remove-Item "$($oldZip.FullName).sig" -Force -ErrorAction SilentlyContinue
+            Compress-Archive -Path $setupExe.FullName -DestinationPath $oldZip.FullName
+            Write-Host "Repackaged updater bundle: $($oldZip.Name)"
+
+            # 3. Re-sign the .nsis.zip with Tauri Ed25519 key
+            Push-Location apps/hivemind-desktop
+            npx tauri signer sign "$($oldZip.FullName)"
+            Pop-Location
+            Write-Host "Ed25519-signed: $($oldZip.Name).sig"
           }
-          Remove-Item cert.pfx
+
+          Remove-Item $certPath -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
