@@ -464,6 +464,9 @@ const SettingsModal = (props: SettingsModalProps) => {
                       <div><dt>PID</dt><dd>{daemonStatus()?.pid ?? '—'}</dd></div>
                       <div><dt>Uptime</dt><dd>{daemonStatus() ? `${Math.round(daemonStatus()!.uptime_secs)}s` : '—'}</dd></div>
                     </dl>
+                    <button class="btn btn-secondary" onClick={() => {
+                      import('@tauri-apps/api/event').then(({ emit }) => emit('update:check', 'manual'));
+                    }}>Check for Updates</button>
 
                     <Show when={editConfig()} fallback={configLoadingFallback('configuration')}>
                         <>
