@@ -122,6 +122,22 @@ pub fn resolve_daemon_binary(explicit: Option<&Path>) -> Result<PathBuf> {
         return Ok(sibling);
     }
 
+    // On macOS, Tauri bundles resources in Contents/Resources/ inside the .app.
+    // The main exe lives at Contents/MacOS/<app>, so we walk up to Contents/
+    // and look inside Resources/ for the daemon binary.
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(resources_candidate) = current_exe
+            .parent() // Contents/MacOS/
+            .and_then(|macos_dir| macos_dir.parent()) // Contents/
+            .map(|contents| contents.join("Resources").join(&exe_name))
+        {
+            if resources_candidate.exists() {
+                return Ok(resources_candidate);
+            }
+        }
+    }
+
     if let Some(repo_root) = find_repo_root(&current_exe) {
         let debug_candidate = repo_root.join("target").join("debug").join(&exe_name);
         if debug_candidate.exists() {

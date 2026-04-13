@@ -5,6 +5,8 @@
 #
 # The PKG installs shared binaries system-wide:
 #   - /Applications/HiveMind OS.app               (Tauri desktop app)
+#       Contains daemon, CLI, and worker in Contents/Resources/ via
+#       Tauri resource bundling, so in-app updates deliver them too.
 #   - /usr/local/bin/hive-daemon                  (background daemon)
 #   - /usr/local/bin/hive-cli                     (CLI tool)
 #   - /usr/local/bin/hive-runtime-worker          (isolated inference worker)
@@ -123,63 +125,46 @@ sign_binary "$REPO_ROOT/target/$TARGET/release/hive-runtime-worker" \
     "com.hivemind.runtime-worker" \
     "$SCRIPT_DIR/entitlements-cli.plist"
 
-# 2. Build the Tauri desktop app.
+# 2. Stage signed binaries so Tauri bundles them as resources inside the .app.
+#    Tauri places resources in Contents/Resources/, which resolve_daemon_binary()
+#    knows how to find.
+echo "==> Staging daemon binaries for Tauri resource bundling..."
+DESKTOP_DIR="$REPO_ROOT/apps/hivemind-desktop"
+STAGING_DIR="$DESKTOP_DIR/src-tauri/bin"
+mkdir -p "$STAGING_DIR"
+# Ensure staged binaries are cleaned up even on failure.
+cleanup_staging() { rm -rf "$STAGING_DIR"; }
+trap cleanup_staging EXIT
+for bin in hive-daemon hive-cli hive-runtime-worker; do
+    cp "$REPO_ROOT/target/$TARGET/release/$bin" "$STAGING_DIR/$bin"
+    echo "  Staged $bin"
+done
+
+# 3. Build the Tauri desktop app with the macOS resource config overlay.
 # When SIGN_IDENTITY is a real certificate, pass it as APPLE_SIGNING_IDENTITY so
 # Tauri codesigns the .app bundle (using the entitlements in tauri.conf.json).
 echo "==> Building Tauri desktop app..."
-cd "$REPO_ROOT/apps/hivemind-desktop"
+cd "$DESKTOP_DIR"
 npm ci --prefer-offline
+TAURI_BUILD_ARGS=(--target "$TARGET" --config src-tauri/tauri.macos-resources.conf.json --features service-manager)
 if [ "$SIGN_IDENTITY" != "-" ]; then
-    APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" npx tauri build --target "$TARGET" --features service-manager
+    APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" npx tauri build "${TAURI_BUILD_ARGS[@]}"
 else
-    npx tauri build --target "$TARGET" --features service-manager
+    npx tauri build "${TAURI_BUILD_ARGS[@]}"
 fi
 cd "$REPO_ROOT"
 
-# 3. Inject signed daemon/cli/worker into .app so the Tauri updater
-#    delivers them alongside the desktop app.
-echo "==> Injecting daemon binaries into .app bundle..."
+# Verify the built .app bundle signature (catches any resource/signing issues early).
 APP_BUNDLE=$(find "$REPO_ROOT/target/$TARGET/release/bundle" -name "HiveMind OS.app" -type d | head -1)
-if [ -z "$APP_BUNDLE" ]; then
-    echo "ERROR: Could not find HiveMind OS.app bundle"
-    exit 1
-fi
-for bin in hive-daemon hive-cli hive-runtime-worker; do
-    cp "$REPO_ROOT/target/$TARGET/release/$bin" "$APP_BUNDLE/Contents/MacOS/"
-    echo "  Copied $bin -> .app/Contents/MacOS/"
-done
-
-# Re-sign the app bundle (adding files invalidates the existing signature).
-# Sign the top-level bundle only — nested binaries are already individually
-# signed above; --deep would re-sign them and potentially strip entitlements.
-echo "==> Re-signing .app bundle..."
-ENTITLEMENTS_APP="$REPO_ROOT/apps/hivemind-desktop/src-tauri/entitlements.mac.plist"
-SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --entitlements "$ENTITLEMENTS_APP")
-if $USE_HARDENED_RUNTIME; then
-    SIGN_ARGS+=(--options runtime)
-fi
-codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
-codesign --verify --deep --strict "$APP_BUNDLE"
-echo "  Signature verified"
-
-# 4. Re-create the updater .app.tar.gz with the modified bundle.
-#    Delete the originals Tauri created (they lack the daemon binaries).
-BUNDLE_DIR="$REPO_ROOT/target/$TARGET/release/bundle/macos"
-rm -f "$BUNDLE_DIR"/*.app.tar.gz "$BUNDLE_DIR"/*.app.tar.gz.sig
-APP_NAME=$(basename "$APP_BUNDLE")
-(cd "$BUNDLE_DIR" && tar -czf "$APP_NAME.tar.gz" "$APP_NAME")
-echo "  Created $APP_NAME.tar.gz"
-
-# Re-sign with Tauri Ed25519 key for updater signature verification.
-if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-    cd "$REPO_ROOT/apps/hivemind-desktop"
-    npx tauri signer sign "$BUNDLE_DIR/$APP_NAME.tar.gz"
-    cd "$REPO_ROOT"
-    echo "  Ed25519-signed $APP_NAME.tar.gz"
+if [ -n "$APP_BUNDLE" ]; then
+    echo "==> Verifying .app bundle signature..."
+    codesign --verify --deep --strict "$APP_BUNDLE"
+    echo "  Signature verified"
 fi
 
 # Rename updater artifacts to include architecture so aarch64 and x86_64
 # don't collide when uploaded to the same GitHub release.
+BUNDLE_DIR="$REPO_ROOT/target/$TARGET/release/bundle/macos"
 for f in "$BUNDLE_DIR"/*.app.tar.gz "$BUNDLE_DIR"/*.app.tar.gz.sig; do
     [ -f "$f" ] || continue
     NEW_NAME=$(echo "$(basename "$f")" | sed "s/\.app\.tar\.gz/_${ARCH}.app.tar.gz/")
@@ -187,7 +172,7 @@ for f in "$BUNDLE_DIR"/*.app.tar.gz "$BUNDLE_DIR"/*.app.tar.gz.sig; do
     echo "  Renamed $(basename "$f") -> $NEW_NAME"
 done
 
-# 5. Assemble the PKG payload
+# 4. Assemble the PKG payload
 echo "==> Assembling PKG payload..."
 mkdir -p "$PKG_ROOT/Applications"
 mkdir -p "$PKG_ROOT/usr/local/bin"
@@ -204,14 +189,17 @@ if [ "$ARCH" = "x86_64" ]; then
         "com.hivemind.onnxruntime"
 fi
 
-# APP_BUNDLE is already set above (step 3) and now includes daemon binaries.
-
+APP_BUNDLE=$(find "$REPO_ROOT/target/$TARGET/release/bundle" -name "HiveMind OS.app" -type d | head -1)
+if [ -z "$APP_BUNDLE" ]; then
+    echo "ERROR: Could not find HiveMind OS.app bundle"
+    exit 1
+fi
 cp -R "$APP_BUNDLE" "$PKG_ROOT/Applications/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-daemon" "$PKG_ROOT/usr/local/bin/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-cli" "$PKG_ROOT/usr/local/bin/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-runtime-worker" "$PKG_ROOT/usr/local/bin/"
 
-# 6. Build the component package
+# 5. Build the component package
 #    Generate a component plist and set BundleIsRelocatable to false so that
 #    macOS Installer doesn't move the .app to wherever Spotlight/PackageKit
 #    found an existing copy with the same bundle identifier.
@@ -234,7 +222,7 @@ pkgbuild \
 
 rm -f "$COMPONENT_PLIST"
 
-# 7. Build the distribution (product) archive, then patch the Distribution XML
+# 6. Build the distribution (product) archive, then patch the Distribution XML
 #    to add <domains> for system-wide install.  productbuild's auto-generated
 #    Distribution lacks this element, which can cause "incompatible" errors.
 echo "==> Building distribution PKG..."

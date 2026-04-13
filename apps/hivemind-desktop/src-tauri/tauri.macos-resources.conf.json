@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "bin/hive-daemon": "hive-daemon",
+      "bin/hive-cli": "hive-cli",
+      "bin/hive-runtime-worker": "hive-runtime-worker"
+    }
+  }
+}
