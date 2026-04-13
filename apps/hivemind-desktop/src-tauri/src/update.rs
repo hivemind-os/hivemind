@@ -23,7 +23,7 @@ pub fn spawn_update_timer(app: &AppHandle) {
         // Wait before the first check so the UI is fully loaded.
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         loop {
-            let _ = handle.emit("update:check", ());
+            let _ = handle.emit("update:check", "automatic");
             // Re-check every 6 hours.
             tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
         }
@@ -33,7 +33,7 @@ pub fn spawn_update_timer(app: &AppHandle) {
 /// Emit `update:check` once so the frontend performs an immediate check.
 /// Called from the system tray "Check for Updates" menu item.
 pub fn trigger_update_check(app: &AppHandle) {
-    let _ = app.emit("update:check", ());
+    let _ = app.emit("update:check", "manual");
     // Show/focus the main window so the user sees the result.
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();

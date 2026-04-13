@@ -186,6 +186,9 @@ const App = () => {
   const [showSessionPermsDialog, setShowSessionPermsDialog] = createSignal(false);
   const [showUpdateDialog, setShowUpdateDialog] = createSignal(false);
   const [pendingUpdate, setPendingUpdate] = createSignal<Update | null>(null);
+  const [updateCheckState, setUpdateCheckState] = createSignal<'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error' | 'unavailable'>('idle');
+  const [updateCheckError, setUpdateCheckError] = createSignal<string | null>(null);
+  let updateCheckRequestId = 0;
   const [sessionPerms, setSessionPerms] = createSignal<{ rules: { tool_pattern: string; scope: string; decision: string }[] }>({ rules: [] });
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [activeTab, setActiveTab] = createSignal<'chat' | 'workspace' | 'stage' | 'workflows' | 'events' | 'processes' | 'config' | 'mcp'>('chat');
@@ -2513,16 +2516,43 @@ const App = () => {
 
     // ── Auto-update: listen for backend-triggered check requests ──
     let updateUnlisten: UnlistenFn | undefined;
-    const updateCheckPromise = listen('update:check', async () => {
+    const updateCheckPromise = listen<string>('update:check', async (event) => {
+      const source = event.payload;
+      const isManual = source === 'manual';
+      const requestId = ++updateCheckRequestId;
+
+      if (isManual) {
+        setPendingUpdate(null);
+        setUpdateCheckError(null);
+        setUpdateCheckState('checking');
+        setShowUpdateDialog(true);
+      }
+
       try {
         const { check } = await import('@tauri-apps/plugin-updater');
+        if (requestId !== updateCheckRequestId) return; // stale request
         const update = await check();
+        if (requestId !== updateCheckRequestId) return; // stale request
         if (update) {
           setPendingUpdate(update);
+          setUpdateCheckState('update-available');
           setShowUpdateDialog(true);
+        } else if (isManual) {
+          setUpdateCheckState('up-to-date');
         }
-      } catch {
-        // Updater not available (dev builds) or network error — ignore silently.
+      } catch (e: any) {
+        if (requestId !== updateCheckRequestId) return; // stale request
+        if (isManual) {
+          const msg = e?.message ?? String(e);
+          // Distinguish plugin-not-available from network/server errors
+          if (msg.includes('not found') || msg.includes('not implemented') || msg.includes('plugin')) {
+            setUpdateCheckState('unavailable');
+          } else {
+            setUpdateCheckError(msg);
+            setUpdateCheckState('error');
+          }
+        }
+        // Automatic checks still fail silently.
       }
     }).then((fn) => { updateUnlisten = fn; return fn; });
     onCleanup(() => { updateCheckPromise.then(fn => fn()); });
@@ -3380,7 +3410,12 @@ const App = () => {
       <UpdateDialog
         open={showUpdateDialog()}
         update={pendingUpdate()}
-        onClose={() => setShowUpdateDialog(false)}
+        checkState={updateCheckState()}
+        checkError={updateCheckError()}
+        onClose={() => { setShowUpdateDialog(false); setUpdateCheckState('idle'); }}
+        onRetry={() => {
+          const _ = import('@tauri-apps/api/event').then(({ emit }) => emit('update:check', 'manual'));
+        }}
       />
 
     </main>
