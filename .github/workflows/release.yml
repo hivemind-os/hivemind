@@ -309,6 +309,26 @@ jobs:
           echo "Generated latest.json for ${VERSION}:"
           cat artifacts/latest.json
 
+      - name: Create stable-named download aliases
+        run: |
+          mkdir -p artifacts/stable
+          # macOS
+          for arch in aarch64 x86_64; do
+            PKG=$(find "artifacts/macos-${arch}" -name "*-signed.pkg" -type f 2>/dev/null | head -1)
+            [ -n "$PKG" ] && cp "$PKG" "artifacts/stable/HiveMind-${arch}-signed.pkg"
+            PKG=$(find "artifacts/macos-${arch}" -name "*.pkg" -not -name "*-signed*" -not -name "*-component*" -type f 2>/dev/null | head -1)
+            [ -n "$PKG" ] && cp "$PKG" "artifacts/stable/HiveMind-${arch}.pkg"
+          done
+          # Windows
+          for arch_label in x64:x64 arm64:arm64; do
+            label="${arch_label%%:*}"
+            dir_name="windows-${label}"
+            EXE=$(find "artifacts/${dir_name}" -name "*-setup.exe" -type f 2>/dev/null | head -1)
+            [ -n "$EXE" ] && cp "$EXE" "artifacts/stable/HiveMind-${label}-setup.exe"
+          done
+          echo "Stable aliases:"
+          ls -la artifacts/stable/ || echo "(none)"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -320,4 +340,5 @@ jobs:
             artifacts/**/*.exe
             artifacts/**/*.nsis.zip
             artifacts/**/*.app.tar.gz
+            artifacts/stable/*
             artifacts/latest.json

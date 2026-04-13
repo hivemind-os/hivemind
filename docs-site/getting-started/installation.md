@@ -8,10 +8,10 @@ Pick the installer for your platform:
 
 | Platform | Download | Format |
 |---|---|---|
-| **macOS** (Apple Silicon) | [HiveMind-aarch64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-0.1.3-aarch64-signed.pkg) | `.pkg` |
-| **macOS** (Intel) | [HiveMind-x86_64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-0.1.3-x86_64-signed.pkg) | `.pkg` |
-| **Windows** (x64) | [HiveMind.OS-x64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind.OS_0.1.3_x64-setup.exe) | `.exe` |
-| **Windows** (ARM64) | [HiveMind.OS-arm64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind.OS_0.1.3_arm64-setup.exe) | `.exe` |
+| **macOS** (Apple Silicon) | [HiveMind-aarch64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-aarch64-signed.pkg) | `.pkg` |
+| **macOS** (Intel) | [HiveMind-x86_64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-x86_64-signed.pkg) | `.pkg` |
+| **Windows** (x64) | [HiveMind-x64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-x64-setup.exe) | `.exe` |
+| **Windows** (ARM64) | [HiveMind-arm64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-arm64-setup.exe) | `.exe` |
 
 All installers are available on the [GitHub Releases page](https://github.com/hivemind-os/hivemind/releases).
 
