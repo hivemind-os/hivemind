@@ -268,7 +268,7 @@ async fn daemon_stop() -> Result<(), String> {
     })
     .await
     .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+    .map_err(|error: anyhow::Error| error.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
