@@ -8,36 +8,25 @@ Pick the installer for your platform:
 
 | Platform | Download | Format |
 |---|---|---|
-| **macOS** (Apple Silicon & Intel) | [HiveMindOS-latest.dmg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMindOS.dmg) | `.dmg` |
-| **Windows** | [HiveMindOS-latest.msi](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMindOS.msi) | `.msi` |
-| **Linux (AppImage)** | [HiveMindOS-latest.AppImage](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMindOS.AppImage) | `.AppImage` |
-| **Linux (Debian)** | [hivemind-os-latest.deb](https://github.com/hivemind-os/hivemind/releases/latest/download/hivemind-os.deb) | `.deb` |
+| **macOS** (Apple Silicon) | [HiveMind-aarch64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-0.1.3-aarch64-signed.pkg) | `.pkg` |
+| **macOS** (Intel) | [HiveMind-x86_64-signed.pkg](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind-0.1.3-x86_64-signed.pkg) | `.pkg` |
+| **Windows** (x64) | [HiveMind.OS-x64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind.OS_0.1.3_x64-setup.exe) | `.exe` |
+| **Windows** (ARM64) | [HiveMind.OS-arm64-setup.exe](https://github.com/hivemind-os/hivemind/releases/latest/download/HiveMind.OS_0.1.3_arm64-setup.exe) | `.exe` |
 
-::: warning Placeholder links
-These download URLs are placeholders. Check the [GitHub Releases page](https://github.com/hivemind-os/hivemind/releases) for actual binaries once published.
-:::
+All installers are available on the [GitHub Releases page](https://github.com/hivemind-os/hivemind/releases).
 
 ## Install
 
 ::: code-group
 
 ```sh [macOS]
-# Open the .dmg and drag HiveMind OS to Applications
-open HiveMindOS-latest.dmg
+# Open the downloaded .pkg installer and follow the prompts
+open HiveMind-*-signed.pkg
 ```
 
 ```sh [Windows]
-# Run the .msi installer — follow the wizard prompts
-.\HiveMindOS-latest.msi
-```
-
-```sh [Linux (AppImage)]
-chmod +x HiveMindOS-latest.AppImage
-./HiveMindOS-latest.AppImage
-```
-
-```sh [Linux (Debian)]
-sudo dpkg -i hivemind-os-latest.deb
+# Run the NSIS installer — follow the wizard prompts
+.\HiveMind.OS_*-setup.exe
 ```
 
 :::
