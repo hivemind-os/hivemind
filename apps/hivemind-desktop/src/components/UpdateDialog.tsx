@@ -45,6 +45,15 @@ export function UpdateDialog(props: UpdateDialogProps) {
     setProgress(0);
 
     try {
+      // Stop the daemon before updating so the installer can replace
+      // binaries that may be in use (especially on Windows).
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('daemon_stop');
+      } catch {
+        // Daemon might already be stopped — continue with update.
+      }
+
       let totalLen = 0;
       let downloaded = 0;
       await props.update.downloadAndInstall((event) => {

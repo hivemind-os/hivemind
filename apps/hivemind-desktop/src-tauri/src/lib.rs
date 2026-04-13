@@ -254,10 +254,21 @@ async fn daemon_start() -> Result<hive_contracts::DaemonStatus, String> {
 #[tauri::command(rename_all = "snake_case")]
 async fn daemon_stop() -> Result<(), String> {
     let url = daemon_url(None).map_err(|error| error.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || stop_daemon_process(&url))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_daemon_process(&url)?;
+        // Wait for the daemon to fully exit so callers (e.g. the updater)
+        // can safely replace the binary on disk.
+        for _ in 0..25 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if fetch_daemon_status(&url).is_err() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
