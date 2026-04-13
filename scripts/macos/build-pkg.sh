@@ -110,6 +110,16 @@ else
 fi
 cd "$REPO_ROOT"
 
+# Rename updater artifacts to include architecture so aarch64 and x86_64
+# don't collide when uploaded to the same GitHub release.
+BUNDLE_DIR="$REPO_ROOT/target/$TARGET/release/bundle/macos"
+for f in "$BUNDLE_DIR"/*.app.tar.gz "$BUNDLE_DIR"/*.app.tar.gz.sig; do
+    [ -f "$f" ] || continue
+    NEW_NAME=$(echo "$(basename "$f")" | sed "s/\.app\.tar\.gz/_${ARCH}.app.tar.gz/")
+    mv "$f" "$BUNDLE_DIR/$NEW_NAME"
+    echo "  Renamed $(basename "$f") -> $NEW_NAME"
+done
+
 # 2. Build daemon and CLI
 echo "==> Building hive-daemon and hive-cli..."
 cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
