@@ -19,13 +19,17 @@ This skill includes `scripts/pdf_to_images.py` which handles PDF processing.
 
 ### Step 1: Install Dependencies
 
-This skill requires Python 3 and the `pymupdf` package. Before running any scripts, install the required packages using the **same Python interpreter** that will run the script:
+The bundled script uses `uv run` to manage its own dependencies (including `pymupdf`) automatically. No separate install step is needed — `uv` is already available on this system.
 
+Run a quick check to confirm:
 ```
-python -m pip install -r "<skill_dir>/requirements.txt"
+uv run --version
 ```
 
-If the install command fails (e.g., pip is not available, network is restricted, or the environment is sandboxed), **stop and report to the user** that this environment cannot run PDF OCR/rendering and suggest they install pymupdf manually. Do not proceed to later steps.
+If `uv` is not found, fall back to installing pymupdf manually:
+```
+python -m pip install pymupdf
+```
 
 ### Step 2: Detect Scanned PDFs
 
@@ -36,7 +40,7 @@ When `filesystem.read_document` returns an error like "no text could be extracte
 Use the bundled script's `extract` mode to check whether the PDF has an embedded text layer. This is **not OCR** — it reads text that is already encoded in the PDF, which succeeds for digitally-created PDFs but fails for pure scans:
 
 ```
-python <skill_dir>/scripts/pdf_to_images.py extract "<pdf_path>"
+uv run <skill_dir>/scripts/pdf_to_images.py extract "<pdf_path>"
 ```
 
 Check the `has_text` field in the JSON output. If `true`, use the extracted text directly.
@@ -46,13 +50,13 @@ Check the `has_text` field in the JSON output. If `true`, use the extracted text
 If text extraction yields no results, render the PDF pages as images for vision analysis:
 
 ```
-python <skill_dir>/scripts/pdf_to_images.py render "<pdf_path>" "<output_dir>" --dpi 300
+uv run <skill_dir>/scripts/pdf_to_images.py render "<pdf_path>" "<output_dir>" --dpi 300
 ```
 
 Where `<output_dir>` is a temporary directory for the images. For large PDFs, process specific pages:
 
 ```
-python <skill_dir>/scripts/pdf_to_images.py render "<pdf_path>" "<output_dir>" --dpi 300 --pages 1-5
+uv run <skill_dir>/scripts/pdf_to_images.py render "<pdf_path>" "<output_dir>" --dpi 300 --pages 1-5
 ```
 
 The output is a JSON object listing the generated image files:

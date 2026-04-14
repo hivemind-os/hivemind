@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = ["pymupdf"]
+# ///
 """Render PDF pages to images or extract embedded text.
 
 This script is bundled with the pdf-ocr skill for the Tax Advisor persona.
@@ -6,8 +10,11 @@ It uses PyMuPDF (pymupdf) to handle image-based/scanned PDFs that cannot
 be read by text-only extractors.
 
 Usage:
-    # Render pages as images (for vision model analysis)
-    python pdf_to_images.py render <pdf_path> <output_dir> [--dpi 300] [--pages 1-3]
+    # Preferred: run via uv (handles pymupdf dependency automatically)
+    uv run pdf_to_images.py render <pdf_path> <output_dir> [--dpi 300] [--pages 1-3]
+
+    # Fallback: standard python (pymupdf must already be installed)
+    python3 pdf_to_images.py render <pdf_path> <output_dir> [--dpi 300] [--pages 1-3]
 
     # Extract embedded text from PDF pages (not OCR — reads the text layer)
     python pdf_to_images.py extract <pdf_path> [--pages 1-3]

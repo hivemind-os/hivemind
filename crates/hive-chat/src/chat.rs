@@ -6386,8 +6386,9 @@ impl ChatService {
                             )
                             .await;
                         }
-                        if let Err(e) = broadcast_tx.send(event.into()) {
-                            tracing::warn!(error = %e, "failed to broadcast loop event");
+                        if broadcast_tx.send(event.into()).is_err() {
+                            // All subscribers have dropped — session stream closed, nothing to do.
+                            tracing::debug!("failed to broadcast loop event: no active subscribers");
                         }
                     }
                 });
