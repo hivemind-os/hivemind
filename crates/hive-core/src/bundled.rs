@@ -67,6 +67,10 @@ static BUNDLED_SKILLS_SYSTEM_GENERAL: Dir<'_> =
 static BUNDLED_SKILLS_3DPRINT_CAD_DESIGNER: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/bundled-personas/system/3d-print/cad-designer/skills");
 
+/// Embedded skills directory for the `system/3d-print/mesh-analyst` persona.
+static BUNDLED_SKILLS_3DPRINT_MESH_ANALYST: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/bundled-personas/system/3d-print/mesh-analyst/skills");
+
 /// Embedded skills directory for the `system/finance/tax-advisor` persona.
 static BUNDLED_SKILLS_FINANCE_TAX_ADVISOR: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/bundled-personas/system/finance/tax-advisor/skills");
@@ -79,6 +83,7 @@ fn bundled_skill_dir(persona_id: &str) -> Option<&'static Dir<'static>> {
     match persona_id {
         "system/general" => Some(&BUNDLED_SKILLS_SYSTEM_GENERAL),
         "system/3d-print/cad-designer" => Some(&BUNDLED_SKILLS_3DPRINT_CAD_DESIGNER),
+        "system/3d-print/mesh-analyst" => Some(&BUNDLED_SKILLS_3DPRINT_MESH_ANALYST),
         "system/finance/tax-advisor" => Some(&BUNDLED_SKILLS_FINANCE_TAX_ADVISOR),
         // To add skills for more bundled personas, add match arms here.
         _ => None,
