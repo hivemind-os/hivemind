@@ -1,5 +1,5 @@
 import { For, Show, Index, createSignal, createEffect, createMemo } from 'solid-js';
-import Handlebars from 'handlebars';
+import { invoke } from '@tauri-apps/api/core';
 import type { PromptTemplate } from '../../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '~/ui/dialog';
 import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
@@ -8,6 +8,8 @@ import { evaluateFieldCondition } from '~/lib/formConditions';
 
 export interface PromptParameterDialogProps {
   template: PromptTemplate;
+  /** ID of the persona that owns this template — required for server-side rendering. */
+  persona_id: string;
   /** Called with the rendered prompt text and raw parameter values when the user submits. */
   onSubmit: (renderedText: string, params: Record<string, any>) => void;
   onCancel: () => void;
@@ -66,13 +68,21 @@ function buildDefaults(fields: SchemaFieldInfo[]): Record<string, any> {
   return defaults;
 }
 
-/** Render a Handlebars template with the given values, matching server-side behavior. */
-function renderWithHandlebars(template: string, values: Record<string, any>): string {
+/** Render a prompt template via the backend Tauri command (avoids CSP unsafe-eval). */
+async function renderViaBackend(
+  persona_id: string,
+  prompt_id: string,
+  params: Record<string, any>,
+): Promise<string> {
   try {
-    const compiled = Handlebars.compile(template, { strict: true });
-    return compiled(values);
+    const result = await invoke<{ rendered: string }>('render_prompt_template', {
+      persona_id,
+      prompt_id,
+      params,
+    });
+    return result.rendered;
   } catch (e: any) {
-    return `(template error: ${e.message})`;
+    return `(template error: ${e})`;
   }
 }
 
@@ -81,21 +91,26 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
   const [values, setValues] = createSignal<Record<string, any>>(buildDefaults(fields()));
   const [jsonMode, setJsonMode] = createSignal(false);
   const [jsonText, setJsonText] = createSignal('{}');
+  const [preview, setPreview] = createSignal('');
+  const [submitting, setSubmitting] = createSignal(false);
 
   createEffect(() => {
     setValues(buildDefaults(fields()));
     setJsonText(JSON.stringify(buildDefaults(fields()), null, 2));
   });
 
+  // Refresh preview whenever parameter values change.
+  createEffect(() => {
+    const vals = values();
+    void renderViaBackend(props.persona_id, props.template.id, vals).then(setPreview);
+  });
+
   const updateValue = (name: string, value: any) => {
     setValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  const preview = createMemo(() => {
-    return renderWithHandlebars(props.template.template, values());
-  });
-
   const canSubmit = createMemo(() => {
+    if (submitting()) return false;
     for (const f of fields()) {
       if (f.required) {
         const v = values()[f.name];
@@ -105,9 +120,14 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
     return true;
   });
 
-  const handleSubmit = () => {
-    const rendered = renderWithHandlebars(props.template.template, values());
-    props.onSubmit(rendered, { ...values() });
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const rendered = await renderViaBackend(props.persona_id, props.template.id, values());
+      props.onSubmit(rendered, { ...values() });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const inputSt = "padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;width:100%;box-sizing:border-box;";
@@ -299,7 +319,7 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
 
       <DialogFooter class="flex-row gap-2">
         <Button variant="outline" onClick={() => props.onCancel()}>Cancel</Button>
-        <Button disabled={!canSubmit()} onClick={handleSubmit}>
+        <Button disabled={!canSubmit()} onClick={() => void handleSubmit()}>
           {props.submitLabel ?? 'Send'}
         </Button>
       </DialogFooter>

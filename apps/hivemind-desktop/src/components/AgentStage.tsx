@@ -1971,6 +1971,7 @@ const AgentStage = (props: AgentStageProps) => {
           return (
             <PromptParameterDialog
               template={d.template}
+              persona_id={d.persona.id}
               submitLabel="Send to Agent"
               onSubmit={(rendered, params) => {
                 const pid = d.persona.id;
