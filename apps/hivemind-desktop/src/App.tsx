@@ -330,10 +330,42 @@ const App = () => {
         'stage:event',
         (ev) => {
           if (ev.payload.session_id !== sid) return;
-          // Questions are now delivered as ChatMessage entries in the session
-          // snapshot (via the same SSE path as regular messages), so we no
-          // longer extract them from stage:event.  The listener stays active
-          // for agent telemetry, status updates, and streaming UX.
+          const event = ev.payload.event;
+          if (!event?.type) return;
+
+          // Sub-agent events (e.g. from workflow-spawned agents) flow through
+          // stage:event but NOT through the chat:event SSE stream.  Handle
+          // tool approvals and questions here so they aren't silently dropped.
+          if (event.type === 'agent_output') {
+            const inner = event.event;
+            if (!inner) return;
+            if (inner.type === 'user_interaction_required') {
+              completeActivity('inference');
+              pushActivity({ id: 'feedback', kind: 'feedback', label: 'Waiting for your input' });
+              if (inner.request_id) {
+                setPendingToolApproval({
+                  request_id: inner.request_id,
+                  tool_id: inner.tool_id,
+                  input: inner.input,
+                  reason: inner.reason,
+                });
+              }
+            } else if (inner.type === 'question_asked') {
+              if (inner.request_id) {
+                addPendingQuestion({
+                  request_id: inner.request_id,
+                  text: inner.text ?? '',
+                  choices: inner.choices ?? [],
+                  allow_freeform: inner.allow_freeform !== false,
+                  multi_select: inner.multi_select === true,
+                  agent_id: event.agent_id,
+                  agent_name: inner.agent_id,
+                  session_id: sid,
+                  message: inner.message,
+                });
+              }
+            }
+          }
         },
       );
 
@@ -2290,6 +2322,62 @@ const App = () => {
             // Also sync to pick up the question message in the session snapshot
             void syncChatState(sid);
           }
+        } else if (event.type === 'agent_output' && event.event) {
+          // Supervisor events from workflow sub-agents arrive on the chat
+          // SSE stream as SessionEvent::Supervisor (internally tagged with
+          // "type" field) rather than the externally-tagged LoopEvent shape.
+          const inner = event.event;
+          if (inner.type === 'model_call_started') {
+            if (!isStreaming()) beginStreamingState();
+            pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
+          } else if (inner.type === 'model_call_completed') {
+            completeActivity('inference');
+          } else if (inner.type === 'tool_call_started') {
+            const tool_id = inner.tool_id ?? 'unknown';
+            const actId = `tool:${tool_id}:${Date.now()}`;
+            pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
+            recordToolCallStart(actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+          } else if (inner.type === 'tool_call_completed') {
+            const tool_id = inner.tool_id ?? 'unknown';
+            const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
+            if (match) completeActivity(match.id, inner.is_error);
+            recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false);
+            pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
+          } else if (inner.type === 'user_interaction_required') {
+            completeActivity('inference');
+            pushActivity({ id: 'feedback', kind: 'feedback', label: 'Waiting for your input' });
+            if (inner.request_id) {
+              setPendingToolApproval({
+                request_id: inner.request_id,
+                tool_id: inner.tool_id,
+                input: inner.input,
+                reason: inner.reason,
+              });
+            }
+          } else if (inner.type === 'question_asked') {
+            completeActivity('inference');
+            pushActivity({ id: 'feedback', kind: 'feedback', label: 'Waiting for your input' });
+            if (inner.request_id) {
+              addPendingQuestion({
+                request_id: inner.request_id,
+                session_id: sid,
+                text: inner.text ?? '',
+                choices: inner.choices ?? [],
+                allow_freeform: inner.allow_freeform !== false,
+                multi_select: inner.multi_select === true,
+                agent_id: event.agent_id,
+                agent_name: inner.agent_id,
+              });
+              void syncChatState(sid);
+            }
+          } else if (inner.type === 'completed' || inner.type === 'failed') {
+            syncChatStateAfterStream(sid);
+          }
+        } else if (event.type === 'agent_status_changed' || event.type === 'agent_task_assigned') {
+          if (!isStreaming()) beginStreamingState();
+          pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
+        } else if (event.type === 'agent_completed' || event.type === 'all_complete') {
+          syncChatStateAfterStream(sid);
         }
       });
 
