@@ -1843,7 +1843,7 @@ impl ShellCommandTool {
                     "properties": {
                         "command": { "type": "string", "description": "Shell command to execute." },
                         "working_dir": { "type": "string", "description": "Optional working directory." },
-                        "timeout_secs": { "type": "number", "description": "Timeout in seconds (default 30)." },
+                        "timeout_secs": { "type": "number", "description": "Timeout in seconds (default 300)." },
                         "shell": { "type": "string", "description": format!("Optional shell to use for execution (available: {}). Defaults to '{}'.", available_names, shells.default_shell) }
                     },
                     "required": ["command"]
@@ -1960,7 +1960,7 @@ impl Tool for ShellCommandTool {
                 }
             }
 
-            let timeout_secs = input.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(30);
+            let timeout_secs = input.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(300);
 
             // Resolve the shell to use for this invocation.
             let shell_info = if let Some(shell_name) = input.get("shell").and_then(|v| v.as_str()) {

@@ -2846,7 +2846,7 @@ mod tests {
                     "properties": {
                         "command": { "type": "string", "description": "Shell command to execute." },
                         "working_dir": { "type": "string", "description": "Optional working directory." },
-                        "timeout_secs": { "type": "number", "description": "Timeout in seconds (default 30)." }
+                        "timeout_secs": { "type": "number", "description": "Timeout in seconds (default 300)." }
                     },
                     "required": ["command"]
                 }),
