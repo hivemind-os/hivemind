@@ -34,7 +34,7 @@ preferred_models:
   - "claude-opus*"
   - "claude-sonnet-4*"
   - "gpt-5*"
-  - "!*mini*"
+  - "!*nano*"
   - "!*codex*"
 prompts:
   - id: build-poc

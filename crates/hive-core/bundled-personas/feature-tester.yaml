@@ -50,5 +50,5 @@ preferred_models:
   - "gpt-5*-codex*"
   - "claude-opus*"
   - "claude-sonnet-4*"
-  - "!*mini*"
+  - "!*nano*"
 prompts: []
