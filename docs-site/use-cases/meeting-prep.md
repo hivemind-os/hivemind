@@ -4,10 +4,7 @@ Walk into every meeting prepared — with context on attendees, agenda summaries
 
 ```mermaid
 flowchart LR
-    A["📅 Calendar event"] --> B["👥 Check attendees"]
-    B --> C["📨 Search emails"]
-    C --> D["📋 Compile brief"]
-    D --> E["🔔 Notify you"]
+    A["⏰ Morning trigger"] --> B["🤖 AI checks calendar\n& emails"] --> C["📋 Briefs\ndelivered"]
 ```
 
 ## What You'll Need
@@ -49,31 +46,15 @@ If you haven't connected email yet, go to **Settings → Connectors**, click **A
 4. Click **Add Trigger** and select **Schedule**.
 5. Set it to run **weekday mornings** — early enough to give you time to read the briefs before your first meeting. A good default is 7:30 AM on weekdays (cron: `30 7 * * 1-5`). The app shows a plain-English preview so you can confirm.
 
-### Add the Steps
+### Add the Step
 
-**Step 1 — List today's meetings:**
+6. Click **Add Step** and choose **Invoke Agent**.
+7. You can use the default persona or create a dedicated "Meeting Prep" persona. Make sure your calendar and email connectors allow this persona — go to **Settings → Connectors**, edit each connector, and add the persona to its **Allowed Personas** list.
+8. In the instructions, type:
 
-6. Click **Add Step** and choose **Call Tool**.
-7. Select **List Events** (under the Calendar category).
-8. Configure it to pull events for today.
+> Check my calendar for today's meetings. For each meeting, search my recent emails involving the attendees for relevant context — ongoing projects, open questions, recent decisions. Then compile a preparation brief for each meeting that includes: meeting name and time, attendee list, summary of relevant email context, and 3–5 suggested talking points. Send the compiled briefs to me via email.
 
-**Step 2 — Search related emails:**
-
-9. Click **Add Step** and choose **Invoke Agent**.
-10. In the instructions, type: `For each meeting on today's calendar, search recent emails involving the attendees. Look for anything relevant — ongoing projects, open questions, recent decisions.`
-11. You can use the default persona or create a dedicated "Meeting Prep" persona.
-
-**Step 3 — Compile the brief:**
-
-12. Click **Add Step** and choose **Invoke Agent**.
-13. In the instructions, type: `Create a meeting preparation brief for each of today's meetings. Include: meeting name and time, attendee list, summary of recent email context, and 3–5 suggested talking points.`
-
-**Step 4 — Deliver the brief:**
-
-14. Click **Add Step** and choose **Signal Agent**.
-15. This sends the compiled brief as a notification inside HiveMind OS.
-
-16. Click **Save** and toggle the workflow to **Enabled**.
+9. Click **Save** and toggle the workflow to **Enabled**.
 
 ---
 
@@ -124,14 +105,6 @@ Each morning, you'll get a notification with a brief for every meeting on your c
 ### Adjust the Timing
 
 Edit the schedule trigger to match your routine. If your first meeting is always at 10 AM, a 9 AM prep brief gives you plenty of time.
-
-### Add CRM Context
-
-Connect a CRM via MCP in **Settings → Connectors**. Then update the workflow instructions to include deal status, customer history, and account notes in each brief.
-
-### Deliver via Slack
-
-Instead of (or in addition to) the in-app notification, add a **Call Tool** step using your Slack connector to post briefs directly to a channel or send them as a direct message.
 
 ### Focus on External Meetings Only
 

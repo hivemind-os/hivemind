@@ -105,9 +105,31 @@ tool_policy:
 
 ## Channel Classification on Tools
 
-MCP servers get a **channel classification level** just like [providers](./providers-and-models). The same data-classification rules apply: the agent will **never** send `CONFIDENTIAL` data to a server classified as `public`.
+MCP servers get a **channel classification level** just like other outbound channels. The same data-classification rules apply: the agent will **never** send `CONFIDENTIAL` data to a server classified as `public`.
 
 This means you can safely mix trusted internal servers with public ones — HiveMind OS enforces the boundaries automatically. A GitHub server classified as `internal` can see your private repo names, but a public search server won't receive anything beyond `PUBLIC` data.
+
+## OS-Level Sandboxing
+
+MCP servers that run as local processes (stdio transport) are executed inside an **OS-level sandbox** that restricts what the process can access on your machine:
+
+| Platform | Mechanism |
+|----------|-----------|
+| **macOS** | `sandbox-exec` with generated Seatbelt profiles |
+| **Linux** | Landlock (kernel 5.13+) with bubblewrap fallback |
+| **Windows** | Restricted tokens (low integrity) + Job Objects |
+
+The sandbox enforces:
+
+- **Filesystem restrictions** — the process can only read and write to explicitly allowed paths. Sensitive directories like `~/.ssh`, `~/.aws`, `~/.gnupg`, and `~/.kube` are denied by default.
+- **Network control** — network access can be allowed or blocked per server.
+- **System path access** — standard system directories (like `/usr`, `/bin`, or `C:\Windows`) are allowed read-only so the process can function, but nothing beyond that.
+
+Sandboxing is **enabled by default**. If a sandbox mechanism isn't available on the host, the process falls back to running unsandboxed.
+
+::: tip Customising the sandbox
+You can grant additional read or write paths per MCP server if it needs access to specific directories. See the [MCP Servers Guide](/guides/mcp-servers) for configuration details.
+:::
 
 ## Example: Summarise Your Open PRs
 

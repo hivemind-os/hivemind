@@ -5,6 +5,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [devtools(), solidPlugin()],
+  cacheDir: path.resolve(__dirname, '.vite'),
   resolve: {
     alias: {
       '~': path.resolve(__dirname, './src'),

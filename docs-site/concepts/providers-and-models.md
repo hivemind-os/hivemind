@@ -10,7 +10,6 @@ A **provider** is an API endpoint that serves language models. It could be a clo
 
 - A **connection** (URL + credentials)
 - A list of **available models**
-- A **data classification level** that controls what information can be sent to it
 
 ## Supported Providers
 
@@ -53,45 +52,36 @@ The real power is mixing providers. Use the best model for each job:
 
 This keeps costs down, data local where it matters, and gives you frontier-quality results where it counts.
 
-## Channel Classification
+## Data Classification
 
-Every provider gets a **data classification level** that controls what data can be sent to it.
+Model providers are **not** part of the data classification system — classification gates apply to outbound **channels** like MCP servers, messaging connectors, and peer connections. Data sent to your configured model providers is governed by your choice of provider (cloud vs. local) rather than the channel classification rules.
 
-::: info How Classification Works
-Every piece of data in HiveMind OS carries a label — `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, or `RESTRICTED`. Every provider has a channel class that determines the maximum data level it can receive. If data is too sensitive for a provider's clearance, the request is blocked or rerouted automatically.
+If keeping sensitive data off cloud APIs matters to you, run a local model (Ollama, Local Models) for tasks that handle private information, and use cloud providers for less sensitive work.
 
-| Channel Class | Accepts Data Up To |
-|---------------|--------------------|
-| `public` | `PUBLIC` only |
-| `internal` | `INTERNAL` |
-| `private` | `CONFIDENTIAL` |
-| `local-only` | All levels (data never leaves your machine) |
+::: tip
+For full details on how data classification works, see [Privacy & Security](./privacy-and-security).
 :::
-
-This means you can safely mix cloud and local providers — sensitive data automatically stays on-device.
 
 ## Putting It All Together
 
-Here's a real-world configuration using two providers with different trust levels:
+Here's a real-world configuration using two providers — a cloud provider for powerful reasoning and a local one for sensitive tasks:
 
 ```yaml
 providers:
   - kind: anthropic
     name: Claude (Primary)
-    channel_class: private
     models:
       primary: claude-sonnet-4-20250514
       coding: claude-sonnet-4-20250514
 
   - kind: ollama-local
     name: Local Llama
-    channel_class: local-only
     models:
       scanner: llama3.2
       admin: llama3.2
 ```
 
-Cloud Claude handles conversations and coding with `private` channel class (accepts up to CONFIDENTIAL data), while local Llama runs prompt scanning and housekeeping tasks with `local-only` channel class — meaning even your most sensitive data never leaves your machine for those tasks.
+Cloud Claude handles conversations and coding, while local Llama runs prompt scanning and housekeeping tasks — keeping those operations entirely on your machine.
 
 ## Learn More
 

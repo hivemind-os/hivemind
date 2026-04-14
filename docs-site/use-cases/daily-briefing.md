@@ -4,10 +4,7 @@ Start every day knowing exactly what needs your attention. HiveMind OS checks yo
 
 ```mermaid
 flowchart LR
-    A["⏰ 9 AM trigger"] --> B["📨 Read new emails"]
-    B --> C["📅 Check calendar"]
-    C --> D["🤖 Summarize"]
-    D --> E["🔔 Notify you"]
+    A["⏰ 9 AM trigger"] --> B["🤖 AI reads emails\n& calendar"] --> C["📋 Briefing\ndelivered"]
 ```
 
 ## What You'll Need
@@ -20,7 +17,7 @@ flowchart LR
 
 ---
 
-## Step 1: Connect Your Email
+## Step 1: Connect Your Email & Calendar
 
 If you've already connected your email (for example, from the [Customer Support](/use-cases/customer-support) use case), you can skip this step.
 
@@ -41,38 +38,21 @@ For the best briefing experience, connect your calendar too — same process, ju
 4. Click **Add Trigger** and select **Schedule**.
 5. Set it to run on **weekdays at 9:00 AM**. In the schedule field, enter the cron expression: `0 9 * * 1-5` (don't worry — the app shows a plain-English preview like "Every weekday at 9:00 AM" so you can confirm it's right).
 
-### Add the Steps
+### Add the Step
 
-**Step 1 — Read recent emails:**
+6. Click **Add Step** and choose **Invoke Agent**.
+7. You can use the default persona or create a dedicated one (something like "Executive Assistant"). Make sure your email and calendar connectors allow this persona — go to **Settings → Connectors**, edit the connector, and add the persona to its **Allowed Personas** list.
+8. In the instructions, type:
 
-6. Click **Add Step** and choose **Call Tool**.
-7. Select **Read Messages** (under the Communication category).
-8. Configure it to fetch emails from the last 24 hours.
+> Read my recent emails and check my calendar for today. Summarize everything into a concise morning briefing organized by priority. Highlight anything urgent, list today's meetings, and suggest what I should focus on first.
 
-**Step 2 — Check today's calendar:**
-
-9. Click **Add Step** and choose **Call Tool**.
-10. Select **List Events** (under the Calendar category).
-11. Configure it to pull today's events.
-
-**Step 3 — Summarize everything:**
-
-12. Click **Add Step** and choose **Invoke Agent**.
-13. You can use the default persona or create a dedicated one (something like "Executive Assistant").
-14. In the instructions, type: `Review the emails and calendar events. Create a concise morning briefing organized by priority. Highlight anything urgent.`
-
-**Step 4 — Send the briefing:**
-
-15. Click **Add Step** and choose **Signal Agent**.
-16. This delivers the summary as a notification inside HiveMind OS. You'll see it the moment you open the app.
-
-17. Click **Save** and toggle the workflow to **Enabled**.
+9. Click **Save** and toggle the workflow to **Enabled**.
 
 ---
 
 ## What You'll See
 
-Every morning, a notification pops up with something like this:
+Every morning, a notification appears with something like this:
 
 > **☀️ Good Morning — Here's Your Briefing for Tuesday, March 18**
 >
@@ -102,17 +82,6 @@ Every morning, a notification pops up with something like this:
 ### Change the Schedule
 
 Edit the workflow trigger to adjust the time. Early riser? Set it to 7 AM. Want a weekend edition? Change the cron to include Saturday and Sunday.
-
-### Add Slack or Discord Updates
-
-Connect a **Slack** or **Discord** connector in **Settings → Connectors**. Then add another step to your workflow to post the briefing to a team channel — great for keeping your whole team in the loop.
-
-### Include More Data Sources
-
-HiveMind OS can pull from any connected service. Ideas:
-- Connect a **CRM** via MCP to include new leads or deal updates
-- Add a web search step to include industry news relevant to your business
-- Pull in task updates from project management tools
 
 ### Create an End-of-Day Recap
 

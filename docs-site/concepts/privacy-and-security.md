@@ -19,7 +19,7 @@ Data gets classified automatically — regex patterns catch API keys, GitHub tok
 
 ## Channel Classification
 
-Every outbound channel — a model provider, an MCP server, a peer connection — has its own classification level:
+Every outbound channel — an MCP server, a messaging connector, a peer connection — has its own classification level:
 
 | Channel Class | Accepts |
 |---------------|---------|
@@ -28,7 +28,7 @@ Every outbound channel — a model provider, an MCP server, a peer connection �
 | `private` | 🟢 PUBLIC + 🔵 INTERNAL + 🟡 CONFIDENTIAL |
 | `local-only` | All levels |
 
-The rule is simple: **data can only flow to channels at the same trust level or higher.** A 🟡 CONFIDENTIAL snippet will never reach a `public` provider unless you explicitly approve it.
+The rule is simple: **data can only flow to channels at the same trust level or higher.** A 🟡 CONFIDENTIAL snippet will never reach a `public` channel unless you explicitly approve it.
 
 ```mermaid
 flowchart LR
@@ -39,7 +39,7 @@ flowchart LR
     E -- "block" --> F["🚫 Block"]
     E -- "prompt" --> G["❓ Ask User"]
     E -- "redact-and-send" --> H["✂️ Redact & Send"]
-    D --> I["☁️ Provider"]
+    D --> I["📤 Channel"]
     G -- "approved" --> I
     H --> I
 ```
@@ -50,14 +50,14 @@ When data tries to cross a classification boundary, HiveMind OS doesn't just cra
 
 | Action | What happens |
 |--------|-------------|
-| **`block`** | Hard stop. The data doesn't go. The agent gets a "classification denied" error and can rephrase or pick a different provider. |
+| **`block`** | Hard stop. The data doesn't go. The agent gets a "classification denied" error and can rephrase or pick a different channel. |
 | **`prompt`** | You see exactly what would cross the boundary, why it's classified that way, and where it's going. You choose whether to allow, deny, or redact. |
 | **`allow`** | Let it through — useful in development, not recommended for production. |
 | **`redact-and-send`** | Automatically strip the sensitive tokens, replace them with `[REDACTED]`, and send the sanitised version. Review the redaction in the audit log. |
 
 You configure this per classification level. A sensible default: `prompt` for INTERNAL and CONFIDENTIAL, `block` for RESTRICTED.
 
-::: danger What happens if you try to send RESTRICTED data to a PUBLIC provider?
+::: danger What happens if you try to send RESTRICTED data to a PUBLIC channel?
 It gets **blocked**. Period. Credentials, secrets, and private keys should never leave your machine.
 :::
 
@@ -72,6 +72,10 @@ If the scanner shared the agent's context, a clever injection could trick the mo
 :::
 
 When the scanner detects a threat, it returns a verdict with confidence score, threat type, and flagged spans. Depending on your config, the system can `block`, `prompt`, `flag`, or `allow` — and every scan is recorded in the risk ledger.
+
+## MCP Server Sandboxing
+
+MCP servers running as local processes are executed inside an **OS-level sandbox** (Seatbelt on macOS, Landlock on Linux, restricted tokens + Job Objects on Windows). The sandbox restricts filesystem access and denies sensitive directories like `~/.ssh` and `~/.aws` by default. See [Tools & MCP](./tools-and-mcp#os-level-sandboxing) for details.
 
 ## Credential Vault
 
@@ -91,7 +95,7 @@ The log is searchable, exportable, and available from the dashboard. If your org
 
 ## Putting It Together
 
-Here's a real-world example — block API keys and passwords from ever reaching cloud providers:
+Here's a real-world example — block API keys and passwords from ever reaching external channels:
 
 ```yaml
 security:
@@ -101,7 +105,7 @@ security:
     CONFIDENTIAL:
       action: Prompt         # Ask before sending sensitive data
     INTERNAL:
-      action: Allow          # Org-internal data can flow to org providers
+      action: Allow          # Org-internal data can flow to org channels
 
   prompt_injection:
     enabled: true

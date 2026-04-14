@@ -4,9 +4,9 @@ Stop spending hours answering the same questions. With HiveMind OS, incoming cus
 
 ```mermaid
 flowchart LR
-    A["📨 Email arrives"] --> B["🤖 AI reads it"]
-    B --> C["📖 Checks product manual"]
-    C --> D["✉️ Sends reply"]
+    A["📨 Email arrives"] --> B["🤖 AI reads & drafts reply"]
+    B --> C["✅ You approve"]
+    C --> D["✉️ Reply sent"]
 ```
 
 ## What You'll Need
@@ -76,27 +76,13 @@ Now you'll connect the pieces: when an email arrives, the AI reads it, checks yo
 
 This tells the workflow to spring into action every time a new email lands in your inbox.
 
-### Add the Steps
-
-Now add three steps using the visual designer:
-
-**Step 1 — Classify the email:**
+### Add the Step
 
 7. Click **Add Step** and choose **Invoke Agent**.
-8. Select your **Customer Support** persona.
-9. In the instructions, type: `Read the incoming email and classify it. Is it a product question, a complaint, a billing issue, or something else? Summarize the customer's request in one sentence.`
+8. Select your **Customer Support** persona. Make sure your email connector allows this persona — go to **Settings → Connectors**, edit the connector, and add the persona to its **Allowed Personas** list.
+9. In the instructions, type:
 
-**Step 2 — Draft a response:**
-
-10. Click **Add Step** and choose **Invoke Agent** again.
-11. Select your **Customer Support** persona.
-12. In the instructions, type: `Based on the classification and the original email, draft a helpful reply. Consult the attached product manual for accurate information.`
-
-**Step 3 — Send the reply:**
-
-13. Click **Add Step** and choose **Call Tool**.
-14. Select the tool **Send External Message** (under the Communication category).
-15. Configure it to reply to the original sender with the drafted response.
+> Read the incoming customer email and consult the attached product manual. Draft a helpful reply, then use the ask_user tool to show me the draft and get my approval before sending. Once approved, send the reply to the customer.
 
 ## Step 4: Upload Your Product Manual
 
@@ -117,19 +103,15 @@ The more detailed your product manual, the better the AI's answers will be. Incl
 1. Click **Save** to save your workflow.
 2. Toggle the workflow to **Enabled**.
 
-That's it! From now on, every incoming email will be read, classified, and answered automatically. You can monitor replies from the **Workflows** page — every run creates an instance with a full log of what happened.
+That's it! From now on, every incoming email will be read and answered by the AI. Because the prompt uses `ask_user`, you'll be asked to approve each reply before it goes out. Once you're confident in the quality, you can remove that part of the prompt to let the AI send replies fully autonomously.
 
 ---
 
 ## Tips for Success
 
-### Start with Human Review
-
-Before trusting the AI to send replies on its own, add a **Feedback Gate** step between the draft and send steps. This pauses the workflow and notifies you to approve each reply before it goes out. Once you're confident in the quality, remove the gate.
-
 ### Handle Different Email Types
 
-Not every email needs an auto-reply. Consider adding logic to your classification step:
+Not every email needs an auto-reply. Consider refining the prompt to handle different cases:
 - **Product questions** → auto-reply using the manual
 - **Billing issues** → forward to your billing team
 - **Complaints** → flag for personal follow-up

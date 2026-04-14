@@ -1,5 +1,6 @@
 dist
 node_modules
+.vite
 test-results
 playwright-report
 src-tauri/bin/
