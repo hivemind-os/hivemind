@@ -16,8 +16,8 @@ It depends on the task:
 
 | Task | Recommended Model |
 |---|---|
-| Complex reasoning & coding | Claude Sonnet, GPT-4 |
-| Quick questions & chat | Claude Haiku, GPT-4o mini |
+| Complex reasoning & coding | Claude Opus, GPT-5 |
+| Quick questions & chat | Claude Sonnet, GPT-5 mini |
 | Offline / private work | Llama 3 (via Ollama) |
 | Embeddings & knowledge | nomic-embed-text (via Ollama) |
 

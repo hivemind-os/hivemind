@@ -211,10 +211,6 @@ export default withMermaid(
                 link: "/examples/research-assistant",
               },
               {
-                text: "Privacy-First Setup",
-                link: "/examples/privacy-first-setup",
-              },
-              {
                 text: "Daily Automation",
                 link: "/examples/daily-automation",
               },
@@ -237,7 +233,7 @@ export default withMermaid(
       socialLinks: [
         {
           icon: "github",
-          link: "https://github.com/danielgerlag/hivemind-os",
+          link: "https://github.com/hivemind-os/hivemind",
         },
       ],
 
@@ -247,7 +243,7 @@ export default withMermaid(
 
       editLink: {
         pattern:
-          "https://github.com/danielgerlag/hivemind-os/edit/main/docs-site/:path",
+          "https://github.com/hivemind-os/hivemind/edit/main/docs-site/:path",
         text: "Edit this page on GitHub",
       },
 
