@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, Suspense, createEffect, createMemo, createSignal, lazy, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { FolderOpen, Link, RefreshCw, FileText, TriangleAlert, Search, ClipboardList, FolderPlus, Trash2, Save, Eye, Pencil, X, Sparkles, ArrowLeft } from 'lucide-solid';
 import { invoke } from '@tauri-apps/api/core';
@@ -6,7 +6,6 @@ import type { Accessor, Setter } from 'solid-js';
 import VirtualTreeList from './VirtualTreeList';
 import CodeViewer from './CodeViewer';
 import MarkdownViewer from './MarkdownViewer';
-import { lazy } from 'solid-js';
 const StlViewer = lazy(() => import('./StlViewer'));
 import HighlightedEditor from './HighlightedEditor';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/ui/dialog';
@@ -856,7 +855,9 @@ const WorkspaceView = (props: WorkspaceViewProps) => {
                     />
                   </Show>
                   <Show when={content().mime_type === 'model/stl'}>
-                    <StlViewer content={content().content} filename={content().path} />
+                    <Suspense fallback={<div class="workspace-viewer-empty"><p>Loading 3D viewer…</p></div>}>
+                      <StlViewer content={content().content} filename={content().path} />
+                    </Suspense>
                   </Show>
                   <Show when={content().is_binary && !content().mime_type.startsWith('image/') && content().mime_type !== 'application/pdf' && content().mime_type !== 'model/stl'}>
                     <div class="workspace-viewer-empty">

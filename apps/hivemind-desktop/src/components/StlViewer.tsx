@@ -1,8 +1,10 @@
-import { onMount, onCleanup, createSignal } from 'solid-js';
+import { onMount, onCleanup, createSignal, Show } from 'solid-js';
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { getThemeFamily } from '../stores/themeStore';
+
+const MAX_PREVIEW_BYTES = 50 * 1024 * 1024; // 50 MB base64 limit (~37 MB raw)
 
 export interface StlViewerProps {
   content: string; // base64-encoded STL
@@ -19,9 +21,15 @@ const StlViewer = (props: StlViewerProps) => {
     dimensions: string;
     volume: string;
   } | null>(null);
+  const [tooLarge, setTooLarge] = createSignal(false);
 
   onMount(() => {
     if (!containerRef) return;
+
+    if (props.content.length > MAX_PREVIEW_BYTES) {
+      setTooLarge(true);
+      return;
+    }
 
     const isDark = getThemeFamily() === 'dark';
     const bgColor = isDark ? 0x1e1e2e : 0xf5f5f5;
@@ -33,9 +41,9 @@ const StlViewer = (props: StlViewerProps) => {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(bgColor);
 
-    // Renderer
+    // Renderer — cap pixel ratio to avoid excessive GPU work on HiDPI screens
     renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const { clientWidth: w, clientHeight: h } = containerRef;
     renderer.setSize(w, h);
     containerRef.appendChild(renderer.domElement);
@@ -43,7 +51,8 @@ const StlViewer = (props: StlViewerProps) => {
     // Camera
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 10000);
 
-    // Controls
+    // Controls — on-demand rendering: render only when user interacts or
+    // while damping decelerates, then stop the animation loop.
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
@@ -126,15 +135,46 @@ const StlViewer = (props: StlViewerProps) => {
       volume: computeVolume(geometry),
     });
 
-    // Animate
-    const animate = () => {
-      animFrameId = requestAnimationFrame(animate);
-      controls.update();
+    // ── On-demand rendering ───────────────────────────────────────────
+    // Instead of a continuous 60fps loop, render only when needed:
+    // • Once on mount (initial frame)
+    // • When the user interacts (orbit/pan/zoom)
+    // • During damping deceleration after interaction ends
+    // The loop auto-stops ~1s after the last interaction to free CPU/GPU.
+    let loopRunning = false;
+    let lastInteractionTime = 0;
+    const DAMPING_SETTLE_MS = 1500;
+
+    const renderFrame = () => {
       renderer!.render(scene, camera);
     };
-    animate();
 
-    // Resize observer
+    const startLoop = () => {
+      lastInteractionTime = performance.now();
+      if (loopRunning) return;
+      loopRunning = true;
+      const loop = () => {
+        if (!loopRunning) return;
+        controls.update();
+        renderFrame();
+        if (performance.now() - lastInteractionTime < DAMPING_SETTLE_MS) {
+          animFrameId = requestAnimationFrame(loop);
+        } else {
+          loopRunning = false;
+        }
+      };
+      animFrameId = requestAnimationFrame(loop);
+    };
+
+    controls.addEventListener('start', startLoop);
+    controls.addEventListener('change', () => {
+      lastInteractionTime = performance.now();
+    });
+
+    // Initial render (single frame, no loop)
+    renderFrame();
+
+    // Resize observer — re-render a single frame on size change
     const resizeObserver = new ResizeObserver(() => {
       if (!containerRef || !renderer) return;
       const { clientWidth: rw, clientHeight: rh } = containerRef;
@@ -142,10 +182,12 @@ const StlViewer = (props: StlViewerProps) => {
       camera.aspect = rw / rh;
       camera.updateProjectionMatrix();
       renderer.setSize(rw, rh);
+      renderFrame();
     });
     resizeObserver.observe(containerRef);
 
     onCleanup(() => {
+      loopRunning = false;
       resizeObserver.disconnect();
       if (animFrameId !== undefined) cancelAnimationFrame(animFrameId);
       controls.dispose();
@@ -161,16 +203,23 @@ const StlViewer = (props: StlViewerProps) => {
 
   return (
     <div class="stl-viewer-wrapper">
-      <div ref={containerRef} class="stl-viewer-canvas" />
-      {stats() && (
-        <div class="stl-viewer-stats">
-          <span>▲ {stats()!.triangles.toLocaleString()} triangles</span>
-          <span class="stl-viewer-stats-sep">|</span>
-          <span>{stats()!.dimensions}</span>
-          <span class="stl-viewer-stats-sep">|</span>
-          <span>Vol: {stats()!.volume}</span>
+      <Show when={!tooLarge()} fallback={
+        <div class="workspace-viewer-empty">
+          <p>STL file too large for interactive 3D preview</p>
+          <p class="muted">File exceeds {Math.round(MAX_PREVIEW_BYTES / 1024 / 1024)} MB limit</p>
         </div>
-      )}
+      }>
+        <div ref={containerRef} class="stl-viewer-canvas" />
+        {stats() && (
+          <div class="stl-viewer-stats">
+            <span>▲ {stats()!.triangles.toLocaleString()} triangles</span>
+            <span class="stl-viewer-stats-sep">|</span>
+            <span>{stats()!.dimensions}</span>
+            <span class="stl-viewer-stats-sep">|</span>
+            <span>Vol: {stats()!.volume}</span>
+          </div>
+        )}
+      </Show>
     </div>
   );
 };
