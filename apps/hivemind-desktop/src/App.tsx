@@ -3260,6 +3260,7 @@ const App = () => {
 
               <div class="flex flex-1 flex-col overflow-hidden" style={activeTab() === 'workflows' ? '' : 'display:none'}>
                 <SessionWorkflows
+                  sessionId={selectedSessionId}
                   chatWorkflows={chatWorkflows}
                   activeChatWorkflows={activeChatWorkflows}
                   terminalChatWorkflows={terminalChatWorkflows}
@@ -3267,6 +3268,12 @@ const App = () => {
                   onResume={resumeChatWorkflow}
                   onKill={killChatWorkflow}
                   onRespondWorkflowGate={respondWorkflowGate}
+                  pendingQuestions={() => pendingQuestions().filter((q) => q.session_id === selectedSessionId())}
+                  onQuestionAnswered={(request_id, answerText) => {
+                    markQuestionAnswered(request_id, answerText);
+                    const sid = selectedSessionId();
+                    if (sid) void syncChatState(sid);
+                  }}
                 />
               </div>
 
