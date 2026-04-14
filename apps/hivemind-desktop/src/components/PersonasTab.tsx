@@ -549,7 +549,6 @@ const PersonasTab = (props: PersonasTabProps) => {
   function computePreview(templateText: string, fields: SchemaField[]): { text?: string; error?: string } {
     if (!templateText.trim()) return { text: '(empty template)' };
     try {
-      const compiled = Handlebars.compile(templateText, { strict: false });
       const defaults: Record<string, any> = {};
       for (const f of fields) {
         if (f.defaultValue) {
@@ -558,9 +557,16 @@ const PersonasTab = (props: PersonasTabProps) => {
           } else {
             try { defaults[f.name] = JSON.parse(f.defaultValue); } catch { defaults[f.name] = f.defaultValue; }
           }
+        } else {
+          defaults[f.name] = `<${f.name}>`;
         }
       }
-      return { text: compiled(defaults) };
+      // Simple substitution for {{var}} placeholders (avoids unsafe-eval from Handlebars.compile).
+      const text = templateText.replace(/\{\{\s*([^#/!>][^}]*?)\s*\}\}/g, (_, key) => {
+        const trimmed = key.trim();
+        return trimmed in defaults ? String(defaults[trimmed]) : `{{${trimmed}}}`;
+      });
+      return { text };
     } catch (e: any) {
       return { error: e.message };
     }

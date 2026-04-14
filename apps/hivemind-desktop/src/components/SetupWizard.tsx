@@ -2,7 +2,7 @@ import { Show, createSignal, onCleanup, type Accessor } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircle, XCircle, PartyPopper } from 'lucide-solid';
 import { Dialog, DialogContent, Button } from '~/ui';
-import type { DownloadProgress, InstalledModel, HiveMindConfigData } from '../types';
+import type { DownloadProgress, InstalledModel, HiveMindConfigData, CapabilityOption } from '../types';
 import { formatBytes } from '../utils';
 
 export interface SetupWizardProps {
@@ -43,7 +43,7 @@ const SetupWizard = (props: SetupWizardProps) => {
       if (providerIdx === -1) return;
 
       const provider = cfg.models.providers[providerIdx];
-      const mc = { ...(provider.model_capabilities ?? {}), [bgeModel.id]: ['embedding'] as const };
+      const mc = { ...(provider.model_capabilities ?? {}), [bgeModel.id]: ['embedding'] as CapabilityOption[] };
       const updatedProviders = [...cfg.models.providers];
       updatedProviders[providerIdx] = { ...provider, model_capabilities: mc };
 

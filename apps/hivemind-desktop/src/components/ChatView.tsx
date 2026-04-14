@@ -151,7 +151,7 @@ const ChatView = (props: ChatViewProps) => {
 
   // ── Prompt template picker state ──
   const [showPromptPicker, setShowPromptPicker] = createSignal(false);
-  const [activePromptTemplate, setActivePromptTemplate] = createSignal<import('../types').PromptTemplate | null>(null);
+  const [activePromptTemplate, setActivePromptTemplate] = createSignal<{ template: import('../types').PromptTemplate; persona_id: string } | null>(null);
 
   const currentPersonaPrompts = createMemo(() => {
     const persona = props.personas().find((p) => p.id === props.selectedAgentId()) ?? props.personas().find((p) => p.id === 'system/general');
@@ -1146,7 +1146,7 @@ const ChatView = (props: ChatViewProps) => {
                             if (!tpl.input_schema?.properties || Object.keys(tpl.input_schema.properties).length === 0) {
                               props.setDraft(tpl.template);
                             } else {
-                              setActivePromptTemplate(tpl);
+                              setActivePromptTemplate({ template: tpl, persona_id: props.selectedAgentId() });
                             }
                           }}
                         >
@@ -1247,7 +1247,7 @@ const ChatView = (props: ChatViewProps) => {
                               if (!tpl.input_schema?.properties || Object.keys(tpl.input_schema.properties).length === 0) {
                                 props.setDraft(tpl.template);
                               } else {
-                                setActivePromptTemplate(tpl);
+                                setActivePromptTemplate({ template: tpl, persona_id: props.selectedAgentId() });
                               }
                             }}
                             onKeyDown={(e: KeyboardEvent) => {
@@ -1257,7 +1257,7 @@ const ChatView = (props: ChatViewProps) => {
                                 if (!tpl.input_schema?.properties || Object.keys(tpl.input_schema.properties).length === 0) {
                                   props.setDraft(tpl.template);
                                 } else {
-                                  setActivePromptTemplate(tpl);
+                                  setActivePromptTemplate({ template: tpl, persona_id: props.selectedAgentId() });
                                 }
                               }
                             }}
@@ -1515,7 +1515,8 @@ const ChatView = (props: ChatViewProps) => {
     <Show when={activePromptTemplate()}>
       {(tpl) => (
         <PromptParameterDialog
-          template={tpl()}
+          template={tpl().template}
+          persona_id={tpl().persona_id}
           onSubmit={(rendered, _params) => {
             props.setDraft(rendered);
             setActivePromptTemplate(null);
