@@ -778,6 +778,8 @@ pub enum WorkflowEvent {
     InteractionResponded {
         instance_id: i64,
         step_id: String,
+        request_id: Option<String>,
+        response_text: Option<String>,
     },
     EventGateResolved {
         instance_id: i64,

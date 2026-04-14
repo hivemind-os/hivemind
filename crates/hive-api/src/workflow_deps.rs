@@ -694,6 +694,18 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
             .map_err(|e| format!("failed to get supervisor: {e}"))?;
         supervisor.kill_agent(agent_id).await.map_err(|e| format!("failed to kill agent: {e}"))
     }
+
+    async fn mark_session_question_answered(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        answer_text: &str,
+    ) -> Result<(), String> {
+        let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
+        chat.mark_question_message_answered(session_id, request_id, answer_text)
+            .await;
+        Ok(())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────

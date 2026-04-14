@@ -105,7 +105,7 @@ impl WorkflowEventEmitter for EventBusEmitter {
                     "choices": choices,
                 }),
             ),
-            WorkflowEvent::InteractionResponded { instance_id, step_id } => (
+            WorkflowEvent::InteractionResponded { instance_id, step_id, .. } => (
                 "workflow.interaction.responded",
                 json!({ "instance_id": instance_id, "step_id": step_id }),
             ),
@@ -153,6 +153,16 @@ impl WorkflowEventEmitter for ChatInjectingEmitter {
                 // to catch any agents missed by the explicit kill cascade.
                 self.cleanup_instance_agents(*instance_id).await;
             }
+            WorkflowEvent::InteractionResponded {
+                instance_id,
+                request_id: Some(request_id),
+                response_text,
+                ..
+            } => {
+                let answer = response_text.as_deref().unwrap_or("(answered)");
+                self.try_mark_question_answered(*instance_id, request_id, answer)
+                    .await;
+            }
             _ => {}
         }
     }
@@ -181,6 +191,31 @@ impl ChatInjectingEmitter {
             if let Err(e) = runner.inject_session_notification(session_id, def_name, &content).await
             {
                 tracing::warn!("failed to inject workflow notification into session: {e}");
+            }
+        }
+    }
+
+    /// Mark the chat question message as answered when a feedback gate is resolved.
+    async fn try_mark_question_answered(
+        &self,
+        instance_id: i64,
+        request_id: &str,
+        answer: &str,
+    ) {
+        let instance = match self.store.get_instance(instance_id) {
+            Ok(Some(inst)) => inst,
+            _ => return,
+        };
+        if instance.definition.mode != types::WorkflowMode::Chat {
+            return;
+        }
+        let session_id = &instance.parent_session_id;
+        let runner = self.agent_runner.lock().await.clone();
+        if let Some(runner) = runner {
+            if let Err(e) =
+                runner.mark_session_question_answered(session_id, request_id, answer).await
+            {
+                tracing::warn!("failed to mark workflow question as answered: {e}");
             }
         }
     }

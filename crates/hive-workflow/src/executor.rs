@@ -836,8 +836,13 @@ impl WorkflowEngine {
 
         // Now mutate
         let state = instance.step_states.get_mut(step_id).unwrap();
+        let gate_request_id = state.interaction_request_id.clone();
         state.status = StepStatus::Completed;
         state.completed_at_ms = Some(now_ms());
+        let response_text = match &resolved_outputs {
+            Value::String(s) => Some(s.clone()),
+            other => Some(other.to_string()),
+        };
         state.outputs = Some(resolved_outputs);
         state.interaction_request_id = None;
 
@@ -853,7 +858,12 @@ impl WorkflowEngine {
         }
 
         self.event_emitter
-            .emit(WorkflowEvent::InteractionResponded { instance_id, step_id: step_id.to_string() })
+            .emit(WorkflowEvent::InteractionResponded {
+                instance_id,
+                step_id: step_id.to_string(),
+                request_id: gate_request_id,
+                response_text,
+            })
             .await;
 
         // Continue execution in the background so the caller (HTTP handler)

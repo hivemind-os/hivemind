@@ -92,6 +92,16 @@ pub trait WorkflowAgentRunner: Send + Sync {
 
     /// Kill an agent by ID. Used for cascade cleanup when a workflow is killed.
     async fn kill_agent(&self, session_id: &str, agent_id: &str) -> Result<(), String>;
+
+    /// Mark a question message as answered in the chat timeline.
+    /// Called when a workflow feedback gate is responded to so the
+    /// question card in the chat thread shows the answer.
+    async fn mark_session_question_answered(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        answer_text: &str,
+    ) -> Result<(), String>;
 }
 
 /// Extension trait for creating user interaction requests (feedback gates).
