@@ -6,6 +6,8 @@ import type { Accessor, Setter } from 'solid-js';
 import VirtualTreeList from './VirtualTreeList';
 import CodeViewer from './CodeViewer';
 import MarkdownViewer from './MarkdownViewer';
+import { lazy } from 'solid-js';
+const StlViewer = lazy(() => import('./StlViewer'));
 import HighlightedEditor from './HighlightedEditor';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/ui/dialog';
 import { Button } from '~/ui/button';
@@ -853,7 +855,10 @@ const WorkspaceView = (props: WorkspaceViewProps) => {
                       title={content().path}
                     />
                   </Show>
-                  <Show when={content().is_binary && !content().mime_type.startsWith('image/') && content().mime_type !== 'application/pdf'}>
+                  <Show when={content().mime_type === 'model/stl'}>
+                    <StlViewer content={content().content} filename={content().path} />
+                  </Show>
+                  <Show when={content().is_binary && !content().mime_type.startsWith('image/') && content().mime_type !== 'application/pdf' && content().mime_type !== 'model/stl'}>
                     <div class="workspace-viewer-empty">
                       <p>Binary file ({content().mime_type}) — preview not available</p>
                       <p class="muted">{ws.formatFileSize(content().size)}</p>

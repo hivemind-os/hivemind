@@ -201,6 +201,8 @@ fn is_binary_extension(ext: &str) -> bool {
             | "sqlite" | "db" | "sqlite3"
         // Documents (binary formats)
             | "doc" | "xls" | "ppt"
+        // 3D models
+            | "stl" | "3mf" | "glb"
         // Other binary
             | "bin" | "dat" | "iso" | "dmg" | "pkg" | "deb" | "rpm"
     )
@@ -262,6 +264,10 @@ pub fn mime_for_extension(ext: &str) -> &'static str {
         "zip" => "application/zip",
         "gz" => "application/gzip",
         "tar" => "application/x-tar",
+        // 3D models
+        "stl" => "model/stl",
+        "3mf" => "model/3mf",
+        "glb" => "model/gltf-binary",
         // Fonts
         "woff" => "font/woff",
         "woff2" => "font/woff2",
