@@ -657,6 +657,35 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         Ok(())
     }
 
+    async fn inject_session_question(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        prompt: &str,
+        choices: &[String],
+        allow_freeform: bool,
+        workflow_instance_id: i64,
+        workflow_step_id: &str,
+        workflow_name: &str,
+    ) -> Result<(), String> {
+        let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
+        chat.insert_question_message(
+            session_id,
+            &format!("workflow:{workflow_instance_id}"),
+            &format!("Workflow: {workflow_name}"),
+            request_id,
+            prompt,
+            choices,
+            allow_freeform,
+            false, // multi_select
+            None,  // message_content
+            Some(workflow_instance_id),
+            Some(workflow_step_id),
+        )
+        .await;
+        Ok(())
+    }
+
     async fn kill_agent(&self, session_id: &str, agent_id: &str) -> Result<(), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
         let supervisor = chat

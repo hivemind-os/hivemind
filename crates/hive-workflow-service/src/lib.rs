@@ -1577,16 +1577,55 @@ impl StepExecutor for ServiceStepExecutor {
         prompt: &str,
         choices: Option<&[String]>,
         allow_freeform: bool,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<String, String> {
         let gate = self.interaction_gate.lock().await.clone();
-        match gate {
+        let request_id = match gate {
             Some(g) => {
                 g.create_feedback_request(instance_id, step_id, prompt, choices, allow_freeform)
-                    .await
+                    .await?
             }
-            None => Err("Interaction gate not configured".to_string()),
+            None => return Err("Interaction gate not configured".to_string()),
+        };
+
+        // Inject a question message into the parent chat session so the
+        // feedback gate appears inline in the chat timeline.
+        // Only inject for chat-mode workflows (same guard as ChatInjectingEmitter).
+        let runner = self.agent_runner.lock().await.clone();
+        if let Some(runner) = runner {
+            let instance = self.store.get_instance(instance_id).ok().flatten();
+            let is_chat_mode = instance
+                .as_ref()
+                .map(|inst| inst.definition.mode == types::WorkflowMode::Chat)
+                .unwrap_or(false);
+            if is_chat_mode {
+                let workflow_name = instance
+                    .as_ref()
+                    .map(|inst| inst.definition.name.as_str())
+                    .unwrap_or("");
+                if let Err(e) = runner
+                    .inject_session_question(
+                        &ctx.parent_session_id,
+                        &request_id,
+                        prompt,
+                        choices.unwrap_or(&[]),
+                        allow_freeform,
+                        instance_id,
+                        step_id,
+                        workflow_name,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        instance_id,
+                        step_id,
+                        "failed to inject workflow feedback question into session: {e}"
+                    );
+                }
+            }
         }
+
+        Ok(request_id)
     }
 
     async fn launch_workflow(

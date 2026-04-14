@@ -75,6 +75,21 @@ pub trait WorkflowAgentRunner: Send + Sync {
         message: &str,
     ) -> Result<(), String>;
 
+    /// Inject a question message into a chat session's timeline.
+    /// Used for workflow feedback gates so the question appears inline
+    /// in the chat thread (rendered as an interactive question card).
+    async fn inject_session_question(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        prompt: &str,
+        choices: &[String],
+        allow_freeform: bool,
+        workflow_instance_id: i64,
+        workflow_step_id: &str,
+        workflow_name: &str,
+    ) -> Result<(), String>;
+
     /// Kill an agent by ID. Used for cascade cleanup when a workflow is killed.
     async fn kill_agent(&self, session_id: &str, agent_id: &str) -> Result<(), String>;
 }
