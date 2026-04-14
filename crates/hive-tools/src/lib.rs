@@ -302,7 +302,17 @@ impl ToolRegistry {
             .tools
             .iter()
             .filter(|(id, _)| {
-                id.starts_with("core.") || id.starts_with("mcp.") || allowed_ids.contains(id)
+                id.starts_with("core.")
+                    || id.starts_with("mcp.")
+                    || allowed_ids.iter().any(|pattern| {
+                        if pattern.contains('*') || pattern.contains('?') {
+                            glob::Pattern::new(pattern)
+                                .map(|p| p.matches(id))
+                                .unwrap_or(false)
+                        } else {
+                            pattern == id.as_str()
+                        }
+                    })
             })
             .map(|(id, tool)| (id.clone(), tool.clone()))
             .collect();
@@ -3999,5 +4009,38 @@ mod tests {
         assert!(!is_blocked_env_var("PATH"));
         assert!(!is_blocked_env_var("MY_VAR"));
         assert!(!is_blocked_env_var("RUST_LOG"));
+    }
+
+    #[test]
+    fn filtered_supports_glob_patterns() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default()));
+        registry.register(Arc::new(DateTimeTool::default()));
+        registry.register(Arc::new(QuestionTool::default())); // core.ask_user
+
+        let allowed = vec!["math.*".to_string()];
+        let filtered = registry.filtered(&allowed);
+        let ids: Vec<_> = filtered.list_definitions().iter().map(|d| d.id.clone()).collect();
+
+        // math.calculate should match "math.*"
+        assert!(ids.contains(&"math.calculate".to_string()), "math.calculate should match 'math.*'");
+        // core.ask_user is auto-allowed
+        assert!(ids.contains(&"core.ask_user".to_string()), "core.* should be auto-allowed");
+        // datetime.now should be filtered out
+        assert!(!ids.contains(&"datetime.now".to_string()), "datetime.now should be filtered out");
+    }
+
+    #[test]
+    fn filtered_exact_match_still_works() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default()));
+        registry.register(Arc::new(DateTimeTool::default()));
+
+        let allowed = vec!["datetime.now".to_string()];
+        let filtered = registry.filtered(&allowed);
+        let ids: Vec<_> = filtered.list_definitions().iter().map(|d| d.id.clone()).collect();
+
+        assert!(ids.contains(&"datetime.now".to_string()));
+        assert!(!ids.contains(&"math.calculate".to_string()));
     }
 }
