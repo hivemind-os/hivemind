@@ -21,6 +21,8 @@ This skill requires Python 3 and the `trimesh` and `numpy` packages. Before runn
 python -m pip install -r "<skill_dir>/requirements.txt"
 ```
 
+**Important**: Package installation can take a few minutes. Use `timeout_secs: 300` when running this command via shell.execute.
+
 If installation fails, stop and report to the user that trimesh is required.
 
 ### Step 2: Run the Analysis

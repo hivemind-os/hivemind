@@ -21,6 +21,8 @@ This skill requires Python 3 and the `cadquery` package. Before running any scri
 python -m pip install -r "<skill_dir>/requirements.txt"
 ```
 
+**Important**: CadQuery installation can take several minutes. Use `timeout_secs: 300` when running this command via shell.execute.
+
 If installation fails, stop and report to the user that CadQuery is required. Do not proceed without it.
 
 ### Step 2: Write the CadQuery Script
@@ -54,6 +56,8 @@ Run the bundled render script to produce the `.stl` and `.png` files:
 ```
 python "<skill_dir>/scripts/render_model.py" "<script_path>" --output-dir "<output_dir>"
 ```
+
+**Important**: Rendering can take over 30 seconds for complex models. Use `timeout_secs: 120` when running this command via shell.execute.
 
 The script outputs a JSON object with file paths and mesh statistics:
 ```json

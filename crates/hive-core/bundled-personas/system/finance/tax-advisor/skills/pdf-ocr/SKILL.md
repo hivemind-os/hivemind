@@ -53,6 +53,8 @@ If text extraction yields no results, render the PDF pages as images for vision 
 uv run <skill_dir>/scripts/pdf_to_images.py render "<pdf_path>" "<output_dir>" --dpi 300
 ```
 
+**Important**: Rendering large or high-DPI PDFs can take over 30 seconds. Use `timeout_secs: 120` when running this command via shell.execute.
+
 Where `<output_dir>` is a temporary directory for the images. For large PDFs, process specific pages:
 
 ```
