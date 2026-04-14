@@ -4,7 +4,7 @@ use hive_contracts::prompt_sanitize::escape_prompt_tags;
 use hive_contracts::InstalledSkill;
 use parking_lot::Mutex;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Manages the runtime skill catalog for prompt injection and activation.
 pub struct SkillCatalog {
@@ -77,6 +77,7 @@ impl SkillCatalog {
                      Its instructions are already in your context."
                 ),
                 already_active: true,
+                source_dir: None,
             });
         }
         activated.insert(name.to_string());
@@ -87,6 +88,7 @@ impl SkillCatalog {
             return Some(ActivationResult {
                 content: format!("Failed to load skill '{name}': invalid local path"),
                 already_active: false,
+                source_dir: None,
             });
         }
         let canonical_dir = match std::fs::canonicalize(skill_dir) {
@@ -95,6 +97,7 @@ impl SkillCatalog {
                 return Some(ActivationResult {
                     content: format!("Failed to load skill '{name}': {e}"),
                     already_active: false,
+                    source_dir: None,
                 });
             }
         };
@@ -105,6 +108,7 @@ impl SkillCatalog {
                 return Some(ActivationResult {
                     content: format!("Failed to load skill '{name}': {e}"),
                     already_active: false,
+                    source_dir: None,
                 });
             }
         };
@@ -112,6 +116,7 @@ impl SkillCatalog {
             return Some(ActivationResult {
                 content: format!("Failed to load skill '{name}': invalid SKILL.md path"),
                 already_active: false,
+                source_dir: None,
             });
         }
         let body = match std::fs::read_to_string(&skill_md_canon) {
@@ -126,6 +131,7 @@ impl SkillCatalog {
                 return Some(ActivationResult {
                     content: format!("Failed to load skill '{name}': {e}"),
                     already_active: false,
+                    source_dir: None,
                 });
             }
         };
@@ -150,7 +156,11 @@ impl SkillCatalog {
         }
         output.push_str("</skill_content>");
 
-        Some(ActivationResult { content: output, already_active: false })
+        Some(ActivationResult {
+            content: output,
+            already_active: false,
+            source_dir: Some(canonical_dir),
+        })
     }
 
     /// Reset activation tracking (e.g. for a new session).
@@ -162,6 +172,85 @@ impl SkillCatalog {
 pub struct ActivationResult {
     pub content: String,
     pub already_active: bool,
+    /// The canonical source directory of the skill on disk.
+    /// The handler can use this to stage resources into the workspace.
+    pub source_dir: Option<PathBuf>,
+}
+
+/// Stage skill resource files into a target directory (typically inside the
+/// session workspace). Copies all non-hidden, non-SKILL.md files from
+/// `source_dir` into `target_dir`, preserving directory structure.
+///
+/// Symlinks are skipped for safety. If `target_dir` already exists it is
+/// removed first to avoid stale files.
+///
+/// Returns the list of staged relative paths on success.
+pub fn stage_skill_resources(
+    source_dir: &Path,
+    target_dir: &Path,
+) -> std::io::Result<Vec<String>> {
+    let canonical_source = source_dir.canonicalize()?;
+
+    // Clean slate — remove any previous staging for this skill.
+    if target_dir.exists() {
+        std::fs::remove_dir_all(target_dir)?;
+    }
+    std::fs::create_dir_all(target_dir)?;
+
+    let mut staged = Vec::new();
+    copy_dir_recursive(&canonical_source, target_dir, &canonical_source, &mut staged)?;
+    staged.sort();
+    Ok(staged)
+}
+
+fn copy_dir_recursive(
+    current: &Path,
+    target_base: &Path,
+    source_root: &Path,
+    staged: &mut Vec<String>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(current)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+
+        // Skip symlinks entirely.
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files and SKILL.md.
+        if name.starts_with('.') || name == "SKILL.md" {
+            continue;
+        }
+
+        // Verify the entry is still under the source root (symlink safety belt).
+        if let Ok(canon) = entry.path().canonicalize() {
+            if !canon.starts_with(source_root) {
+                continue;
+            }
+        }
+
+        let entry_path = entry.path();
+        let rel = entry_path
+            .strip_prefix(source_root)
+            .unwrap_or(&entry_path)
+            .to_path_buf();
+        let dest = target_base.join(&rel);
+
+        if file_type.is_dir() {
+            std::fs::create_dir_all(&dest)?;
+            copy_dir_recursive(&entry.path(), target_base, source_root, staged)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(entry.path(), &dest)?;
+            staged.push(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    Ok(())
 }
 
 /// List files in a skill directory (non-recursive, first level only).
@@ -259,5 +348,50 @@ mod tests {
     fn activation_nonexistent_returns_none() {
         let catalog = SkillCatalog::new(vec![]);
         assert!(catalog.activate("nonexistent").is_none());
+    }
+
+    #[test]
+    fn stage_skill_resources_copies_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("skill-src");
+        std::fs::create_dir_all(source.join("scripts")).unwrap();
+        std::fs::write(source.join("SKILL.md"), "# Skill").unwrap();
+        std::fs::write(source.join(".hidden"), "secret").unwrap();
+        std::fs::write(source.join("requirements.txt"), "cadquery").unwrap();
+        std::fs::write(source.join("scripts/render.py"), "print('hi')").unwrap();
+
+        let target = tmp.path().join("workspace/.skills/test-skill");
+        let staged = stage_skill_resources(&source, &target).unwrap();
+
+        assert!(staged.contains(&"requirements.txt".to_string()));
+        assert!(staged.contains(&"scripts/render.py".to_string()));
+        // SKILL.md and hidden files should not be copied
+        assert!(!staged.iter().any(|s| s.contains("SKILL.md")));
+        assert!(!staged.iter().any(|s| s.contains(".hidden")));
+        // Files should exist at target
+        assert!(target.join("requirements.txt").exists());
+        assert!(target.join("scripts/render.py").exists());
+    }
+
+    #[test]
+    fn stage_skill_resources_replaces_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("skill-src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), "version1").unwrap();
+
+        let target = tmp.path().join("staged");
+        stage_skill_resources(&source, &target).unwrap();
+        assert!(target.join("a.txt").exists());
+
+        // Remove a.txt from source and add b.txt
+        std::fs::remove_file(source.join("a.txt")).unwrap();
+        std::fs::write(source.join("b.txt"), "version2").unwrap();
+
+        let staged = stage_skill_resources(&source, &target).unwrap();
+        // Old file should be gone, new file should be present
+        assert!(!target.join("a.txt").exists());
+        assert!(target.join("b.txt").exists());
+        assert!(staged.contains(&"b.txt".to_string()));
     }
 }

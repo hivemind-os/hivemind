@@ -2339,10 +2339,36 @@ async fn handle_activate_skill(
 
     if let Some(ref catalog) = context.tools_ctx.skill_catalog {
         match catalog.activate(name) {
-            Some(result) => Ok(ToolResult {
-                output: serde_json::json!({ "content": result.content }),
-                data_class: hive_classification::DataClass::Internal,
-            }),
+            Some(result) => {
+                let mut content = result.content;
+
+                // Stage skill resources into the workspace so the model can
+                // access them via the sandboxed filesystem tools.
+                if let (Some(source_dir), Some(workspace)) =
+                    (&result.source_dir, context.workspace_path())
+                {
+                    let target = workspace.join(".skills").join(name);
+                    match hive_skills::stage_skill_resources(source_dir, &target) {
+                        Ok(_) => {
+                            let abs_str = source_dir.to_string_lossy();
+                            let relative = format!(".skills/{name}");
+                            content = content.replace(abs_str.as_ref(), &relative);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                skill = name,
+                                error = %e,
+                                "failed to stage skill resources into workspace"
+                            );
+                        }
+                    }
+                }
+
+                Ok(ToolResult {
+                    output: serde_json::json!({ "content": content }),
+                    data_class: hive_classification::DataClass::Internal,
+                })
+            }
             None => Err(LoopError::ToolExecutionFailed {
                 tool_id: call.tool_id.clone(),
                 detail: format!("skill '{name}' is not installed or enabled"),
