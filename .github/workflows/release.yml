@@ -193,6 +193,14 @@ jobs:
           CXXFLAGS: /EHsc
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
+      - name: Azure login (OIDC)
+        if: env.HAS_AZURE_SIGNING == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
       - name: Sign installer (Azure Trusted Signing)
         if: env.HAS_AZURE_SIGNING == 'true'
         uses: azure/trusted-signing-action@v0.5.1
