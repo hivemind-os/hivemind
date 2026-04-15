@@ -32,6 +32,7 @@ on:
 
 permissions:
   contents: write  # needed for creating GitHub Releases
+  id-token: write  # needed for OIDC auth to Azure Trusted Signing
 
 env:
   CARGO_TERM_COLOR: always
@@ -156,7 +157,7 @@ jobs:
         include: ${{ fromJson(needs.setup.outputs.windows_matrix) }}
     runs-on: ${{ matrix.runner }}
     env:
-      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -192,30 +193,37 @@ jobs:
           CXXFLAGS: /EHsc
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
-      - name: Sign installer and repackage updater bundle
-        if: env.HAS_WINDOWS_CERT == 'true'
+      - name: Sign installer (Azure Trusted Signing)
+        if: env.HAS_AZURE_SIGNING == 'true'
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: target\${{ matrix.target }}\release\bundle\nsis
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Repackage updater bundle with signed installer
+        if: env.HAS_AZURE_SIGNING == 'true'
         env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
-          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
-          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
-          [IO.File]::WriteAllBytes($certPath, $certBytes)
-
           $nsisDir = "target/${{ matrix.target }}/release/bundle/nsis"
 
-          # 1. Authenticode-sign the NSIS installer exe
           $setupExe = Get-ChildItem -Path $nsisDir |
                       Where-Object { $_.Name -like "*-setup.exe" } |
                       Select-Object -First 1
           if (-not $setupExe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
-          signtool sign /fd SHA256 /t http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD $setupExe.FullName
-          Write-Host "Authenticode-signed: $($setupExe.Name)"
+          Write-Host "Using signed installer: $($setupExe.Name)"
 
-          # 2. Repackage the .nsis.zip so the updater delivers the signed exe
+          # Repackage the .nsis.zip so the updater delivers the signed exe
           $oldZip = Get-ChildItem -Path $nsisDir |
                     Where-Object { $_.Name -like "*.nsis.zip" } |
                     Select-Object -First 1
@@ -225,14 +233,12 @@ jobs:
             Compress-Archive -Path $setupExe.FullName -DestinationPath $oldZip.FullName
             Write-Host "Repackaged updater bundle: $($oldZip.Name)"
 
-            # 3. Re-sign the .nsis.zip with Tauri Ed25519 key
+            # Re-sign the .nsis.zip with Tauri Ed25519 key
             Push-Location apps/hivemind-desktop
             npx tauri signer sign "$($oldZip.FullName)"
             Pop-Location
             Write-Host "Ed25519-signed: $($oldZip.Name).sig"
           }
-
-          Remove-Item $certPath -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
