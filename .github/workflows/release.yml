@@ -183,6 +183,21 @@ jobs:
         run: npm ci
         working-directory: apps/hivemind-desktop
 
+      - name: Download VC++ Redistributable
+        shell: pwsh
+        run: |
+          $vcUrl = if ("${{ matrix.arch }}" -eq "arm64") {
+            "https://aka.ms/vs/17/release/vc_redist.arm64.exe"
+          } else {
+            "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+          }
+          $dest = "apps/hivemind-desktop/src-tauri/vc_redist.exe"
+          Invoke-WebRequest -Uri $vcUrl -OutFile $dest
+          if (-not (Test-Path $dest) -or (Get-Item $dest).Length -lt 1MB) {
+            Write-Error "Failed to download vc_redist.exe or file size is unexpectedly small"
+            exit 1
+          }
+
       - name: Build NSIS installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

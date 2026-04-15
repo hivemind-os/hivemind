@@ -10,3 +10,5 @@ config.yaml
 !/vendor/rmcp-macros
 # Playwright MCP browser session artifacts
 .playwright-mcp/
+# VC++ Redistributable downloaded during Windows CI builds
+apps/hivemind-desktop/src-tauri/vc_redist.exe
