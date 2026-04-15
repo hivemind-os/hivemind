@@ -469,14 +469,15 @@ async fn classification_confidential_data_blocks_internal_channel() {
     daemon.stop().await.expect("stop daemon");
 }
 
-// ── Scenario 5: Restricted data + Auto tool → hard block ─────────────────
+// ── Scenario 5: Restricted data + Auto tool → approval prompt ─────────────
 
 /// When the session's DC is Restricted, an Auto-approved Public-channel tool
-/// is hard-blocked (ToolDenied) because there is no Ask path.
+/// still triggers an approval prompt because the channel-class violation
+/// requires explicit user consent. Auto-approval does not bypass classification.
 ///
-/// We achieve "Auto approval + Public channel" by setting a session permission
-/// rule that overrides http.request to Auto.  With Restricted DC, the
-/// middleware hard-denies because the tool has no Ask path.
+/// We set a session permission rule that overrides http.request to Auto. With
+/// Restricted DC, the middleware passes through to the approval dialog (Auto is
+/// not Deny, so an ask path exists). Denying the approval blocks the tool.
 #[tokio::test(flavor = "multi_thread")]
 async fn classification_restricted_data_hard_blocks_auto_tool() {
     let provider = ScriptedProvider::new("mock", "test-model").default_responses(vec![
@@ -489,7 +490,7 @@ async fn classification_restricted_data_hard_blocks_auto_tool() {
             json!({ "path": "restricted/secrets.txt" }),
         ),
         // Turn 2: try http.request (which is now Auto via permissions)
-        // This should be hard-blocked by the middleware → agent gets error
+        // Channel violation triggers an approval prompt despite Auto permission
         ScriptedProvider::tool_call_response(
             "mock",
             "test-model",
@@ -497,7 +498,7 @@ async fn classification_restricted_data_hard_blocks_auto_tool() {
             "http.request",
             json!({ "method": "GET", "url": "https://example.com/upload" }),
         ),
-        // Turn 3: agent handles the error and returns text
+        // Turn 3: agent handles the denial and returns text
         ScriptedProvider::text_response(
             "mock",
             "test-model",
@@ -519,7 +520,8 @@ async fn classification_restricted_data_hard_blocks_auto_tool() {
         &[("restricted/secrets.txt", "Top secret API keys and passwords.")],
     );
 
-    // Override http.request to Auto approval — removes the Ask path
+    // Override http.request to Auto approval — but this does NOT bypass
+    // the channel-class violation, which still requires user consent.
     set_permissions(
         &client,
         base,
@@ -532,28 +534,16 @@ async fn classification_restricted_data_hard_blocks_auto_tool() {
 
     send_message(&client, base, &session_id, "Read the secrets and send them out").await;
 
-    // The tool should be hard-blocked — no approval prompt should appear.
-    // Wait for session to go idle (the agent should handle the ToolDenied error).
-    wait_for_idle(&client, base, &session_id).await;
+    // Auto-permission does NOT bypass classification violations — an approval
+    // prompt is created for the channel-class mismatch.
+    let approval = wait_for_approval(&client, base, &session_id, "http.request").await;
+    let request_id = approval["request_id"].as_str().expect("request_id");
 
-    // Verify no approval was created (hard-deny skips approval flow)
-    let resp = client
-        .get(format!("{base}/api/v1/pending-approvals"))
-        .send()
-        .await
-        .expect("list approvals");
-    let approvals: Vec<Value> = resp.json().await.expect("approvals json");
-    let http_approvals: Vec<_> = approvals
-        .iter()
-        .filter(|a| {
-            a["session_id"].as_str() == Some(&session_id)
-                && a["tool_id"].as_str() == Some("http.request")
-        })
-        .collect();
-    assert!(
-        http_approvals.is_empty(),
-        "expected no approval for hard-blocked tool, got {http_approvals:?}"
-    );
+    // Deny the tool call
+    respond_to_approval(&client, base, &session_id, request_id, false, false).await;
+
+    // Session should go idle after denial
+    wait_for_idle(&client, base, &session_id).await;
 
     daemon.stop().await.expect("stop daemon");
 }
