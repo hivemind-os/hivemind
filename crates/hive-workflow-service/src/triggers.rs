@@ -458,9 +458,13 @@ impl TriggerManager {
                     );
                     if matched {
                         // Persistent dedup: skip if we already triggered this
-                        // workflow for the same external_id.
+                        // workflow for the same external_id.  We key on
+                        // definition_name (e.g. "user/test1") rather than
+                        // definition_id (UUID) because the UUID changes each
+                        // time the workflow is saved, which would invalidate
+                        // dedup entries and allow duplicates across saves.
                         if let Some(ext_id) = payload.get("external_id").and_then(|v| v.as_str()) {
-                            match self.store.is_trigger_seen(&trigger.definition_id, ext_id) {
+                            match self.store.is_trigger_seen(&trigger.definition_name, ext_id) {
                                 Ok(true) => {
                                     info!(
                                         definition_id = %trigger.definition_id,
@@ -538,12 +542,13 @@ impl TriggerManager {
         // Launch workflows first, then persist dedup and mark_as_read only
         // for successful launches. This prevents permanently suppressing a
         // trigger when the launch itself fails.
-        for (definition_id, name, version, inputs, mark_info) in to_launch {
+        for (_definition_id, name, version, inputs, mark_info) in to_launch {
             let launched = self.auto_launch(&name, Some(&version), inputs.clone()).await;
 
             if launched {
                 if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
-                    if let Err(e) = self.store.mark_trigger_seen(&definition_id, ext_id) {
+                    // Use definition_name for dedup (stable across saves).
+                    if let Err(e) = self.store.mark_trigger_seen(&name, ext_id) {
                         warn!(error = %e, "failed to record trigger dedup");
                     }
                 }

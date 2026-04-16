@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -1052,6 +1052,10 @@ impl ConnectorService {
             tokio::spawn(async move {
                 let mut consecutive_failures: u32 = 0;
                 let mut cycle: u64 = 0;
+                // Track external_ids already published within this task's
+                // lifetime to avoid re-publishing the same unread message
+                // on every poll cycle.
+                let mut published_ids: HashSet<String> = HashSet::new();
                 const MAX_BACKOFF_SECS: u64 = 300; // 5 min cap
                 // Log a heartbeat every ~10 cycles so operators can verify
                 // the loop is alive even when no new messages arrive.
@@ -1066,7 +1070,7 @@ impl ConnectorService {
                     }
 
                     cycle += 1;
-                    let found_messages = svc.poll_connector_once(&cid).await;
+                    let found_messages = svc.poll_connector_once(&cid, &mut published_ids).await;
 
                     if found_messages {
                         consecutive_failures = 0;
@@ -1172,7 +1176,7 @@ impl ConnectorService {
         Self::create_connector(config, Path::new("/tmp"))
     }
 
-    async fn poll_connector_once(&self, connector_id: &str) -> bool {
+    async fn poll_connector_once(&self, connector_id: &str, published_ids: &mut HashSet<String>) -> bool {
         let (connector, config) = {
             let handles = self.handles.read();
             match handles.get(connector_id) {
@@ -1213,6 +1217,19 @@ impl ConnectorService {
         self.last_poll_with_messages_ms.store(now, Ordering::Relaxed);
 
         for msg in &inbound {
+            // Connector-side dedup: skip messages we already published in
+            // this poll task's lifetime.  Insert only after successful
+            // publish so transient failures don't permanently suppress a
+            // message.
+            if published_ids.contains(&msg.external_id) {
+                debug!(
+                    connector_id,
+                    external_id = %msg.external_id,
+                    "skipping already-published message"
+                );
+                continue;
+            }
+
             let input_class = {
                 let handles = self.handles.read();
                 handles
@@ -1264,6 +1281,14 @@ impl ConnectorService {
                 });
                 if let Err(e) = bus.publish(&topic, "connector-poll", payload) {
                     warn!(error = %e, connector_id, "failed to publish inbound message event");
+                } else {
+                    published_ids.insert(msg.external_id.clone());
+                    // Cap the set to prevent unbounded growth in long-running
+                    // processes.  10 000 entries is ~1 MB, far beyond any
+                    // realistic inbox churn between restarts.
+                    if published_ids.len() > 10_000 {
+                        published_ids.clear();
+                    }
                 }
             }
         }
