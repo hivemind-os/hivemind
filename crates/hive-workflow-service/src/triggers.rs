@@ -1307,15 +1307,27 @@ fn payload_matches_incoming(
     // Detected via provider-specific metadata keys:
     //   Discord: referenced_message_id
     //   Slack: thread_ts
-    //   Email (IMAP/Gmail/Microsoft): in_reply_to, references
+    //   Email (IMAP/Gmail/Microsoft): in_reply_to
+    // Note: `references` alone is NOT used — some providers (e.g. Microsoft
+    // Graph) set it for conversation threading even on new/original emails.
     if ignore_replies {
         if let Some(meta) = payload.get("metadata").and_then(|m| m.as_object()) {
-            let is_reply = meta.contains_key("referenced_message_id")
-                || meta.contains_key("thread_ts")
-                || meta.contains_key("in_reply_to")
-                || meta.contains_key("references");
+            // Helper: key exists and has a non-empty string value.
+            let has = |key: &str| {
+                meta.get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty())
+            };
+            let is_reply = has("referenced_message_id")
+                || has("thread_ts")
+                || has("in_reply_to");
             if is_reply {
-                info!("rejected: message is a reply (ignore_replies=true)");
+                info!(
+                    has_referenced_message_id = has("referenced_message_id"),
+                    has_thread_ts = has("thread_ts"),
+                    has_in_reply_to = has("in_reply_to"),
+                    "rejected: message is a reply (ignore_replies=true)"
+                );
                 return false;
             }
         }
@@ -1763,15 +1775,28 @@ mod tests {
             &payload, "email-ch", None, None, None, None, None, false
         ));
 
-        // Also test with "references" header
+        // `references` header alone should NOT trigger reply rejection —
+        // providers like Microsoft Graph set it for conversation threading
+        // even on original (non-reply) emails.
         let payload2 = json!({
             "channel_id": "email-ch",
             "from": "bob@example.com",
             "body": "Re: thread",
             "metadata": { "references": "<msg-id@example.com>" }
         });
-        assert!(!payload_matches_incoming(
+        assert!(payload_matches_incoming(
             &payload2, "email-ch", None, None, None, None, None, true
+        ));
+
+        // But `references` WITH `in_reply_to` should still be rejected
+        let payload3 = json!({
+            "channel_id": "email-ch",
+            "from": "carol@example.com",
+            "body": "Re: thread",
+            "metadata": { "in_reply_to": "<orig@example.com>", "references": "<orig@example.com>" }
+        });
+        assert!(!payload_matches_incoming(
+            &payload3, "email-ch", None, None, None, None, None, true
         ));
     }
 
@@ -1785,6 +1810,18 @@ mod tests {
         });
         // New message (no reply indicators) should pass even with ignore_replies=true
         assert!(payload_matches_incoming(&payload, "any-ch", None, None, None, None, None, true));
+    }
+
+    #[test]
+    fn test_ignore_replies_empty_values_pass() {
+        // Empty-string metadata values should NOT trigger reply rejection
+        let payload = json!({
+            "channel_id": "ch",
+            "from": "user",
+            "body": "hello",
+            "metadata": { "in_reply_to": "", "referenced_message_id": "", "thread_ts": "" }
+        });
+        assert!(payload_matches_incoming(&payload, "ch", None, None, None, None, None, true));
     }
 
     #[test]
