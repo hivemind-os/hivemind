@@ -261,18 +261,6 @@ security:
       action: prompt
 ```
 
-See [SPEC.md](./SPEC.md) for the full configuration schema and all available options.
-
----
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [SPEC.md](./SPEC.md) | Full project specification — architecture, providers, classification, knowledge graph, MCP, scheduling |
-| [PLAN.md](./PLAN.md) | Phased implementation plan with milestones and crate structure |
-| [TESTING_GUIDE.md](./TESTING_GUIDE.md) | Build, test, and iterate guide — prerequisites, test loops, dev mode, CI/CD |
-
 ---
 
 ## License
