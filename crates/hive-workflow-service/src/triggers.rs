@@ -416,7 +416,7 @@ impl TriggerManager {
         // --- Incoming message triggers ---
         if topic.starts_with("comm.message.received") {
             let payload_channel = payload.get("channel_id").and_then(|v| v.as_str());
-            debug!(
+            info!(
                 topic,
                 payload_channel_id = ?payload_channel,
                 registered_incoming_triggers = triggers.incoming_message.len(),
@@ -444,7 +444,7 @@ impl TriggerManager {
                         body_filter.as_deref(),
                         *ignore_replies,
                     );
-                    debug!(
+                    info!(
                         definition = %trigger.definition_name,
                         trigger_channel_id = %channel_id,
                         matched,

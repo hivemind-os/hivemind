@@ -63,6 +63,21 @@ fn read_entry(key: &str) -> Option<String> {
 
 /// Write a single keyring entry.  Returns `true` on success.
 fn write_entry(key: &str, value: &str) -> bool {
+    // Windows Credential Manager has a 2560-character limit per entry
+    // (UTF-16 encoded). Ephemeral tokens (e.g. OAuth access tokens) can
+    // exceed this. Skip persistence with a warning — the value is still
+    // cached in memory and can be refreshed.
+    #[cfg(target_os = "windows")]
+    if value.len() > 2500 {
+        warn!(
+            key = %key,
+            len = value.len(),
+            "secret too large for Windows keyring (>{} chars), keeping in memory only",
+            2500
+        );
+        return false;
+    }
+
     match keyring::Entry::new(SERVICE, key) {
         Ok(entry) => {
             if let Err(e) = entry.set_password(value) {
