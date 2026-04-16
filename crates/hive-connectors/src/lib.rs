@@ -41,6 +41,6 @@ pub use connector::{Connector, InboundMessage};
 pub use message_state::{MessageState, MessageStateStore, SqliteMessageStateStore};
 pub use registry::ConnectorRegistry;
 pub use resolver::ResourceResolver;
-pub use service::{ConnectorService, ConnectorServiceHandle};
+pub use service::{ConnectorService, ConnectorServiceHandle, PollHealth};
 pub use service_registry::{DynService, OperationSchema, ServiceDescriptor, ServiceRegistry};
 pub use services::{CalendarService, CommunicationService, ContactsService, DriveService};

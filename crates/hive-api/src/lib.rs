@@ -1462,6 +1462,9 @@ impl AppState {
                             tracing::warn!("failed to reload connectors: {e}");
                         } else {
                             tracing::info!("Connectors reloaded");
+                            // Restart polling so new config takes effect immediately
+                            // and any prior backoff state is reset.
+                            connectors.start_background_poll();
                         }
                     }
                     None => {
