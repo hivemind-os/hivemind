@@ -130,19 +130,26 @@ impl RuntimeWorkerProxy {
             "spawning runtime worker"
         );
 
-        let mut child = Command::new(&self.config.worker_binary)
-            .arg("--runtime")
+        let mut cmd = Command::new(&self.config.worker_binary);
+        cmd.arg("--runtime")
             .arg(runtime_arg)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit()) // worker logs go to daemon's stderr
-            .spawn()
-            .map_err(|e| {
-                InferenceError::WorkerCrashed(format!(
-                    "failed to spawn worker binary '{}': {e}",
-                    self.config.worker_binary.display()
-                ))
-            })?;
+            .stderr(Stdio::inherit()); // worker logs go to daemon's stderr
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            InferenceError::WorkerCrashed(format!(
+                "failed to spawn worker binary '{}': {e}",
+                self.config.worker_binary.display()
+            ))
+        })?;
 
         let stdin = child.stdin.take().ok_or_else(|| {
             InferenceError::WorkerCrashed("failed to capture worker stdin".into())

@@ -121,10 +121,18 @@ fn which_shell(name: &str) -> Option<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
-        Command::new("where").arg(name).output().ok().filter(|o| o.status.success()).and_then(|o| {
-            let output = String::from_utf8_lossy(&o.stdout);
-            output.lines().next().map(|line| PathBuf::from(line.trim()))
-        })
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        Command::new("where")
+            .arg(name)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| {
+                let output = String::from_utf8_lossy(&o.stdout);
+                output.lines().next().map(|line| PathBuf::from(line.trim()))
+            })
     }
 }
 
@@ -141,16 +149,28 @@ fn kind_from_path(path: &PathBuf) -> ShellKind {
 
 /// Attempt to get the version string for a shell.
 fn get_shell_version(path: &PathBuf, kind: &ShellKind) -> Option<String> {
-    let output = match kind {
-        ShellKind::Cmd => return None,
-        ShellKind::PowerShell | ShellKind::Pwsh => Command::new(path)
-            .args(["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"])
-            .output()
-            .ok()?,
-        ShellKind::Fish => Command::new(path).args(["--version"]).output().ok()?,
-        ShellKind::Nushell => Command::new(path).args(["--version"]).output().ok()?,
-        _ => Command::new(path).args(["--version"]).output().ok()?,
+    if matches!(kind, ShellKind::Cmd) {
+        return None;
+    }
+
+    let mut cmd = Command::new(path);
+    match kind {
+        ShellKind::PowerShell | ShellKind::Pwsh => {
+            cmd.args(["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"]);
+        }
+        _ => {
+            cmd.args(["--version"]);
+        }
     };
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().ok()?;
 
     if !output.status.success() {
         return None;

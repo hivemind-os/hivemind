@@ -329,11 +329,19 @@ impl PythonEnvManager {
     async fn run_uv(&self, uv_path: &Path, args: &[&str]) -> Result<(), PythonEnvError> {
         tracing::debug!("running: {} {}", uv_path.display(), args.join(" "));
 
-        let output = tokio::process::Command::new(uv_path)
-            .args(args)
+        let mut cmd = tokio::process::Command::new(uv_path);
+        cmd.args(args)
             .env("UV_NO_PROGRESS", "1")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let output = cmd
             .spawn()
             .map_err(|e| PythonEnvError::UvCommand(format!("failed to spawn uv: {e}")))?
             .wait_with_output()

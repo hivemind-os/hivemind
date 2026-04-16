@@ -37,9 +37,13 @@ fn detect_cpu() -> CpuInfo {
 fn detect_memory() -> MemoryInfo {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         // Parse wmic output for total physical memory
         let total = std::process::Command::new("wmic")
             .args(["OS", "get", "TotalVisibleMemorySize", "/value"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -53,6 +57,7 @@ fn detect_memory() -> MemoryInfo {
             * 1024; // wmic returns KB, convert to bytes
         let available = std::process::Command::new("wmic")
             .args(["OS", "get", "FreePhysicalMemory", "/value"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -129,10 +134,17 @@ fn detect_gpus() -> Vec<GpuInfo> {
     // Try nvidia-smi for NVIDIA GPUs.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
-        if let Ok(output) = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"])
-            .output()
+        let mut cmd = std::process::Command::new("nvidia-smi");
+        cmd.args(["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"]);
+
+        #[cfg(target_os = "windows")]
         {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        if let Ok(output) = cmd.output() {
             if output.status.success() {
                 if let Ok(text) = String::from_utf8(output.stdout) {
                     for line in text.lines() {
