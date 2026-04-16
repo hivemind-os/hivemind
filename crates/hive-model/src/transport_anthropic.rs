@@ -22,10 +22,12 @@ impl ProviderTransport for AnthropicTransport {
         selection: &ModelSelection,
     ) -> Result<CompletionResponse> {
         let url = format!("{}/v1/messages", trim_trailing_slash(ctx.base_url));
+        let (system, messages) = anthropic_messages_from_request(request);
         let payload = AnthropicRequest {
             model: selection.model.clone(),
             max_tokens: 1024,
-            messages: anthropic_messages_from_request(request),
+            system,
+            messages,
             tools: format_tools_anthropic(&request.tools),
         };
 
@@ -88,10 +90,12 @@ impl ProviderTransport for AnthropicTransport {
     ) -> Result<CompletionStream> {
         let client = shared_async_client().clone();
         let url = format!("{}/v1/messages", trim_trailing_slash(ctx.base_url));
+        let (system, messages) = anthropic_messages_from_request(request);
         let payload = AnthropicStreamRequest {
             model: selection.model.clone(),
             max_tokens: 1024,
-            messages: anthropic_messages_from_request(request),
+            system,
+            messages,
             stream: true,
             tools: format_tools_anthropic(&request.tools),
         };
