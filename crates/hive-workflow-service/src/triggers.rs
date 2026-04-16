@@ -447,6 +447,12 @@ impl TriggerManager {
                     info!(
                         definition = %trigger.definition_name,
                         trigger_channel_id = %channel_id,
+                        ignore_replies,
+                        listen_channel_id = ?listen_channel_id,
+                        from_filter = ?from_filter,
+                        subject_filter = ?subject_filter,
+                        body_filter = ?body_filter,
+                        filter = ?filter,
                         matched,
                         "incoming message trigger evaluation"
                     );
@@ -1294,6 +1300,7 @@ fn payload_matches_incoming(
 ) -> bool {
     let cid = payload.get("channel_id").and_then(|v| v.as_str());
     if cid != Some(channel_id) {
+        debug!(payload_channel = ?cid, trigger_channel = channel_id, "rejected: channel_id mismatch");
         return false;
     }
     // When ignore_replies is set, skip messages that are replies.
@@ -1308,6 +1315,7 @@ fn payload_matches_incoming(
                 || meta.contains_key("in_reply_to")
                 || meta.contains_key("references");
             if is_reply {
+                info!("rejected: message is a reply (ignore_replies=true)");
                 return false;
             }
         }
@@ -1321,6 +1329,7 @@ fn payload_matches_incoming(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if msg_channel != lc {
+                info!(listen_channel_id = lc, msg_channel, "rejected: listen_channel_id mismatch");
                 return false;
             }
         }
@@ -1330,6 +1339,7 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let from = payload.get("from").and_then(|v| v.as_str()).unwrap_or("");
             if !from.to_lowercase().contains(&f.to_lowercase()) {
+                info!(from_filter = f, from, "rejected: from_filter mismatch");
                 return false;
             }
         }
@@ -1338,6 +1348,7 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let subject = payload.get("subject").and_then(|v| v.as_str()).unwrap_or("");
             if !subject.to_lowercase().contains(&f.to_lowercase()) {
+                info!(subject_filter = f, subject, "rejected: subject_filter mismatch");
                 return false;
             }
         }
@@ -1346,12 +1357,17 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
             if !body.to_lowercase().contains(&f.to_lowercase()) {
+                info!(body_filter = f, "rejected: body_filter mismatch");
                 return false;
             }
         }
     }
     // Legacy generic filter (substring on full payload)
-    filter_matches(payload, filter)
+    let result = filter_matches(payload, filter);
+    if !result {
+        info!(filter = ?filter, "rejected: legacy filter mismatch");
+    }
+    result
 }
 
 fn trigger_type_label(tt: &TriggerType) -> &'static str {
