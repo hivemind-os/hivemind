@@ -462,19 +462,30 @@ impl TriggerManager {
                         if let Some(ext_id) = payload.get("external_id").and_then(|v| v.as_str()) {
                             match self.store.is_trigger_seen(&trigger.definition_id, ext_id) {
                                 Ok(true) => {
-                                    debug!(
+                                    info!(
                                         definition_id = %trigger.definition_id,
                                         definition = %trigger.definition_name,
                                         external_id = ext_id,
-                                        "skipping duplicate incoming message trigger"
+                                        "skipping duplicate incoming message trigger (already seen)"
                                     );
                                     continue;
                                 }
                                 Err(e) => {
                                     warn!(error = %e, "trigger dedup check failed, proceeding");
                                 }
-                                _ => {}
+                                _ => {
+                                    info!(
+                                        definition = %trigger.definition_name,
+                                        external_id = ext_id,
+                                        "trigger dedup: first time seeing this message"
+                                    );
+                                }
                             }
+                        } else {
+                            warn!(
+                                definition = %trigger.definition_name,
+                                "matched trigger has no external_id — dedup skipped"
+                            );
                         }
 
                         let mark_info = if *mark_as_read {
@@ -740,6 +751,10 @@ impl TriggerManager {
 
         replay_events.sort_by_key(|e| e.id);
         let replayed = replay_events.len();
+        let comm_events = replay_events.iter().filter(|e| e.topic.starts_with("comm.message.received")).count();
+        if replayed > 0 {
+            info!(replayed, comm_events, since_ms, "replaying missed events");
+        }
         for event in replay_events {
             self.evaluate_event(&event.topic, &event.payload).await;
             let event_ts = event.timestamp_ms.min(u64::MAX as u128) as u64;
