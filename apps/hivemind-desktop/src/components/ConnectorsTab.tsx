@@ -23,7 +23,7 @@ import { Button, Badge } from '~/ui';
 
 // ── Component ────────────────────────────────────────────────────
 
-export default function ConnectorsTab(_props: { daemon_url?: string }) {
+export default function ConnectorsTab(_props: { daemon_url?: string; onConnectorsChanged?: () => void }) {
   // Core state
   const [connectors, setConnectors] = createSignal<ConnectorConfig[]>([]);
   const [statuses, setStatuses] = createSignal<Record<string, ConnectorStatus>>({});
@@ -70,6 +70,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string }) {
     try {
       await invoke('save_connectors', { configs });
       setConnectors(configs);
+      _props.onConnectorsChanged?.();
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -185,6 +186,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string }) {
               setOauthStatus('complete');
               if (oauthPollTimer) { clearInterval(oauthPollTimer); oauthPollTimer = null; }
               await loadConnectors();
+              _props.onConnectorsChanged?.();
             } else if (pollData.status === 'failed') {
               setOauthStatus('error');
               setOauthError(pollData.error || 'OAuth authorization failed');
@@ -212,6 +214,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string }) {
               setOauthStatus('complete');
               if (oauthPollTimer) { clearInterval(oauthPollTimer); oauthPollTimer = null; }
               await loadConnectors();
+              _props.onConnectorsChanged?.();
             } else if (pollData.status === 'failed') {
               setOauthStatus('error');
               setOauthError(pollData.error || 'OAuth authorization failed');
