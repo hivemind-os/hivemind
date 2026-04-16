@@ -206,24 +206,12 @@ export function createConfigStore(deps: ConfigStoreDeps): ConfigStoreReturn {
     setEditConfig((c) => {
       if (!c) return null;
       const kind = 'open-ai-compatible';
-      const existing = c.models.providers.filter((p) => p.id === kind || p.id.startsWith(`${kind}-`));
-      let id: string;
-      if (existing.length === 0) {
-        id = kind;
-      } else {
-        // Find the highest existing suffix number
-        let maxSuffix = 1;
-        for (const p of existing) {
-          const match = p.id.match(/-(\d+)$/);
-          if (match) {
-            maxSuffix = Math.max(maxSuffix, parseInt(match[1], 10));
-          }
-        }
-        id = `${kind}-${maxSuffix + 1}`;
-      }
+      // Use a short random id so it doesn't imply a specific provider kind.
+      // The user picks the actual kind in the edit dialog afterwards.
+      const id = `provider-${crypto.randomUUID().slice(0, 8)}`;
       const newP: ModelProviderConfig = {
         id, name: 'New Provider', kind,
-        base_url: 'https://api.openai.com/v1', auth: 'api-key', models: ['gpt-4o'],
+        base_url: 'https://api.openai.com/v1', auth: 'api-key', models: [],
         model_capabilities: {},
         channel_class: 'internal', priority: 50, enabled: true,
         options: { route: null, allow_model_discovery: false, default_api_version: null, response_prefix: null, headers: {} },

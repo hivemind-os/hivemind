@@ -413,30 +413,35 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                   updateProvider(idx(), 'kind', newKind);
                   switch (newKind) {
                     case 'anthropic':
+                      updateProvider(idx(), 'name', 'Anthropic');
                       updateProvider(idx(), 'auth', 'api-key');
                       updateProvider(idx(), 'base_url', 'https://api.anthropic.com');
                       updateProvider(idx(), 'models', []);
                       updateProvider(idx(), 'model_capabilities', {});
                       break;
                     case 'open-ai-compatible':
+                      updateProvider(idx(), 'name', 'OpenAI Compatible');
                       updateProvider(idx(), 'auth', 'api-key');
                       updateProvider(idx(), 'base_url', 'https://api.openai.com/v1');
                       updateProvider(idx(), 'models', []);
                       updateProvider(idx(), 'model_capabilities', {});
                       break;
                     case 'microsoft-foundry':
+                      updateProvider(idx(), 'name', 'Microsoft Foundry');
                       updateProvider(idx(), 'auth', 'api-key');
                       updateProvider(idx(), 'base_url', '');
                       updateProvider(idx(), 'models', []);
                       updateProvider(idx(), 'model_capabilities', {});
                       break;
                     case 'github-copilot':
+                      updateProvider(idx(), 'name', 'GitHub Copilot');
                       updateProvider(idx(), 'auth', 'github-oauth');
                       updateProvider(idx(), 'base_url', 'https://api.githubcopilot.com');
                       updateProvider(idx(), 'models', []);
                       updateProvider(idx(), 'model_capabilities', {});
                       break;
                     case 'ollama-local':
+                      updateProvider(idx(), 'name', 'Ollama (Local)');
                       updateProvider(idx(), 'auth', 'none');
                       updateProvider(idx(), 'base_url', 'http://localhost:11434');
                       updateProvider(idx(), 'models', []);
