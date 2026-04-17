@@ -66,7 +66,7 @@ no OAuth tokens for connector 'microsoft'. Please re-authorize via Settings → 
   which npx  # or the command in your config
   ```
 - Check the MCP server config in your persona's `mcp_servers` section (visible in **Settings → Personas**).
-- Restart the connection from the UI: **Settings → MCP Servers → Reconnect**.
+- Restart the connection from the persona's MCP Servers section in **Settings → Personas**.
 - Check MCP logs:
   ```bash
   cat ~/.hivemind/logs/mcp-*.log | tail -30

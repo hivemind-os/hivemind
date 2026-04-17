@@ -61,9 +61,12 @@ The transport is transparent to the agent — it calls tools the same way regard
 
 ## Adding an MCP Server
 
-1. Open **Settings → MCP Servers → Add**
-2. Choose a transport type (stdio for local, HTTP for remote)
-3. Fill in the connection details and save
+MCP servers are configured **per persona** — each persona gets its own set of integrations, so a Data Analyst persona can have a Postgres server without it cluttering your Code Reviewer.
+
+1. Open **Settings → Personas** and select a persona
+2. In the **MCP Servers** section, click **Add Server**
+3. Choose a transport type (stdio for local, HTTP for remote)
+4. Fill in the connection details and save
 
 Here's an example configuration that adds three MCP servers:
 

@@ -4,8 +4,10 @@ Connect HiveMind OS to external tools and data sources through the **Model Conte
 
 ## Adding an MCP Server via UI
 
-1. Open **Settings → MCP Servers**
-2. Click **Add**
+MCP servers are configured **per persona** — each persona gets its own set of integrations.
+
+1. Open **Settings → Personas** and select (or create) a persona
+2. Scroll to the **MCP Servers** section and click **Add Server**
 3. Choose a transport type — **stdio** (local process), **SSE** (remote HTTP), or **streamable-http** (bidirectional HTTP)
 4. Fill in the connection details (command, args, URL, environment variables)
 5. Assign a **channel classification** (see [below](#channel-classification))
@@ -98,9 +100,9 @@ HiveMind OS applies the same [data-classification rules](/concepts/privacy-and-s
 
 **Example:** A filesystem server accessing local files should be `local-only`. A remote API you don't fully control should be `internal` or `public` depending on trust level.
 
-## Per-Persona MCP Scoping
+## Per-Persona Configuration
 
-You can assign specific MCP servers to individual [personas](/concepts/personas). This limits which integrations each persona can access — a security-focused reviewer doesn't need your Slack server.
+MCP servers are always configured **per persona**. Each persona has its own list of servers, so integrations are scoped to the agent that needs them — a security-focused reviewer doesn't get your Slack server.
 
 ```yaml
 id: user/data-analyst
@@ -128,7 +130,7 @@ Only the servers listed in `mcpServers` are available to that persona. Each entr
 | Problem | What to Check |
 |---|---|
 | **Server not starting** | Verify the `command` path is correct and the binary is installed (e.g., `npx` is on your PATH) |
-| **Tools not appearing** | Restart the MCP connection from **Settings → MCP Servers** — tool discovery runs at connect time |
+| **Tools not appearing** | Restart the MCP connection from the persona's MCP Servers section — tool discovery runs at connect time |
 | **Permission errors** | Check the server's `channel_class` — it may be too restrictive for the data the agent needs to send |
 | **Timeout issues** | Increase the connection timeout in server settings; remote SSE servers may need longer initial handshakes |
 
