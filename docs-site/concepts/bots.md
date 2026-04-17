@@ -105,7 +105,7 @@ The **Bots** page in HiveMind OS is your command center for managing all active 
 
 For multi-agent scenarios, the **Agent Stage** provides a visual collaboration view. When multiple bots work together — say, a planner bot delegating to a coder bot and a reviewer bot — the Stage shows each agent's status, message flow, and progress in real time. It's the visual layer on top of the supervisor system that orchestrates agent teams.
 
-![Agent Stage showing bots with approval badges and a toast notification](/images/agent-approval-badge.png)
+<video src="/images/agent-stage.mp4" autoplay loop muted playsinline style="width:100%; border-radius:8px;" title="Agent Stage showing bots with approval badges and a toast notification"></video>
 
 Badges on each agent card give you at-a-glance status:
 
