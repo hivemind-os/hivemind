@@ -1344,7 +1344,7 @@ const App = () => {
   const sendMessage = async (decision?: ScanDecision, options?: { skipPreempt?: boolean }) => {
     if (busyAction() !== null) return;
     let content = (decision ? pendingReviewContent() ?? draft() : draft()).trim();
-    const attachments = pendingAttachments();
+    let attachments = [...pendingAttachments()];
     if ((!content && attachments.length === 0) || !daemonOnline()) {
       return;
     }
@@ -1358,13 +1358,16 @@ const App = () => {
       if (!content && attachments.length === 0) return;
     }
 
-    // Resolve @[path] file references: read file contents and embed inline.
+    // Resolve @[path] file references: for regular sessions, attach as
+    // MessageAttachments (the backend routes text/* to ContentPart::Text).
+    // For bot sessions (which only support plain content), embed inline.
     const atMentionPattern = /@\[([^\]]+)\]/g;
     const mentionMatches = [...content.matchAll(atMentionPattern)];
     if (mentionMatches.length > 0) {
       const isBot = sessionEntityType() === 'bot';
       const sid = selectedSessionId();
       const seen = new Set<string>();
+      const fileAttachments: MessageAttachment[] = [];
       const fileBlocks: string[] = [];
 
       for (const m of mentionMatches) {
@@ -1378,7 +1381,28 @@ const App = () => {
               ? await invoke<any>('workspace_read_file', { session_id: sid, path: filePath })
               : null;
           if (fileData && !fileData.is_binary && fileData.content) {
-            fileBlocks.push(`\n<file path="${filePath}">\n${fileData.content}\n</file>`);
+            if (isBot) {
+              // Bots only support plain content — embed inline.
+              fileBlocks.push(`\n<file path="${filePath}">\n${fileData.content}\n</file>`);
+            } else {
+              // Regular sessions: create a proper attachment.
+              const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+              const mimeMap: Record<string, string> = {
+                ts: 'text/typescript', tsx: 'text/typescript', js: 'text/javascript',
+                jsx: 'text/javascript', py: 'text/x-python', rs: 'text/x-rust',
+                go: 'text/x-go', md: 'text/markdown', json: 'text/json',
+                yaml: 'text/yaml', yml: 'text/yaml', toml: 'text/toml',
+                html: 'text/html', css: 'text/css', sql: 'text/sql',
+                sh: 'text/x-shellscript', xml: 'text/xml', csv: 'text/csv',
+              };
+              const mediaType = mimeMap[ext] ?? 'text/plain';
+              fileAttachments.push({
+                id: `at-${fileAttachments.length}`,
+                filename: filePath,
+                media_type: mediaType,
+                data: btoa(unescape(encodeURIComponent(fileData.content))),
+              });
+            }
           }
         } catch {
           // File read failed — leave the token as-is for context
@@ -1388,9 +1412,14 @@ const App = () => {
       // Replace @[path] tokens with plain path references in the message
       content = content.replace(atMentionPattern, (_match, path) => `\`${path}\``);
 
-      // Append file contents at the end of the message
+      // For bots: append inline file contents
       if (fileBlocks.length > 0) {
         content += '\n\n---\nReferenced files:' + fileBlocks.join('');
+      }
+
+      // For regular sessions: merge file attachments with any pending attachments
+      if (fileAttachments.length > 0) {
+        attachments.push(...fileAttachments);
       }
     }
 

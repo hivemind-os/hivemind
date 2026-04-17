@@ -8338,6 +8338,9 @@ fn build_content_parts(
     text: &str,
     attachments: &[MessageAttachment],
 ) -> Vec<hive_model::ContentPart> {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+
     if attachments.is_empty() {
         return vec![];
     }
@@ -8346,10 +8349,27 @@ fn build_content_parts(
         parts.push(hive_model::ContentPart::Text { text: text.to_string() });
     }
     for att in attachments {
-        parts.push(hive_model::ContentPart::Image {
-            media_type: att.media_type.clone(),
-            data: att.data.clone(),
-        });
+        if att.media_type.starts_with("text/") {
+            // Decode base64 text content and include as a Text part.
+            let label = att.filename.as_deref().unwrap_or("attachment");
+            if let Ok(bytes) = b64.decode(&att.data) {
+                if let Ok(decoded) = String::from_utf8(bytes) {
+                    parts.push(hive_model::ContentPart::Text {
+                        text: format!("<file name=\"{label}\">\n{decoded}\n</file>"),
+                    });
+                    continue;
+                }
+            }
+            // Fallback: include the raw base64 data as-is if decode fails.
+            parts.push(hive_model::ContentPart::Text {
+                text: format!("<file name=\"{label}\">\n{}\n</file>", att.data),
+            });
+        } else {
+            parts.push(hive_model::ContentPart::Image {
+                media_type: att.media_type.clone(),
+                data: att.data.clone(),
+            });
+        }
     }
     parts
 }
