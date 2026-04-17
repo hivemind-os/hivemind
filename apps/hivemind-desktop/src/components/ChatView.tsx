@@ -260,6 +260,20 @@ const ChatView = (props: ChatViewProps) => {
     return filtered.length > 0 ? filtered : null;
   });
 
+  // Slash command: detect /workflow or /wf at the start of the draft
+  const slashWorkflowMatches = createMemo(() => {
+    const text = props.draft().trimStart();
+    const match = text.match(/^\/(?:workflow|wf)\s*(.*)/i);
+    if (!match) return null;
+    const filter = match[1]?.toLowerCase() ?? '';
+    const defs = props.chatWorkflowDefinitions();
+    if (defs.length === 0) return null;
+    const filtered = filter
+      ? defs.filter((d) => d.name.toLowerCase().includes(filter) || (d.description ?? '').toLowerCase().includes(filter))
+      : defs;
+    return filtered.length > 0 ? filtered : null;
+  });
+
   async function handleLaunchChatWorkflow() {
     const val = wfLaunchValue();
     if (!val?.definition) return;
@@ -1242,6 +1256,34 @@ const ChatView = (props: ChatViewProps) => {
                           <span class="font-medium">{tpl.name || tpl.id}</span>
                           <Show when={tpl.description}>
                             <span class="text-xs text-muted-foreground">{tpl.description}</span>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                )}
+              </Show>
+              {/* /workflow or /wf slash command autocomplete */}
+              <Show when={slashWorkflowMatches()}>
+                {(matches) => (
+                  <div class="absolute bottom-full left-0 z-50 mb-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border mb-1">Chat workflows</div>
+                    <For each={matches()}>
+                      {(def) => (
+                        <div
+                          class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            props.setDraft('');
+                            // Pre-fill the launcher dialog with this workflow
+                            setWfLaunchValue({ definition: def.name, inputs: {} });
+                            setShowWfLauncher(true);
+                          }}
+                        >
+                          <GitBranch size={14} class="shrink-0 text-muted-foreground" />
+                          <span class="font-medium">{def.name}</span>
+                          <Show when={def.description}>
+                            <span class="text-xs text-muted-foreground truncate">{def.description}</span>
                           </Show>
                         </div>
                       )}
