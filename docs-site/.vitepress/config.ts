@@ -250,7 +250,8 @@ export default withMermaid(
 
       footer: {
         message: "Released under the MIT License.",
-        copyright: "Copyright © 2024-present HiveMind OS Contributors",
+        copyright:
+          'Copyright © 2024-present HiveMind OS Contributors · <a href="/privacy-policy">Privacy Policy</a>',
       },
     },
 
