@@ -30,14 +30,34 @@ These tools are always available — no setup required. The agent calls them aut
 
 ::: info MCP in Plain English
 **Model Context Protocol** is an open standard for connecting AI agents to external tools and data sources. Think of it as **USB ports for your AI** — plug in any compatible server and the agent instantly gains new capabilities, from browsing GitHub repos to querying databases.
+:::
+
+MCP is maintained as an open-source specification at **[modelcontextprotocol.io](https://modelcontextprotocol.io)**. The full protocol specification is at **[modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification)**.
+
+The protocol is supported by a wide ecosystem — Claude, ChatGPT, VS Code, Cursor, and many other AI applications all speak MCP. Servers you configure in HiveMind OS work with any MCP-compatible client, and vice versa.
+
+### Protocol Concepts
+
+MCP defines three categories of capabilities that servers can expose:
+
+| Capability | What It Provides | Example |
+|---|---|---|
+| **Tools** | Functions the agent can call | `create_issue`, `run_query`, `send_message` |
+| **Resources** | Contextual data for the model or user | File contents, database schemas, API documentation |
+| **Prompts** | Templated messages and workflows | A "summarise PR" prompt template with input parameters |
+
+When you connect an MCP server, HiveMind OS automatically discovers all three and makes them available to the agent — just like built-in tools.
+
+### Transports
 
 MCP servers communicate over two transport types:
 
-- **stdio** — runs as a local process on your machine (fast, private)
-- **SSE / Streamable HTTP** — connects to a remote server over HTTP (great for shared corporate tools)
-:::
+| Transport | How It Works | Best For |
+|---|---|---|
+| **stdio** | Runs as a local process on your machine | Fast, private, no network required |
+| **SSE / Streamable HTTP** | Connects to a remote server over HTTP | Shared corporate tools, cloud-hosted services |
 
-When you connect an MCP server, HiveMind OS automatically discovers its tools, resources, and prompts. They become first-class actions the agent can use — just like built-in tools.
+The transport is transparent to the agent — it calls tools the same way regardless of where the server is running.
 
 ## Adding an MCP Server
 
@@ -143,8 +163,24 @@ HiveMind OS will call the GitHub MCP server's tools to list your PRs, check revi
 
 Many tools and MCP servers require **Node.js** or **Python** to run. HiveMind OS ships with [managed runtimes](/concepts/managed-runtimes) that are downloaded automatically — the agent uses these instead of relying on your system-installed versions. This ensures consistent behaviour for shell commands, process execution, and MCP stdio servers like `npx @modelcontextprotocol/server-github`.
 
+## MCP vs Agent Skills
+
+MCP and [Agent Skills](/concepts/skills) are complementary standards:
+
+| | MCP | Agent Skills |
+|---|---|---|
+| **Provides** | Callable tools, resources, prompts | Knowledge, procedures, scripts |
+| **Analogy** | The wrench in your toolbox | The instruction manual for using it |
+| **Spec** | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification) | [agentskills.io](https://agentskills.io/specification) |
+| **Example** | A GitHub server that can create PRs | A skill that teaches the agent *how* to write good PR descriptions |
+
+HiveMind OS supports both — connect MCP servers for actions, install skills for expertise.
+
 ## Learn More
 
+- **[MCP Specification](https://modelcontextprotocol.io/specification)** — The full open protocol standard
+- **[MCP Servers Directory](https://github.com/modelcontextprotocol/servers)** — Browse available servers
 - [Configure MCP Servers](/guides/mcp-servers) — Detailed setup guide for MCP
+- [Agent Skills](/concepts/skills) — How skills complement tools with knowledge and procedures
 - [Privacy & Security](./privacy-and-security) — How classification protects your data across tools
 - [Agentic Loops](./agentic-loops) — How the agent decides which tools to call
