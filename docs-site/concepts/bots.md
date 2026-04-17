@@ -99,10 +99,21 @@ The **Bots** page in HiveMind OS is your command center for managing all active 
 - **Activity log** — review what each bot has been doing, including tool calls and outputs
 - **Messaging interface** — send follow-up messages to idle bots directly from the dashboard
 - **Approval badges** — bots waiting for human approval surface clearly so you never miss a gate
+- **Question badges** — bots that have asked a question and are waiting for your response are flagged with a question badge
 
 ## Agent Stage
 
 For multi-agent scenarios, the **Agent Stage** provides a visual collaboration view. When multiple bots work together — say, a planner bot delegating to a coder bot and a reviewer bot — the Stage shows each agent's status, message flow, and progress in real time. It's the visual layer on top of the supervisor system that orchestrates agent teams.
+
+![Agent Stage showing bots with approval badges and a toast notification](/images/agent-approval-badge.png)
+
+Badges on each agent card give you at-a-glance status:
+
+- **Question badge** — the bot has asked a question and is waiting for your response. Click the badge to view and answer.
+
+![Agent Stage showing a question badge on a bot awaiting user input](/images/agent-question-badge.png)
+
+- **Approval badge** — the bot needs human approval before it can proceed with a tool call. See the [Security Policies Guide](/guides/security-policies) for how approval rules work.
 
 ## Putting It Together
 
