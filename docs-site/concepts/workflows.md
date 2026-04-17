@@ -121,11 +121,13 @@ HiveMind OS offers three ways to author workflows:
 
 A workflow runs when its **trigger** fires. This creates an **instance** — a live execution of the workflow with its own state and progress.
 
-- **Manual trigger** — you click **Launch** on the Workflows page, fill in any input fields, and the workflow starts.
-- **Automatic triggers** (schedule, event, incoming message, MCP notification) — fire on their own once the workflow is saved. You can pause and resume triggers without deleting the workflow.
+- **Manual trigger** — you launch the workflow yourself. Background and chat workflows are launched from different places (see below).
+- **Automatic triggers** (schedule, event, incoming message) — fire on their own once the workflow is saved. You can pause and resume triggers without deleting the workflow.
 - **Nested launch** — a `launch_workflow` step inside one workflow starts another, enabling composition.
 
-**Background** instances run independently and appear on the Workflows page. **Chat** instances are launched from the **Chat view** and attach to a conversation — agent outputs appear as messages, and `feedback_gate` steps pause to ask questions or present choices.
+**Background workflows** are launched from the **workflow definitions view** (⚙ gear icon next to **Workflows** in the sidebar) — click the **Launch** button on a definition, fill in any inputs, and the instance appears on the Workflows page where you can track it.
+
+**Chat workflows** are launched from the **Chat view** — click the **Launch a chat workflow** button in the composer toolbar, pick a workflow, and it attaches to your conversation. Agent outputs appear as messages, and `feedback_gate` steps pause to ask questions or present choices.
 
 You can **monitor**, **pause**, **resume**, or **kill** running instances from the Workflows page at any time.
 

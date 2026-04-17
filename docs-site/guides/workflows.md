@@ -8,7 +8,7 @@ Workflows let you chain agents, tools, and control logic into repeatable automat
 2. Give it a name (e.g. `user/daily-digest`) and pick a mode — **Background** or **Chat**.
 3. Add a **trigger** — what kicks the workflow off (schedule, event, or manual).
 4. Add **steps** — the work the workflow actually does.
-5. Hit **Run** to test it. Background workflows launch immediately; chat workflows are launched from the Chat view and attach to your conversation.
+5. Save and launch it. **Background workflows** are launched from the definitions view (click the **Launch** button). **Chat workflows** are launched from the **Chat view** using the workflow button in the composer toolbar.
 
 ## Visual Designer vs YAML Editor
 
@@ -33,7 +33,6 @@ Background workflows run autonomously without user interaction. They're ideal fo
 | `manual` | Triggered manually by a user (optionally with an input schema) |
 | `schedule` | Cron expression (e.g. `"0 9 * * 1-5"` for weekdays at 9 AM) |
 | `event_pattern` | Fires on internal event bus topics |
-| `mcp_notification` | Fires when an MCP server sends a notification |
 | `incoming_message` | Fires on messages from a connector (email, Slack, Discord, etc.) |
 
 ### Monitoring
@@ -235,18 +234,33 @@ Keep workflows focused on orchestration. Put complex logic inside agent prompts 
 
 ## Launching Workflows
 
-Once you've created a workflow, there are several ways to launch it depending on the trigger type and mode.
+Background and chat workflows are launched from **different places** in the UI.
 
-### Manual Launch (UI)
+### Launching Background Workflows
 
-For workflows with a `manual` trigger:
+Background workflows are launched from the **workflow definitions view** (⚙ gear icon next to **Workflows** in the sidebar):
 
-1. Open the **Workflows** page from the sidebar
-2. Find your workflow and click **Launch**
-3. If the workflow defines an `input_schema`, a form appears where you fill in the required fields
-4. Click **Run** — the workflow starts immediately
+1. Open the definitions view and find your workflow
+2. Click the **Launch** button on the workflow definition
+3. If the workflow has multiple manual triggers, pick which one to use
+4. Fill in any required inputs (shown as a form generated from the `input_schema`, or as a JSON editor for complex inputs)
+5. Review and click **Launch** — the workflow starts immediately
 
-**Background workflows** run independently — the instance appears on the Workflows page where you can track its progress. **Chat workflows** are launched from the **Chat view** — they attach to your conversation and interact with you inline.
+The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress in real time.
+
+### Launching Chat Workflows
+
+Chat workflows are launched from the **Chat view** using the workflow button in the message composer:
+
+1. Open the **Chat view** and start or select a conversation
+2. Click the **Launch a chat workflow** button in the composer toolbar
+3. A dialog opens with a searchable list of available chat workflows — pick the one you want
+4. If the workflow has multiple manual triggers, choose which one to use
+5. Fill in any required inputs and click **Launch**
+6. The workflow attaches to your conversation — agent steps produce messages in the thread, and `feedback_gate` steps pause to present you with choices or a text input
+7. Your responses feed back into the workflow, and execution continues
+
+This makes chat workflows ideal for guided processes — onboarding, approval flows, interactive research — where you need to participate at key moments.
 
 ### Automatic Triggers
 
@@ -257,7 +271,6 @@ Workflows with non-manual triggers activate automatically once saved:
 | `schedule` | At the next matching cron time (e.g., `"0 9 * * 1-5"` fires weekdays at 9 AM) |
 | `event_pattern` | When a matching event is published on the internal event bus |
 | `incoming_message` | When a message arrives on the specified connector channel |
-| `mcp_notification` | When a connected MCP server sends a notification |
 
 You can **pause triggers** on any workflow without deleting it — the workflow stays saved but won't fire until you resume triggers. Toggle this from the workflow's detail panel.
 
@@ -276,18 +289,6 @@ Use the `launch_workflow` step kind to start one workflow from another:
 ```
 
 This is how you compose small, focused workflows into larger automations — each workflow handles one concern.
-
-### Launching Chat Workflows
-
-Chat workflows are launched from the **Chat view**, not the Workflows page. When you launch one:
-
-1. Open the **Chat view** and start or select a conversation
-2. Launch the chat workflow — it attaches to the conversation
-3. Agent steps produce messages in the conversation thread
-4. `feedback_gate` steps pause execution and present you with choices or a text input
-5. Your response feeds back into the workflow, and execution continues
-
-This makes chat workflows ideal for guided processes — onboarding, approval flows, interactive research — where the user needs to participate at key moments.
 
 ## Managing Running Workflows
 
@@ -342,7 +343,7 @@ Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the def
 | **3D Print Design** | `system/3d-print/design` | Chat | Guides a 3D print CAD design workflow using specialized personas for modeling and analysis. |
 
 ::: tip Start with Approval Workflow
-The **Approval Workflow** is the simplest bundled workflow and a great way to see feedback gates, branching, and variables in action. Launch it from the Workflows page to try it out.
+The **Approval Workflow** is the simplest bundled workflow and a great way to see feedback gates, branching, and variables in action. Launch it from the definitions view to try it out.
 :::
 
 ## Creating a Custom Workflow from Scratch
@@ -488,8 +489,8 @@ Use a `branch` step to handle each category differently:
 ### Step 7: Test It
 
 1. Save the workflow
-2. To test before real messages arrive, click **Launch** from the Workflows page — you'll be prompted to provide test input as JSON (e.g., `{"from": "test@example.com", "subject": "Billing help", "body": "I need an invoice"}`)
-3. Watch the instance execute on the Workflows page — click into it to see step-by-step progress
+2. To test before real messages arrive, click **Launch** from the definitions view (⚙ gear icon) — you'll be prompted to provide test input as JSON (e.g., `{"from": "test@example.com", "subject": "Billing help", "body": "I need an invoice"}`)
+3. Watch the instance execute on the **Workflows** page (click **Workflows** in the sidebar) — click into it to see step-by-step progress
 4. Check that the classification is correct and the response makes sense
 
 ### Step 8: Activate

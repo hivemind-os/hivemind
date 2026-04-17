@@ -170,14 +170,24 @@ When you're happy with your workflow, save it and toggle it to **active**. It wi
 
 ### Launching a Workflow
 
-To run a workflow you've already created:
+Background and chat workflows are launched from **different places**.
+
+**Background workflows** — launch from the workflow definitions view:
 
 1. Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the definitions view
 2. Find your workflow and click **Launch**
-3. If the workflow asks for inputs (e.g., a project name or description), fill in the form that appears
-4. Click **Run**
+3. If the workflow has multiple manual triggers, pick which one to use
+4. Fill in any required inputs and click **Launch**
 
-**Background workflows** start working on their own — you'll see a progress tracker on the Workflows page. **Chat workflows** are launched from the **Chat view** and run inside your conversation so you can interact with them.
+The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress.
+
+**Chat workflows** — launch from the Chat view:
+
+1. Open the **Chat view** and start or select a conversation
+2. Click the **Launch a chat workflow** button in the composer toolbar
+3. Pick your workflow from the searchable list that appears
+4. Fill in any required inputs and click **Launch**
+5. The workflow runs inside your conversation — it sends messages and can ask you questions along the way
 
 Workflows with automatic triggers (schedule, incoming message) run on their own once saved — no need to launch them manually.
 
