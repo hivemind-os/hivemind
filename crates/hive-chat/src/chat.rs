@@ -3418,6 +3418,7 @@ impl ChatService {
 
         // Remove the session node (and its edges) from the knowledge graph.
         // If scrub_kb is true, also delete all linked message nodes first.
+        // Always remove child agent nodes to avoid FK constraint failures.
         let graph_path = Arc::clone(&self.knowledge_graph_path);
         tokio::task::spawn_blocking(move || {
             let graph = KnowledgeGraph::open(&*graph_path).map_err(|e| {
@@ -3436,6 +3437,20 @@ impl ChatService {
                 tracing::info!(
                     "scrubbed {scrubbed} message nodes for session node {session_node_id}"
                 );
+            }
+            // Remove persisted agent nodes linked to this session so that
+            // their edges are gone before we delete the session node.
+            let agent_nodes = graph
+                .list_outbound_nodes(
+                    session_node_id,
+                    "session_agent",
+                    DataClass::Internal,
+                    10_000,
+                )
+                .unwrap_or_default();
+            if !agent_nodes.is_empty() {
+                let ids: Vec<i64> = agent_nodes.iter().map(|n| n.id).collect();
+                let _ = graph.remove_nodes_batch(&ids);
             }
             graph.remove_node(session_node_id).map_err(|e| {
                 ChatServiceError::KnowledgeGraphFailed {
@@ -7575,23 +7590,20 @@ impl ChatService {
                             detail: e.to_string(),
                         }
                     })?;
-                    let node_id = graph
-                        .insert_node(&NewNode {
+                    graph.insert_node_linked(
+                        &NewNode {
                             node_type: "session_agent".to_string(),
                             name: agent_name,
                             data_class: DataClass::Internal,
                             content: Some(content),
-                        })
-                        .map_err(|e| ChatServiceError::KnowledgeGraphFailed {
-                            operation: "insert_agent_node",
-                            detail: e.to_string(),
-                        })?;
-                    graph.insert_edge(session_node_id, node_id, "session_agent", 1.0).map_err(
-                        |e| ChatServiceError::KnowledgeGraphFailed {
-                            operation: "link_session_agent",
-                            detail: e.to_string(),
                         },
-                    )?;
+                        session_node_id,
+                        "session_agent",
+                        1.0,
+                    ).map_err(|e| ChatServiceError::KnowledgeGraphFailed {
+                        operation: "insert_agent_node",
+                        detail: e.to_string(),
+                    })?;
                 }
             }
             Ok(())
@@ -8338,9 +8350,6 @@ fn build_content_parts(
     text: &str,
     attachments: &[MessageAttachment],
 ) -> Vec<hive_model::ContentPart> {
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD;
-
     if attachments.is_empty() {
         return vec![];
     }
@@ -8349,27 +8358,10 @@ fn build_content_parts(
         parts.push(hive_model::ContentPart::Text { text: text.to_string() });
     }
     for att in attachments {
-        if att.media_type.starts_with("text/") {
-            // Decode base64 text content and include as a Text part.
-            let label = att.filename.as_deref().unwrap_or("attachment");
-            if let Ok(bytes) = b64.decode(&att.data) {
-                if let Ok(decoded) = String::from_utf8(bytes) {
-                    parts.push(hive_model::ContentPart::Text {
-                        text: format!("<file name=\"{label}\">\n{decoded}\n</file>"),
-                    });
-                    continue;
-                }
-            }
-            // Fallback: include the raw base64 data as-is if decode fails.
-            parts.push(hive_model::ContentPart::Text {
-                text: format!("<file name=\"{label}\">\n{}\n</file>", att.data),
-            });
-        } else {
-            parts.push(hive_model::ContentPart::Image {
-                media_type: att.media_type.clone(),
-                data: att.data.clone(),
-            });
-        }
+        parts.push(hive_model::ContentPart::Image {
+            media_type: att.media_type.clone(),
+            data: att.data.clone(),
+        });
     }
     parts
 }

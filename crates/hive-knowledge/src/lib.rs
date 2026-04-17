@@ -138,6 +138,32 @@ impl KnowledgeGraph {
         Ok(self.connection.last_insert_rowid())
     }
 
+    /// Insert a node and link it to a parent node via an edge, atomically.
+    ///
+    /// Both the node insert and the edge insert happen inside a single
+    /// transaction so that a concurrent `remove_node` on the parent cannot
+    /// leave an orphan child node.
+    pub fn insert_node_linked(
+        &self,
+        node: &NewNode,
+        parent_id: i64,
+        edge_type: &str,
+        weight: f64,
+    ) -> anyhow::Result<i64> {
+        let tx = self.connection.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO nodes (node_type, name, data_class, content) VALUES (?1, ?2, ?3, ?4)",
+            params![node.node_type, node.name, node.data_class.to_i64(), node.content],
+        )?;
+        let node_id = self.connection.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO edges (source_id, target_id, edge_type, weight) VALUES (?1, ?2, ?3, ?4)",
+            params![parent_id, node_id, edge_type, weight],
+        )?;
+        tx.commit()?;
+        Ok(node_id)
+    }
+
     pub fn get_node(&self, id: i64) -> anyhow::Result<Option<Node>> {
         Ok(self.connection
             .query_row(
@@ -394,29 +420,28 @@ impl KnowledgeGraph {
     }
 
     pub fn remove_node(&self, id: i64) -> anyhow::Result<bool> {
-        // Clean embedding data from all vec tables.
-        self.connection
-            .execute("DELETE FROM embedding_meta WHERE node_id = ?1", params![id])
+        let tables = self.all_vec_table_names().unwrap_or_default();
+        // Wrap all deletes in a single transaction so that a concurrent
+        // writer cannot insert a new edge between the edge-delete and the
+        // node-delete, which would cause a FOREIGN KEY constraint failure.
+        let tx = self.connection.unchecked_transaction()?;
+        tx.execute("DELETE FROM embedding_meta WHERE node_id = ?1", params![id])
             .unwrap_or_else(|e| {
                 tracing::warn!("failed to delete embedding_meta for node {id}: {e}");
                 0
             });
-        if let Ok(tables) = self.all_vec_table_names() {
-            for tbl in &tables {
-                self.connection
-                    .execute(&format!("DELETE FROM \"{tbl}\" WHERE rowid = ?1"), params![id])
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(
-                            "failed to delete embedding row from {tbl} for node {id}: {e}"
-                        );
-                        0
-                    });
-            }
+        for tbl in &tables {
+            tx.execute(&format!("DELETE FROM \"{tbl}\" WHERE rowid = ?1"), params![id])
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "failed to delete embedding row from {tbl} for node {id}: {e}"
+                    );
+                    0
+                });
         }
-        // Delete edges referencing this node first
-        self.connection
-            .execute("DELETE FROM edges WHERE source_id = ?1 OR target_id = ?1", params![id])?;
-        let deleted = self.connection.execute("DELETE FROM nodes WHERE id = ?1", params![id])?;
+        tx.execute("DELETE FROM edges WHERE source_id = ?1 OR target_id = ?1", params![id])?;
+        let deleted = tx.execute("DELETE FROM nodes WHERE id = ?1", params![id])?;
+        tx.commit()?;
         Ok(deleted > 0)
     }
 
