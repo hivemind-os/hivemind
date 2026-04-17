@@ -1363,6 +1363,9 @@ const App = () => {
     await runAction('send', async () => {
       // For bot sessions, route through the bot message API.
       if (sessionEntityType() === 'bot') {
+        // Reject messages to bots that have finished.
+        const bot = botStore.bots().find(b => b.config.id === session_id);
+        if (bot?.status === 'done' || bot?.status === 'error') return;
         await invoke('message_bot', { agent_id: session_id, content });
         setDraft('');
         setPendingAttachments([]);
@@ -3216,6 +3219,10 @@ const App = () => {
                   loadEditConfig={loadEditConfig}
                   loadToolDefinitions={loadToolDefinitions}
                   entityType={sessionEntityType()}
+                  readOnly={sessionEntityType() === 'bot' && (() => {
+                    const bot = botStore.bots().find(b => b.config.id === selectedSessionId());
+                    return bot?.status === 'done' || bot?.status === 'error';
+                  })()}
                   allQuestions={allQuestions}
                   onQuestionAnswered={(request_id, answerText) => {
                     markQuestionAnswered(request_id, answerText);

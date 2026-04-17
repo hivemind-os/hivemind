@@ -86,6 +86,8 @@ export interface ChatViewProps {
   loadToolDefinitions: () => Promise<void>;
   // Entity type — controls which features are visible
   entityType?: 'session' | 'bot';
+  // When true, the compose area is hidden (e.g. bot in "done" status)
+  readOnly?: boolean;
   // Spatial canvas props
   onSpatialSendMessage: (content: string, position: any) => void;
   // Inline question props
@@ -1111,6 +1113,7 @@ const ChatView = (props: ChatViewProps) => {
               }}
             </Show>
 
+            <Show when={!props.readOnly}>
             <div
               class={`relative flex items-end gap-2 rounded-lg border border-input bg-background p-2 ${isDragging() ? 'drag-over' : ''}`}
               onDragOver={handleDragOver}
@@ -1382,6 +1385,12 @@ const ChatView = (props: ChatViewProps) => {
                 </Button>
               </Show>
             </div>
+            </Show>
+            <Show when={props.readOnly}>
+              <div class="px-3 py-2 text-center text-xs text-muted-foreground border-t border-border">
+                This bot has finished — chat is read-only.
+              </div>
+            </Show>
           </section>
         </div>
       }
