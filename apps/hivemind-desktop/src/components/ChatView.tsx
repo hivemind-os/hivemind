@@ -15,7 +15,7 @@ import type {
   WorkflowInstanceSummary,
 } from '../types';
 import { formatTime, renderMarkdown, riskClass, statusClass } from '../utils';
-import { CheckCircle, XCircle, Radio, Brain, Lock, Wrench, Tag, Target, MessageCircle, Shield, ClipboardList, MessageSquare, Pause, Square, Play, Hourglass, RefreshCw, Settings, Paperclip, Zap, BarChart3, ChevronDown, ChevronRight, GitBranch, BookOpen, Info } from 'lucide-solid';
+import { CheckCircle, XCircle, Radio, Brain, Lock, Wrench, Tag, Target, MessageCircle, Shield, ClipboardList, MessageSquare, Pause, Square, Play, Hourglass, RefreshCw, Settings, Paperclip, Zap, BarChart3, ChevronDown, ChevronRight, GitBranch, BookOpen, Info, FileText } from 'lucide-solid';
 import InlineQuestion, { AnsweredQuestion, type PendingQuestion } from './InlineQuestion';
 import SessionConfigDialog from './SessionConfigDialog';
 import { highlightYaml } from './YamlHighlight';
@@ -104,11 +104,14 @@ export interface ChatViewProps {
   onKillChatWorkflow: (instanceId: number) => void;
   onRespondWorkflowGate: (instanceId: number, stepId: string, response: any) => Promise<void>;
   fetchParsedWorkflow: (name: string) => Promise<{ definition: any } | null>;
+  // @-mention workspace file references
+  workspaceFiles?: Accessor<any[]>;
 }
 
 const ChatView = (props: ChatViewProps) => {
   const { safeTimeout } = useTimerCleanup();
   let messageListRef: HTMLDivElement | undefined;
+  let textareaRef: HTMLTextAreaElement | undefined;
   const [userAtBottom, setUserAtBottom] = createSignal(true);
   const [showConfigDialog, setShowConfigDialog] = createSignal(false);
   const [expandedToolMsgs, setExpandedToolMsgs] = createSignal<Set<string>>(new Set());
@@ -120,6 +123,89 @@ const ChatView = (props: ChatViewProps) => {
   const [expandedNotifications, setExpandedNotifications] = createSignal<Set<string>>(new Set());
   const [isDragging, setIsDragging] = createSignal(false);
   let attachmentIdCounter = 0;
+
+  // ── @-mention workspace file references ──
+  const [cursorPos, setCursorPos] = createSignal(0);
+  const [atMentionIndex, setAtMentionIndex] = createSignal(0);
+
+  /** Recursively flatten the workspace file tree into a list of file entries (not dirs). */
+  const flatWorkspaceFiles = createMemo(() => {
+    const tree = props.workspaceFiles?.() ?? [];
+    const result: { name: string; path: string }[] = [];
+    const walk = (entries: any[]) => {
+      for (const entry of entries) {
+        if (!entry.is_dir) {
+          result.push({ name: entry.name, path: entry.path });
+        }
+        if (entry.children) walk(entry.children);
+      }
+    };
+    walk(tree);
+    return result;
+  });
+
+  /**
+   * Detect @-mention trigger: look backward from cursor to find `@` preceded by
+   * whitespace or start-of-string. Returns filtered file matches or null.
+   */
+  const atMentionMatches = createMemo(() => {
+    const text = props.draft();
+    const pos = cursorPos();
+    if (!text || pos <= 0) return null;
+
+    // Find the `@` that starts this mention (scan backward from cursor)
+    let atIdx = -1;
+    for (let i = pos - 1; i >= 0; i--) {
+      const ch = text[i];
+      if (ch === '@') {
+        // `@` must be at start or preceded by whitespace
+        if (i === 0 || /\s/.test(text[i - 1])) {
+          atIdx = i;
+        }
+        break;
+      }
+      // Stop scanning if we hit whitespace or newline — no @ found
+      if (/\s/.test(ch)) break;
+    }
+    if (atIdx < 0) return null;
+
+    const query = text.slice(atIdx + 1, pos).toLowerCase();
+    const files = flatWorkspaceFiles();
+    if (files.length === 0) return null;
+
+    const filtered = query
+      ? files.filter((f) => f.path.toLowerCase().includes(query) || f.name.toLowerCase().includes(query))
+      : files;
+
+    return filtered.length > 0 ? { atIdx, query, matches: filtered.slice(0, 15) } : null;
+  });
+
+  // Reset selected index when matches change
+  createEffect(() => {
+    atMentionMatches();
+    setAtMentionIndex(0);
+  });
+
+  /** Insert a file reference token into the draft, replacing the @query. */
+  const insertAtMention = (filePath: string) => {
+    const info = atMentionMatches();
+    if (!info) return;
+    const text = props.draft();
+    const before = text.slice(0, info.atIdx);
+    const after = text.slice(cursorPos());
+    const token = `@[${filePath}] `;
+    const newDraft = before + token + after;
+    props.setDraft(newDraft);
+    const newPos = before.length + token.length;
+    setCursorPos(newPos);
+    // Restore focus and cursor position after SolidJS re-renders
+    queueMicrotask(() => {
+      if (textareaRef) {
+        textareaRef.focus();
+        textareaRef.setSelectionRange(newPos, newPos);
+      }
+    });
+  };
 
   // ── Message collapse state ──
   const [collapsedMsgIds, setCollapsedMsgIds] = createSignal<Set<string>>(new Set());
@@ -1163,18 +1249,71 @@ const ChatView = (props: ChatViewProps) => {
                   </div>
                 )}
               </Show>
+              {/* @-mention file autocomplete */}
+              <Show when={atMentionMatches()}>
+                {(info) => (
+                  <div class="absolute bottom-full left-0 z-50 mb-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border mb-1">Workspace files</div>
+                    <For each={info().matches}>
+                      {(file, idx) => (
+                        <div
+                          class={`flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground ${idx() === atMentionIndex() ? 'bg-accent text-accent-foreground' : ''}`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            insertAtMention(file.path);
+                          }}
+                        >
+                          <FileText size={14} class="shrink-0 text-muted-foreground" />
+                          <span class="truncate font-mono text-xs">{file.path}</span>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                )}
+              </Show>
               <textarea
+                ref={textareaRef}
                 data-testid="composer-textarea"
                 aria-label="Message input"
                 value={props.draft()}
                 placeholder={
                   props.daemonOnline()
-                    ? 'Ask HiveMind something, or drop/paste images here…'
+                    ? 'Ask HiveMind something, or type @ to reference workspace files…'
                     : 'Start the daemon to enable chat.'
                 }
                 disabled={!props.daemonOnline() || props.busyAction() === 'start'}
-                onInput={(event) => props.setDraft(event.currentTarget.value)}
+                onInput={(event) => {
+                  props.setDraft(event.currentTarget.value);
+                  setCursorPos(event.currentTarget.selectionStart ?? 0);
+                }}
+                onClick={(event) => setCursorPos(event.currentTarget.selectionStart ?? 0)}
+                onSelect={(event) => setCursorPos((event.currentTarget as HTMLTextAreaElement).selectionStart ?? 0)}
                 onKeyDown={(event) => {
+                  const mentions = atMentionMatches();
+                  if (mentions) {
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      setAtMentionIndex((prev) => Math.min(prev + 1, mentions.matches.length - 1));
+                      return;
+                    }
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      setAtMentionIndex((prev) => Math.max(prev - 1, 0));
+                      return;
+                    }
+                    if (event.key === 'Enter' || event.key === 'Tab') {
+                      event.preventDefault();
+                      const selected = mentions.matches[atMentionIndex()];
+                      if (selected) insertAtMention(selected.path);
+                      return;
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      // Clear the @ query to dismiss the popup
+                      setCursorPos(0);
+                      return;
+                    }
+                  }
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     void props.sendMessage();

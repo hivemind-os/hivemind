@@ -752,6 +752,14 @@ const App = () => {
     }
   });
 
+  // Eagerly load workspace file listing when a session is selected (for @-mention autocomplete)
+  createEffect(() => {
+    const sid = selectedSessionId();
+    if (sid && workspaceLoadedForSession() !== sid) {
+      void loadWorkspaceFiles();
+    }
+  });
+
   // Subscribe to index-status SSE when session changes
   createEffect(() => {
     const currentSessionId = selectedSessionId();
@@ -1348,6 +1356,42 @@ const App = () => {
       content = queueMatch[1].trim();
       skipPreempt = true;
       if (!content && attachments.length === 0) return;
+    }
+
+    // Resolve @[path] file references: read file contents and embed inline.
+    const atMentionPattern = /@\[([^\]]+)\]/g;
+    const mentionMatches = [...content.matchAll(atMentionPattern)];
+    if (mentionMatches.length > 0) {
+      const isBot = sessionEntityType() === 'bot';
+      const sid = selectedSessionId();
+      const seen = new Set<string>();
+      const fileBlocks: string[] = [];
+
+      for (const m of mentionMatches) {
+        const filePath = m[1];
+        if (seen.has(filePath)) continue;
+        seen.add(filePath);
+        try {
+          const fileData = isBot && sid
+            ? await invoke<any>('bot_workspace_read_file', { bot_id: sid, path: filePath })
+            : sid
+              ? await invoke<any>('workspace_read_file', { session_id: sid, path: filePath })
+              : null;
+          if (fileData && !fileData.is_binary && fileData.content) {
+            fileBlocks.push(`\n<file path="${filePath}">\n${fileData.content}\n</file>`);
+          }
+        } catch {
+          // File read failed — leave the token as-is for context
+        }
+      }
+
+      // Replace @[path] tokens with plain path references in the message
+      content = content.replace(atMentionPattern, (_match, path) => `\`${path}\``);
+
+      // Append file contents at the end of the message
+      if (fileBlocks.length > 0) {
+        content += '\n\n---\nReferenced files:' + fileBlocks.join('');
+      }
     }
 
     const agent_id = selectedAgentId();
@@ -3223,6 +3267,7 @@ const App = () => {
                     const bot = botStore.bots().find(b => b.config.id === selectedSessionId());
                     return bot?.status === 'done' || bot?.status === 'error';
                   })()}
+                  workspaceFiles={workspaceFiles}
                   allQuestions={allQuestions}
                   onQuestionAnswered={(request_id, answerText) => {
                     markQuestionAnswered(request_id, answerText);
