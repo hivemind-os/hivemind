@@ -139,7 +139,7 @@ To run a workflow you've already created:
 3. If the workflow asks for inputs (e.g., a project name or description), fill in the form that appears
 4. Click **Run**
 
-**Background workflows** start working on their own — you'll see a progress tracker on the Workflows page. **Chat workflows** launched from a conversation run inside the chat; launched from the Workflows page, they create a standalone instance you can interact with there.
+**Background workflows** start working on their own — you'll see a progress tracker on the Workflows page. **Chat workflows** are launched from the **Chat view** and run inside your conversation so you can interact with them.
 
 Workflows with automatic triggers (schedule, incoming message) run on their own once saved — no need to launch them manually.
 

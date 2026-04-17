@@ -8,7 +8,7 @@ Workflows let you chain agents, tools, and control logic into repeatable automat
 2. Give it a name (e.g. `user/daily-digest`) and pick a mode — **Background** or **Chat**.
 3. Add a **trigger** — what kicks the workflow off (schedule, event, or manual).
 4. Add **steps** — the work the workflow actually does.
-5. Hit **Run** to test it. Background workflows launch immediately; chat workflows attach to your current conversation.
+5. Hit **Run** to test it. Background workflows launch immediately; chat workflows are launched from the Chat view and attach to your conversation.
 
 ## Visual Designer vs YAML Editor
 
@@ -246,7 +246,7 @@ For workflows with a `manual` trigger:
 3. If the workflow defines an `input_schema`, a form appears where you fill in the required fields
 4. Click **Run** — the workflow starts immediately
 
-**Background workflows** run independently — the instance appears on the Workflows page where you can track its progress. **Chat workflows** launched from a conversation attach to that chat session and interact with you inline. Chat workflows launched from the Workflows page create a standalone instance you monitor on the Workflows page.
+**Background workflows** run independently — the instance appears on the Workflows page where you can track its progress. **Chat workflows** are launched from the **Chat view** — they attach to your conversation and interact with you inline.
 
 ### Automatic Triggers
 
@@ -279,16 +279,15 @@ This is how you compose small, focused workflows into larger automations — eac
 
 ### Launching Chat Workflows
 
-Chat workflows run inside a conversation. When you launch one **from a chat session**:
+Chat workflows are launched from the **Chat view**, not the Workflows page. When you launch one:
 
-1. The workflow attaches to the conversation
-2. Agent steps produce messages in the conversation thread
-3. `feedback_gate` steps pause execution and present you with choices or a text input
-4. Your response feeds back into the workflow, and execution continues
+1. Open the **Chat view** and start or select a conversation
+2. Launch the chat workflow — it attaches to the conversation
+3. Agent steps produce messages in the conversation thread
+4. `feedback_gate` steps pause execution and present you with choices or a text input
+5. Your response feeds back into the workflow, and execution continues
 
 This makes chat workflows ideal for guided processes — onboarding, approval flows, interactive research — where the user needs to participate at key moments.
-
-You can also launch chat workflows from the **Workflows page** — they'll create a standalone instance you interact with from the instance detail panel.
 
 ## Managing Running Workflows
 

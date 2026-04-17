@@ -125,7 +125,7 @@ A workflow runs when its **trigger** fires. This creates an **instance** — a l
 - **Automatic triggers** (schedule, event, incoming message, MCP notification) — fire on their own once the workflow is saved. You can pause and resume triggers without deleting the workflow.
 - **Nested launch** — a `launch_workflow` step inside one workflow starts another, enabling composition.
 
-**Background** instances run independently and appear on the Workflows page. **Chat** instances attach to a conversation and interact with the user inline — agent outputs appear as messages, and `feedback_gate` steps pause to ask questions or present choices.
+**Background** instances run independently and appear on the Workflows page. **Chat** instances are launched from the **Chat view** and attach to a conversation — agent outputs appear as messages, and `feedback_gate` steps pause to ask questions or present choices.
 
 You can **monitor**, **pause**, **resume**, or **kill** running instances from the Workflows page at any time.
 
