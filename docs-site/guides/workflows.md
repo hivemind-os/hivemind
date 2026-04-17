@@ -384,7 +384,9 @@ steps:
 
 ### Step 4: Add Classification
 
+::: v-pre
 Use an `invoke_agent` step to classify the message. Note how trigger data for incoming messages is accessed directly as `{{trigger.from}}`, `{{trigger.subject}}`, `{{trigger.body}}`, etc.
+:::
 
 ```yaml
   - id: classify

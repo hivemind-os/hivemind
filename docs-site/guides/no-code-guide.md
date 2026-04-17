@@ -91,40 +91,78 @@ Email is the most versatile connector. Once connected, you can auto-reply to cus
 
 ## Building Workflows (Visual Designer)
 
-Workflows let you automate multi-step tasks. You build them visually — no code, no YAML. Go to **Workflows** in the sidebar.
+Workflows let you automate multi-step tasks. You build them in a visual designer with drag-and-drop steps, form-based configuration, and an AI assistant that can help design the workflow for you. Go to **Workflows** in the sidebar.
 
-### Create a New Workflow
+### The Creation Wizard
 
-1. Click **New Workflow**
-2. Give it a name and description
-3. Choose a **mode**:
-   - **Background** — Runs automatically without your input. Great for automations like "summarize every new email."
-   - **Chat** — Interactive. The workflow can ask you questions and wait for your input along the way.
+Click **New Workflow** to open the creation wizard. It walks you through six steps:
 
-### Pick a Trigger
+**Step 1 — Choose how to start:**
 
-The trigger decides *what starts* your workflow:
+- **Start from scratch** — Build a brand-new workflow from an empty canvas.
+- **Copy from existing** — Duplicate one of your workflows (or a bundled system workflow) as a starting point. Pick the source workflow from the dropdown and give your copy a new name.
+- **Start from a template** — Pick from a library of pre-built templates. Like "Copy from existing," this creates an editable copy you own.
 
-| Trigger | What It Does |
+**Step 2 — Choose workflow type:**
+
+- **Background** — Runs automatically without your input. Great for automations like "summarize every new email" or "triage incoming support tickets."
+- **Chat** — Interactive. The workflow runs inside a conversation in the Chat view so you can provide input, answer questions, and guide it along the way.
+
+**Step 3 — Name your workflow.** Give it a clear, descriptive name.
+
+**Step 4 — Attachments (optional).** Upload reference documents — product manuals, style guides, FAQ sheets — for the AI to consult during the workflow. You can also add these later in the designer.
+
+**Step 5 — Generate with AI (optional).** Describe what you want the workflow to do in plain language and the AI assistant will design it for you. You can also choose whether the workflow should include human-approval steps, skip approvals, or let the AI decide. If you skip this step, you'll start with an empty canvas.
+
+**Step 6 — Choose a trigger.** The trigger decides *what starts* your workflow:
+
+| Trigger | What It Does | Configuration |
+|---|---|---|
+| **Manual** | You start it yourself by clicking Launch | Define input fields (name, type, label) that appear as a form when launching |
+| **Schedule** | Runs on a timer | Set a cron expression (e.g., daily at 9 AM) |
+| **Incoming Message** | Fires when a new email or chat message arrives | Pick a connector and optionally filter by channel, sender, subject, or body. For email, you can auto-mark as read and ignore replies |
+| **Event Pattern** | Fires when a specific internal event occurs | Set an event topic and optional filter expression |
+
+::: tip Chat workflows only support manual triggers
+Since chat workflows run inside a conversation, they always start when you launch them — so the wizard only shows the Manual trigger for chat mode.
+:::
+
+### The Visual Designer
+
+After the wizard, you land in the **visual designer** — a canvas-based editor where you build your workflow. It has four main areas:
+
+**Step Palette (left side)** — Lists all the step types you can add. Drag a step onto the canvas, or click it to add it to your workflow. The available steps are:
+
+| Step | What It Does |
 |---|---|
-| **Manual** | You start it yourself by clicking a button |
-| **Schedule** | Runs on a timer — daily, weekly, or a custom schedule |
-| **Incoming Message** | Fires when a new email, Slack message, or other message arrives |
-| **Event Pattern** | Fires when a specific pattern of events occurs |
-| **MCP Notification** | Fires when an external tool sends a notification |
+| **Invoke Agent** | Have one of your personas perform a task. E.g., "Read this email and draft a reply." |
+| **Invoke Prompt** | Run a prompt template against a persona — useful for structured, repeatable tasks with parameters. |
+| **Call Tool** | Perform a specific action: send an email, search the web, create a calendar event, etc. Pick from any tool your connectors provide. |
+| **Feedback Gate** | Pause and ask you a question before continuing. Great for approvals ("Does this reply look good?"). You define the prompt, choices, and whether free-form input is allowed. |
+| **Event Gate** | Pause and wait for an external event (e.g., a webhook or system event) before continuing. Set a topic, optional filter, and timeout. |
+| **Delay** | Wait a set amount of time (days, hours, minutes, seconds) before moving on. |
+| **Set Variable** | Store or update a value for use in later steps. Supports set, append to list, and merge into object. |
+| **Branch** | Split the workflow into two paths based on a condition. |
+| **For Each** | Loop over a collection and run steps for each item. |
+| **While Loop** | Repeat steps as long as a condition is true, with a configurable max iterations safety limit. |
+| **Launch Workflow** | Start another workflow from within this one. |
+| **Signal Agent** | Send a signal to a running bot. |
+| **Schedule Task** | Schedule a task for later execution. |
+| **End Workflow** | Explicitly end the workflow at this point. |
 
-### Add Steps
+**Canvas (center)** — The visual graph of your workflow. Steps appear as nodes connected by edges showing the flow. You can:
+- **Drag nodes** to rearrange the layout
+- **Connect steps** by dragging from one node's output port to another node's input port
+- **Select multiple nodes** and move them together
+- **Auto-layout** with `Ctrl+Shift+L` (or `Cmd+Shift+L` on Mac) to tidy up the graph
 
-Steps are the actions your workflow performs, in order:
+**Node Editor (right side)** — When you click a step on the canvas, a panel opens on the right showing that step's configuration form. Each step type has its own fields — for example, an Invoke Agent step lets you pick a persona, write the task prompt, set a timeout, and configure permissions. A Call Tool step shows a tool picker and auto-generates input fields based on the tool's schema.
 
-- **Invoke Agent** — Have one of your personas do something. For example: "Read the incoming email and draft a polite reply."
-- **Call Tool** — Perform a specific action like sending an email, creating a calendar event, or searching the web.
-- **Feedback Gate** — Pause the workflow and ask *you* a question before continuing. Great for approvals ("Does this reply look good?").
-- **Delay** — Wait a specific amount of time before moving on.
+**AI Assist (bottom)** — A built-in chat panel where you can ask the AI to modify your workflow. Describe what you want in plain language — "add error handling to each step," "insert an approval gate before sending the email," "add a branch that routes billing questions differently" — and the AI will update the workflow graph for you. Quick-action buttons for common requests (like adding error handling or approval steps) are available as shortcuts.
 
-### Attachments
+### YAML Preview
 
-You can upload reference documents to your workflow — product manuals, style guides, FAQ sheets. The AI will consult these when performing its steps.
+The designer also includes a **YAML preview** panel that shows the underlying workflow definition. This is read-only — all editing happens through the visual designer and node editor forms. The YAML view is useful for understanding the structure or for copying the definition to share with others.
 
 ### Save and Activate
 
