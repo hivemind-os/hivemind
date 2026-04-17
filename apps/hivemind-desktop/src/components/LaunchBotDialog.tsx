@@ -47,7 +47,11 @@ const STEP_LABELS: Record<WizardStep, string> = {
 export default function LaunchBotDialog(props: LaunchBotDialogProps) {
   const [step, setStep] = createSignal<WizardStep>('basics');
   const [name, setName] = createSignal('');
-  const [persona_id, setPersonaId] = createSignal(props.personas()?.[0]?.id ?? '');
+  const [persona_id, setPersonaId] = createSignal(
+    props.personas()?.find(p => p.id === 'system/general')?.id
+    ?? props.personas()?.[0]?.id
+    ?? ''
+  );
   const [launchPrompt, setLaunchPrompt] = createSignal('');
   const [mode, setMode] = createSignal<'idle_after_task' | 'continuous' | 'one_shot'>('one_shot');
   const [overrideTools, setOverrideTools] = createSignal(false);
@@ -66,7 +70,8 @@ export default function LaunchBotDialog(props: LaunchBotDialogProps) {
   createEffect(() => {
     const list = props.personas();
     if (list.length > 0 && !list.some(p => p.id === persona_id())) {
-      setPersonaId(list[0].id);
+      const general = list.find(p => p.id === 'system/general');
+      setPersonaId(general ? general.id : list[0].id);
     } else if (list.length === 0) {
       setPersonaId('');
     }
