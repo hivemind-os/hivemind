@@ -101,10 +101,12 @@ steps:
         - billing (account/payment related)
         - other
 
-        Subject: {{trigger.message.subject}}
-        Body: {{trigger.message.body}}
+        Subject: {{trigger.subject}}
+        Body: {{trigger.body}}
 
         Respond with ONLY the category name.
+    outputs:
+      category: "{{result}}"
 
   # ── Step 2: Draft a response using the product manual ─────
   - id: draft_response
@@ -115,12 +117,12 @@ steps:
       task: |
         A customer sent this email. Draft a helpful response.
 
-        From: {{trigger.message.from}}
-        Subject: {{trigger.message.subject}}
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
         Body:
-        {{trigger.message.body}}
+        {{trigger.body}}
 
-        Category: {{steps.classify.output}}
+        Category: {{steps.classify.outputs.category}}
 
         Use the attached product manual and FAQ as your primary
         reference. Cite specific sections when relevant.
@@ -129,25 +131,28 @@ steps:
       attachments:
         - product-manual
         - faq-doc
+    outputs:
+      reply: "{{result}}"
 
   # ── Step 3: Send the reply ────────────────────────────────
   - id: send_reply
     type: task
     task:
       kind: call_tool
-      tool_id: comm.send_external_message
+      tool_id: connector.send_message
       arguments:
         channel_id: email-support
-        reply_to: "{{trigger.message.id}}"
-        body: "{{steps.draft_response.output}}"
+        to: "{{trigger.from}}"
+        subject: "Re: {{trigger.subject}}"
+        body: "{{steps.draft_response.outputs.reply}}"
     on_error:
       strategy: retry
       max_retries: 3
       delay_secs: 10
 
 output:
-  category: "{{steps.classify.output}}"
-  response: "{{steps.draft_response.output}}"
+  category: "{{steps.classify.outputs.category}}"
+  response: "{{steps.draft_response.outputs.reply}}"
 ```
 
 ## How It Works
@@ -155,7 +160,7 @@ output:
 1. **Trigger** — the workflow fires on every new email arriving on the `email-support` connector channel. Reply threads are ignored (`ignore_replies: true`) to avoid infinite loops.
 2. **Classify** — a quick `invoke_agent` step categorizes the email (product question, bug report, etc.) to help the agent tailor its response.
 3. **Draft response** — spawns a `user/support-agent` with access to the **product manual** and **FAQ** attachments. The agent reads these files to ground its response in real product documentation — no hallucination.
-4. **Send reply** — calls `comm.send_external_message` to send the response back to the customer on the same email thread.
+4. **Send reply** — calls `connector.send_message` to send the response back to the customer on the same email thread.
 
 ::: tip Attachments are the secret sauce
 Workflow attachments let you give an agent **specific knowledge** for a specific workflow — without cluttering the global knowledge graph. Upload your product manual, API docs, or any reference material and the agent can read them during execution.

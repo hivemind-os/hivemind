@@ -130,8 +130,32 @@ You can upload reference documents to your workflow — product manuals, style g
 
 When you're happy with your workflow, save it and toggle it to **active**. It will start running based on its trigger.
 
+### Launching a Workflow
+
+To run a workflow you've already created:
+
+1. Open **Workflows** in the sidebar
+2. Find your workflow and click **Launch**
+3. If the workflow asks for inputs (e.g., a project name or description), fill in the form that appears
+4. Click **Run**
+
+**Background workflows** start working on their own — you'll see a progress tracker on the Workflows page. **Chat workflows** launched from a conversation run inside the chat; launched from the Workflows page, they create a standalone instance you can interact with there.
+
+Workflows with automatic triggers (schedule, incoming message) run on their own once saved — no need to launch them manually.
+
+### Try the Bundled Workflows
+
+HiveMind OS comes with several pre-built workflows ready to use — no setup required. Open **Workflows** and look for the ones with a `system/` prefix:
+
+- **Approval Workflow** — submit a request, get an AI analysis, then approve or reject it. A great way to see how interactive workflows work.
+- **Email Responder** — automatically replies to incoming customer emails using your uploaded product docs.
+- **Email Triage** — classifies incoming emails by type (bug report, billing, feature request) and routes them.
+- **Software Feature** — guides you through planning, implementing, and documenting a software feature with AI agents at each stage.
+
+To customize a bundled workflow, use **New Workflow → Copy from existing** — this creates your own copy that you can edit freely.
+
 ::: tip Start simple
-Your first workflow should have just three parts: a trigger, one agent step, and one action. You can always add more steps later.
+Your first workflow should have just three parts: a trigger, one agent step, and one action. You can always add more steps later. Or try launching one of the **bundled workflows** to see a complete example in action.
 :::
 
 
