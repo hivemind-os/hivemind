@@ -246,14 +246,22 @@ jobs:
           if (-not $setupExe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
           Write-Host "Using signed installer: $($setupExe.Name)"
 
-          # Repackage the .nsis.zip so the updater delivers the signed exe
+          # Repackage the .nsis.zip so the updater delivers the signed exe.
+          # IMPORTANT: Use .NET ZipFile with CompressionLevel Optimal (Deflate)
+          # instead of Compress-Archive, which may use Deflate64 on newer
+          # Windows — a method the Tauri updater zip crate does not support.
           $oldZip = Get-ChildItem -Path $nsisDir |
                     Where-Object { $_.Name -like "*.nsis.zip" } |
                     Select-Object -First 1
           if ($oldZip) {
             Remove-Item $oldZip.FullName -Force
             Remove-Item "$($oldZip.FullName).sig" -Force -ErrorAction SilentlyContinue
-            Compress-Archive -Path $setupExe.FullName -DestinationPath $oldZip.FullName
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [System.IO.Compression.ZipFile]::Open($oldZip.FullName, 'Create')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+              $zip, $setupExe.FullName, $setupExe.Name,
+              [System.IO.Compression.CompressionLevel]::Optimal)
+            $zip.Dispose()
             Write-Host "Repackaged updater bundle: $($oldZip.Name)"
 
             # Re-sign the .nsis.zip with Tauri Ed25519 key
