@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "HiveMind OS",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "identifier": "com.hivemind.desktop",
   "build": {
     "frontendDist": "../dist",
