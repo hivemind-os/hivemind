@@ -91,6 +91,7 @@ export default function BotDetailPanel(props: BotDetailPanelProps) {
 
   // Agent working state: use the authoritative status from the stage
   const working = createMemo(() => props.agentStatus === 'active');
+  const isDone = createMemo(() => props.agentStatus === 'done' || props.agentStatus === 'error');
 
   // Auto-scroll chat
   let chatEndRef: HTMLDivElement | undefined;
@@ -212,23 +213,29 @@ export default function BotDetailPanel(props: BotDetailPanelProps) {
             </div>
 
             {/* Message input */}
-            <div class="flex gap-1.5 p-3 border-t border-border">
-              <input
-                type="text"
-                placeholder="Send a message..."
-                value={messageInput()}
-                onInput={(e) => setMessageInput(e.currentTarget.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-                class="flex-1 bg-secondary text-foreground border border-border rounded-md px-2.5 py-1.5 text-sm"
-              />
-              <Button
-                size="sm"
-                disabled={!messageInput().trim() || sending()}
-                onClick={() => void sendMessage()}
-              >
-                {sending() ? '...' : 'Send'}
-              </Button>
-            </div>
+            <Show when={!isDone()} fallback={
+              <div class="p-3 border-t border-border text-center text-xs text-muted-foreground">
+                This bot has finished — chat is read-only.
+              </div>
+            }>
+              <div class="flex gap-1.5 p-3 border-t border-border">
+                <input
+                  type="text"
+                  placeholder="Send a message..."
+                  value={messageInput()}
+                  onInput={(e) => setMessageInput(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
+                  class="flex-1 bg-secondary text-foreground border border-border rounded-md px-2.5 py-1.5 text-sm"
+                />
+                <Button
+                  size="sm"
+                  disabled={!messageInput().trim() || sending()}
+                  onClick={() => void sendMessage()}
+                >
+                  {sending() ? '...' : 'Send'}
+                </Button>
+              </div>
+            </Show>
           </Show>
 
           {/* Events tab */}

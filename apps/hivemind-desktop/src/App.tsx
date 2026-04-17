@@ -752,6 +752,14 @@ const App = () => {
     }
   });
 
+  // Eagerly load workspace file listing when a session is selected (for @-mention autocomplete)
+  createEffect(() => {
+    const sid = selectedSessionId();
+    if (sid && workspaceLoadedForSession() !== sid) {
+      void loadWorkspaceFiles();
+    }
+  });
+
   // Subscribe to index-status SSE when session changes
   createEffect(() => {
     const currentSessionId = selectedSessionId();
@@ -1336,7 +1344,7 @@ const App = () => {
   const sendMessage = async (decision?: ScanDecision, options?: { skipPreempt?: boolean }) => {
     if (busyAction() !== null) return;
     let content = (decision ? pendingReviewContent() ?? draft() : draft()).trim();
-    const attachments = pendingAttachments();
+    let attachments = [...pendingAttachments()];
     if ((!content && attachments.length === 0) || !daemonOnline()) {
       return;
     }
@@ -1348,6 +1356,71 @@ const App = () => {
       content = queueMatch[1].trim();
       skipPreempt = true;
       if (!content && attachments.length === 0) return;
+    }
+
+    // Resolve @[path] file references: for regular sessions, attach as
+    // MessageAttachments (the backend routes text/* to ContentPart::Text).
+    // For bot sessions (which only support plain content), embed inline.
+    const atMentionPattern = /@\[([^\]]+)\]/g;
+    const mentionMatches = [...content.matchAll(atMentionPattern)];
+    if (mentionMatches.length > 0) {
+      const isBot = sessionEntityType() === 'bot';
+      const sid = selectedSessionId();
+      const seen = new Set<string>();
+      const fileAttachments: MessageAttachment[] = [];
+      const fileBlocks: string[] = [];
+
+      for (const m of mentionMatches) {
+        const filePath = m[1];
+        if (seen.has(filePath)) continue;
+        seen.add(filePath);
+        try {
+          const fileData = isBot && sid
+            ? await invoke<any>('bot_workspace_read_file', { bot_id: sid, path: filePath })
+            : sid
+              ? await invoke<any>('workspace_read_file', { session_id: sid, path: filePath })
+              : null;
+          if (fileData && !fileData.is_binary && fileData.content) {
+            if (isBot) {
+              // Bots only support plain content — embed inline.
+              fileBlocks.push(`\n<file path="${filePath}">\n${fileData.content}\n</file>`);
+            } else {
+              // Regular sessions: create a proper attachment.
+              const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+              const mimeMap: Record<string, string> = {
+                ts: 'text/typescript', tsx: 'text/typescript', js: 'text/javascript',
+                jsx: 'text/javascript', py: 'text/x-python', rs: 'text/x-rust',
+                go: 'text/x-go', md: 'text/markdown', json: 'text/json',
+                yaml: 'text/yaml', yml: 'text/yaml', toml: 'text/toml',
+                html: 'text/html', css: 'text/css', sql: 'text/sql',
+                sh: 'text/x-shellscript', xml: 'text/xml', csv: 'text/csv',
+              };
+              const mediaType = mimeMap[ext] ?? 'text/plain';
+              fileAttachments.push({
+                id: `at-${fileAttachments.length}`,
+                filename: filePath,
+                media_type: mediaType,
+                data: btoa(unescape(encodeURIComponent(fileData.content))),
+              });
+            }
+          }
+        } catch {
+          // File read failed — leave the token as-is for context
+        }
+      }
+
+      // Replace @[path] tokens with plain path references in the message
+      content = content.replace(atMentionPattern, (_match, path) => `\`${path}\``);
+
+      // For bots: append inline file contents
+      if (fileBlocks.length > 0) {
+        content += '\n\n---\nReferenced files:' + fileBlocks.join('');
+      }
+
+      // For regular sessions: merge file attachments with any pending attachments
+      if (fileAttachments.length > 0) {
+        attachments.push(...fileAttachments);
+      }
     }
 
     const agent_id = selectedAgentId();
@@ -1363,6 +1436,9 @@ const App = () => {
     await runAction('send', async () => {
       // For bot sessions, route through the bot message API.
       if (sessionEntityType() === 'bot') {
+        // Reject messages to bots that have finished.
+        const bot = botStore.bots().find(b => b.config.id === session_id);
+        if (bot?.status === 'done' || bot?.status === 'error') return;
         await invoke('message_bot', { agent_id: session_id, content });
         setDraft('');
         setPendingAttachments([]);
@@ -3216,6 +3292,11 @@ const App = () => {
                   loadEditConfig={loadEditConfig}
                   loadToolDefinitions={loadToolDefinitions}
                   entityType={sessionEntityType()}
+                  readOnly={sessionEntityType() === 'bot' && (() => {
+                    const bot = botStore.bots().find(b => b.config.id === selectedSessionId());
+                    return bot?.status === 'done' || bot?.status === 'error';
+                  })()}
+                  workspaceFiles={workspaceFiles}
                   allQuestions={allQuestions}
                   onQuestionAnswered={(request_id, answerText) => {
                     markQuestionAnswered(request_id, answerText);
