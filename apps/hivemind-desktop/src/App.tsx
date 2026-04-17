@@ -2963,6 +2963,7 @@ const App = () => {
               toolDefinitions={toolDefinitions}
               connectors={channels}
               loadPersonas={loadPersonas}
+              onConnectorsChanged={loadChannels}
               isNoTokenError={isNoTokenError}
               isLicenseError={isLicenseError}
               extractRepoFromError={extractRepoFromError}

@@ -725,6 +725,9 @@ fn save_oauth_channel(
         }
         if let Some(connectors) = &state.connectors {
             let _ = connectors.load_connectors(configs);
+            // Restart polling so new tokens / config take effect immediately
+            // and any prior backoff state is reset.
+            connectors.start_background_poll();
         }
     } else {
         tracing::debug!(

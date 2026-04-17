@@ -2063,6 +2063,12 @@ impl Tool for ShellCommandTool {
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
 
+            #[cfg(target_os = "windows")]
+            {
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+
             // Try to spawn. If the sandbox wrapper fails, fall back to unsandboxed.
             let child = match cmd.spawn() {
                 Ok(child) => {
@@ -2096,6 +2102,13 @@ impl Tool for ShellCommandTool {
                     }
                     fallback.stdout(std::process::Stdio::piped());
                     fallback.stderr(std::process::Stdio::piped());
+
+                    #[cfg(target_os = "windows")]
+                    {
+                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                        fallback.creation_flags(CREATE_NO_WINDOW);
+                    }
+
                     fallback.spawn().map_err(|e| {
                         ToolError::ExecutionFailed(format!("failed to spawn command: {e}"))
                     })?

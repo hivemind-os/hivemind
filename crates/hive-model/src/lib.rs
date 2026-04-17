@@ -1520,15 +1520,28 @@ fn openai_messages_from_request(request: &CompletionRequest) -> Vec<OpenAiMessag
     messages
 }
 
-fn anthropic_messages_from_request(request: &CompletionRequest) -> Vec<AnthropicMessage> {
-    let mut messages = request
+fn anthropic_messages_from_request(
+    request: &CompletionRequest,
+) -> (Option<String>, Vec<AnthropicMessage>) {
+    // Anthropic requires system messages as a top-level `system` parameter,
+    // not as `{"role": "system"}` entries in the messages array.
+    let system_parts: Vec<String> = request
         .messages
         .iter()
+        .filter(|m| m.role == "system")
+        .map(|m| m.content.clone())
+        .collect();
+    let system = if system_parts.is_empty() { None } else { Some(system_parts.join("\n\n")) };
+
+    let mut messages: Vec<AnthropicMessage> = request
+        .messages
+        .iter()
+        .filter(|m| m.role != "system")
         .map(|message| AnthropicMessage {
             role: message.role.clone(),
             content: anthropic_content_from_completion(message),
         })
-        .collect::<Vec<_>>();
+        .collect();
     // Final user message: use prompt_content_parts when present (multimodal).
     let prompt_content = if request.prompt_content_parts.is_empty() {
         AnthropicContent::Text(request.prompt.clone())
@@ -1551,7 +1564,7 @@ fn anthropic_messages_from_request(request: &CompletionRequest) -> Vec<Anthropic
         )
     };
     messages.push(AnthropicMessage { role: "user".to_string(), content: prompt_content });
-    messages
+    (system, messages)
 }
 
 /// Convert a `CompletionMessage` to OpenAI content format.
@@ -1661,6 +1674,8 @@ struct OpenAiToolCallFunction {
 struct AnthropicRequest {
     model: String,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
     messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
@@ -1727,6 +1742,8 @@ struct OpenAiChatStreamRequest {
 struct AnthropicStreamRequest {
     model: String,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
     messages: Vec<AnthropicMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

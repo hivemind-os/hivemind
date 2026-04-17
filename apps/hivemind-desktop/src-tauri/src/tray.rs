@@ -135,11 +135,19 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
 /// Register a window-close handler that hides the window instead of quitting,
 /// so the tray icon remains active and the daemon keeps running.
+/// When `update_installing` is set, the handler lets the close proceed so the
+/// NSIS installer can shut down the process and replace the binary.
 pub fn setup_close_to_tray(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let win = window.clone();
+        let state = app.state::<super::AppState>();
+        let updating = state.update_installing.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if updating.load(std::sync::atomic::Ordering::SeqCst) {
+                    // Let the window close so the NSIS installer can proceed.
+                    return;
+                }
                 api.prevent_close();
                 let _ = win.hide();
             }

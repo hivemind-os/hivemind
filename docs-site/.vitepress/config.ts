@@ -107,6 +107,7 @@ export default withMermaid(
                 link: "/concepts/knowledge-graph",
               },
               { text: "Tools & MCP", link: "/concepts/tools-and-mcp" },
+              { text: "Agent Skills", link: "/concepts/skills" },
               {
                 text: "Managed Runtimes",
                 link: "/concepts/managed-runtimes",

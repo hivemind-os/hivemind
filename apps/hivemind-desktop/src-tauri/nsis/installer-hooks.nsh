@@ -1,11 +1,11 @@
 ; NSIS installer hooks for HiveMind OS
 ;
-; NSIS_HOOK_POSTCOPY runs after the application files are copied to $INSTDIR.
-; We use it to silently install the Microsoft Visual C++ Redistributable that
-; was bundled alongside the app, then remove it from the install directory so
-; it is not left behind for users.
+; NSIS_HOOK_POSTINSTALL runs after Tauri finishes installing all files,
+; shortcuts, and registry entries.  We use it to silently install the
+; Microsoft Visual C++ Redistributable that was bundled alongside the app,
+; then remove it from the install directory so it is not left behind for users.
 
-!macro NSIS_HOOK_POSTCOPY
+!macro NSIS_HOOK_POSTINSTALL
   ExecWait '"$INSTDIR\vc_redist.exe" /install /quiet /norestart' $0
   Delete "$INSTDIR\vc_redist.exe"
   ; 0 = success, 3010 = success with reboot required — both are acceptable.

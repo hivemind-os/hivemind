@@ -101,7 +101,7 @@ impl ProviderTransport for OpenAiTransport {
             tools: format_tools_openai(&request.tools),
         };
 
-        tracing::info!(
+        tracing::debug!(
             provider_id = %ctx.provider_id,
             provider_kind = ?ctx.provider_kind,
             model = %selection.model,

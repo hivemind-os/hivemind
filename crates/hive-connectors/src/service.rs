@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -53,6 +53,19 @@ struct ConnectorHandle {
 }
 
 // ---------------------------------------------------------------------------
+// PollHealth — snapshot of polling health counters
+// ---------------------------------------------------------------------------
+
+/// Snapshot of polling health counters for diagnostics.
+#[derive(Debug, Clone)]
+pub struct PollHealth {
+    pub is_polling: bool,
+    pub success_count: u64,
+    pub failure_count: u64,
+    pub last_poll_with_messages_ms: u64,
+}
+
+// ---------------------------------------------------------------------------
 // ConnectorService
 // ---------------------------------------------------------------------------
 
@@ -68,11 +81,17 @@ pub struct ConnectorService {
     connectors_dir: PathBuf,
     polling: Arc<AtomicBool>,
     /// Epoch counter to deduplicate poll task generations.
-    poll_epoch: Arc<std::sync::atomic::AtomicU64>,
+    poll_epoch: Arc<AtomicU64>,
     /// Notified when polling should stop so IDLE tasks wake up immediately.
     shutdown_notify: Arc<Notify>,
     /// Event bus for publishing inbound message events.
     event_bus: Option<Arc<EventBus>>,
+    /// Total number of successful poll cycles across all connectors.
+    poll_success_count: Arc<AtomicU64>,
+    /// Total number of failed poll cycles across all connectors.
+    poll_failure_count: Arc<AtomicU64>,
+    /// Timestamp (epoch millis) of the last successful poll that found messages.
+    last_poll_with_messages_ms: Arc<AtomicU64>,
 }
 
 impl ConnectorService {
@@ -95,9 +114,12 @@ impl ConnectorService {
             audit_log,
             connectors_dir,
             polling: Arc::new(AtomicBool::new(false)),
-            poll_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            poll_epoch: Arc::new(AtomicU64::new(0)),
             shutdown_notify: Arc::new(Notify::new()),
             event_bus: None,
+            poll_success_count: Arc::new(AtomicU64::new(0)),
+            poll_failure_count: Arc::new(AtomicU64::new(0)),
+            last_poll_with_messages_ms: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -975,6 +997,16 @@ impl ConnectorService {
         self.polling.load(Ordering::SeqCst)
     }
 
+    /// Return a snapshot of polling health counters for diagnostics.
+    pub fn poll_health(&self) -> PollHealth {
+        PollHealth {
+            is_polling: self.polling.load(Ordering::SeqCst),
+            success_count: self.poll_success_count.load(Ordering::Relaxed),
+            failure_count: self.poll_failure_count.load(Ordering::Relaxed),
+            last_poll_with_messages_ms: self.last_poll_with_messages_ms.load(Ordering::Relaxed),
+        }
+    }
+
     fn spawn_poll_tasks(self: &Arc<Self>, epoch: u64) {
         let handles = self.handles.read();
         for (connector_id, handle) in handles.iter() {
@@ -1015,30 +1047,61 @@ impl ConnectorService {
             // so that ServiceLogCollector routes its logs to the individual
             // ConnectorListenerDaemonService instead of the umbrella polling service.
             let span_service_id = cid.clone();
+            let success_counter = Arc::clone(&self.poll_success_count);
+            let failure_counter = Arc::clone(&self.poll_failure_count);
             tokio::spawn(async move {
                 let mut consecutive_failures: u32 = 0;
+                let mut cycle: u64 = 0;
+                // Track external_ids already published within this task's
+                // lifetime to avoid re-publishing the same unread message
+                // on every poll cycle.
+                let mut published_ids: HashSet<String> = HashSet::new();
                 const MAX_BACKOFF_SECS: u64 = 300; // 5 min cap
+                // Log a heartbeat every ~10 cycles so operators can verify
+                // the loop is alive even when no new messages arrive.
+                const HEARTBEAT_CYCLES: u64 = 10;
 
                 loop {
                     if !svc.polling.load(Ordering::SeqCst)
                         || poll_epoch.load(Ordering::SeqCst) != epoch
                     {
-                        debug!(connector_id = %cid, "poll loop stopped (flag or epoch mismatch)");
+                        info!(connector_id = %cid, cycle, "poll loop stopped (flag or epoch mismatch)");
                         break;
                     }
 
-                    if svc.poll_connector_once(&cid).await {
+                    cycle += 1;
+                    let found_messages = svc.poll_connector_once(&cid, &mut published_ids).await;
+
+                    if found_messages {
                         consecutive_failures = 0;
+                        success_counter.fetch_add(1, Ordering::Relaxed);
                     } else {
                         consecutive_failures = consecutive_failures.saturating_add(1);
+                        failure_counter.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    // Periodic heartbeat log
+                    if cycle % HEARTBEAT_CYCLES == 0 {
+                        debug!(
+                            connector_id = %cid,
+                            cycle,
+                            consecutive_failures,
+                            "poll loop heartbeat"
+                        );
                     }
 
                     // Back off on consecutive failures
                     if consecutive_failures > 0 {
-                        let backoff = poll_interval
+                        let backoff = (poll_interval
                             .max(std::time::Duration::from_secs(30))
-                            .min(std::time::Duration::from_secs(MAX_BACKOFF_SECS))
-                            * consecutive_failures.min(6);
+                            * consecutive_failures.min(6))
+                            .min(std::time::Duration::from_secs(MAX_BACKOFF_SECS));
+                        debug!(
+                            connector_id = %cid,
+                            consecutive_failures,
+                            backoff_secs = backoff.as_secs(),
+                            "poll failed, backing off"
+                        );
                         tokio::select! {
                             _ = tokio::time::sleep(backoff) => {}
                             _ = shutdown.notified() => {
@@ -1113,18 +1176,24 @@ impl ConnectorService {
         Self::create_connector(config, Path::new("/tmp"))
     }
 
-    async fn poll_connector_once(&self, connector_id: &str) -> bool {
+    async fn poll_connector_once(&self, connector_id: &str, published_ids: &mut HashSet<String>) -> bool {
         let (connector, config) = {
             let handles = self.handles.read();
             match handles.get(connector_id) {
                 Some(h) => (Arc::clone(&h.connector), h.config.clone()),
-                None => return false,
+                None => {
+                    debug!(connector_id, "poll skipped: connector handle not found");
+                    return false;
+                }
             }
         };
 
         let comm = match connector.communication() {
             Some(c) => c,
-            None => return false,
+            None => {
+                debug!(connector_id, "poll skipped: no communication service");
+                return false;
+            }
         };
 
         let inbound = match comm.fetch_new(50).await {
@@ -1140,8 +1209,27 @@ impl ConnectorService {
         }
 
         info!(connector_id, count = inbound.len(), "background poll found new messages");
+        // Update the last-poll-with-messages timestamp for health reporting.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.last_poll_with_messages_ms.store(now, Ordering::Relaxed);
 
         for msg in &inbound {
+            // Connector-side dedup: skip messages we already published in
+            // this poll task's lifetime.  Insert only after successful
+            // publish so transient failures don't permanently suppress a
+            // message.
+            if published_ids.contains(&msg.external_id) {
+                debug!(
+                    connector_id,
+                    external_id = %msg.external_id,
+                    "skipping already-published message"
+                );
+                continue;
+            }
+
             let input_class = {
                 let handles = self.handles.read();
                 handles
@@ -1193,6 +1281,14 @@ impl ConnectorService {
                 });
                 if let Err(e) = bus.publish(&topic, "connector-poll", payload) {
                     warn!(error = %e, connector_id, "failed to publish inbound message event");
+                } else {
+                    published_ids.insert(msg.external_id.clone());
+                    // Cap the set to prevent unbounded growth in long-running
+                    // processes.  10 000 entries is ~1 MB, far beyond any
+                    // realistic inbox churn between restarts.
+                    if published_ids.len() > 10_000 {
+                        published_ids.clear();
+                    }
                 }
             }
         }

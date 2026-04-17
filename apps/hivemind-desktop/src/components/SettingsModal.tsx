@@ -175,6 +175,9 @@ export interface SettingsModalProps {
 
   // Agent Kit integration
   onExportPersonaToKit?: (persona_id: string) => void;
+
+  // Connector change notification (refreshes channel list for workflows)
+  onConnectorsChanged?: () => void;
 }
 
 const SettingsModal = (props: SettingsModalProps) => {
@@ -1593,7 +1596,7 @@ const SettingsModal = (props: SettingsModalProps) => {
                 {/* ── Connectors ──────────────────────────────────── */}
                 <Show when={localTab() === 'channels'}>
                   <Show when={props.context()?.daemon_url} fallback={<p class="muted">Start the daemon to manage connectors.</p>}>
-                    {(url) => <Suspense fallback={<p class="muted">Loading…</p>}><ConnectorsTab daemon_url={url()} /></Suspense>}
+                    {(url) => <Suspense fallback={<p class="muted">Loading…</p>}><ConnectorsTab daemon_url={url()} onConnectorsChanged={props.onConnectorsChanged} /></Suspense>}
                   </Show>
                 </Show>
 

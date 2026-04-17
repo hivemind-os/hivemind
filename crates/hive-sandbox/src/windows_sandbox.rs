@@ -199,14 +199,19 @@ pub fn sandbox_command_with_shell(
     shell_flag: Option<&str>,
 ) -> Result<SandboxedCommand, SandboxError> {
     // Check if PowerShell is available
-    let ps_available = std::process::Command::new("powershell")
-        .arg("-Command")
-        .arg("$true")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let ps_available = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("powershell")
+            .arg("-Command")
+            .arg("$true")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
 
     if !ps_available {
         return Err(SandboxError::Unavailable("PowerShell not available".into()));

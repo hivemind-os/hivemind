@@ -415,6 +415,13 @@ impl TriggerManager {
 
         // --- Incoming message triggers ---
         if topic.starts_with("comm.message.received") {
+            let payload_channel = payload.get("channel_id").and_then(|v| v.as_str());
+            info!(
+                topic,
+                payload_channel_id = ?payload_channel,
+                registered_incoming_triggers = triggers.incoming_message.len(),
+                "evaluating incoming message event"
+            );
             for trigger in &triggers.incoming_message {
                 if let TriggerType::IncomingMessage {
                     channel_id,
@@ -427,7 +434,7 @@ impl TriggerManager {
                     ignore_replies,
                 } = &trigger.trigger_type
                 {
-                    if payload_matches_incoming(
+                    let matched = payload_matches_incoming(
                         payload,
                         channel_id,
                         listen_channel_id.as_deref(),
@@ -436,25 +443,53 @@ impl TriggerManager {
                         subject_filter.as_deref(),
                         body_filter.as_deref(),
                         *ignore_replies,
-                    ) {
+                    );
+                    info!(
+                        definition = %trigger.definition_name,
+                        trigger_channel_id = %channel_id,
+                        ignore_replies,
+                        listen_channel_id = ?listen_channel_id,
+                        from_filter = ?from_filter,
+                        subject_filter = ?subject_filter,
+                        body_filter = ?body_filter,
+                        filter = ?filter,
+                        matched,
+                        "incoming message trigger evaluation"
+                    );
+                    if matched {
                         // Persistent dedup: skip if we already triggered this
-                        // workflow for the same external_id.
+                        // workflow for the same external_id.  We key on
+                        // definition_name (e.g. "user/test1") rather than
+                        // definition_id (UUID) because the UUID changes each
+                        // time the workflow is saved, which would invalidate
+                        // dedup entries and allow duplicates across saves.
                         if let Some(ext_id) = payload.get("external_id").and_then(|v| v.as_str()) {
-                            match self.store.is_trigger_seen(&trigger.definition_id, ext_id) {
+                            match self.store.is_trigger_seen(&trigger.definition_name, ext_id) {
                                 Ok(true) => {
-                                    debug!(
+                                    info!(
                                         definition_id = %trigger.definition_id,
                                         definition = %trigger.definition_name,
                                         external_id = ext_id,
-                                        "skipping duplicate incoming message trigger"
+                                        "skipping duplicate incoming message trigger (already seen)"
                                     );
                                     continue;
                                 }
                                 Err(e) => {
                                     warn!(error = %e, "trigger dedup check failed, proceeding");
                                 }
-                                _ => {}
+                                _ => {
+                                    info!(
+                                        definition = %trigger.definition_name,
+                                        external_id = ext_id,
+                                        "trigger dedup: first time seeing this message"
+                                    );
+                                }
                             }
+                        } else {
+                            warn!(
+                                definition = %trigger.definition_name,
+                                "matched trigger has no external_id — dedup skipped"
+                            );
                         }
 
                         let mark_info = if *mark_as_read {
@@ -480,6 +515,14 @@ impl TriggerManager {
 
         drop(triggers);
 
+        if !to_launch.is_empty() {
+            info!(
+                topic,
+                matched_triggers = to_launch.len(),
+                "trigger evaluation matched — launching workflows"
+            );
+        }
+
         // Check active event gates
         let mut matched_gates = Vec::new();
         {
@@ -499,12 +542,13 @@ impl TriggerManager {
         // Launch workflows first, then persist dedup and mark_as_read only
         // for successful launches. This prevents permanently suppressing a
         // trigger when the launch itself fails.
-        for (definition_id, name, version, inputs, mark_info) in to_launch {
+        for (_definition_id, name, version, inputs, mark_info) in to_launch {
             let launched = self.auto_launch(&name, Some(&version), inputs.clone()).await;
 
             if launched {
                 if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
-                    if let Err(e) = self.store.mark_trigger_seen(&definition_id, ext_id) {
+                    // Use definition_name for dedup (stable across saves).
+                    if let Err(e) = self.store.mark_trigger_seen(&name, ext_id) {
                         warn!(error = %e, "failed to record trigger dedup");
                     }
                 }
@@ -712,6 +756,10 @@ impl TriggerManager {
 
         replay_events.sort_by_key(|e| e.id);
         let replayed = replay_events.len();
+        let comm_events = replay_events.iter().filter(|e| e.topic.starts_with("comm.message.received")).count();
+        if replayed > 0 {
+            info!(replayed, comm_events, since_ms, "replaying missed events");
+        }
         for event in replay_events {
             self.evaluate_event(&event.topic, &event.payload).await;
             let event_ts = event.timestamp_ms.min(u64::MAX as u128) as u64;
@@ -1272,20 +1320,34 @@ fn payload_matches_incoming(
 ) -> bool {
     let cid = payload.get("channel_id").and_then(|v| v.as_str());
     if cid != Some(channel_id) {
+        debug!(payload_channel = ?cid, trigger_channel = channel_id, "rejected: channel_id mismatch");
         return false;
     }
     // When ignore_replies is set, skip messages that are replies.
     // Detected via provider-specific metadata keys:
     //   Discord: referenced_message_id
     //   Slack: thread_ts
-    //   Email (IMAP/Gmail/Microsoft): in_reply_to, references
+    //   Email (IMAP/Gmail/Microsoft): in_reply_to
+    // Note: `references` alone is NOT used — some providers (e.g. Microsoft
+    // Graph) set it for conversation threading even on new/original emails.
     if ignore_replies {
         if let Some(meta) = payload.get("metadata").and_then(|m| m.as_object()) {
-            let is_reply = meta.contains_key("referenced_message_id")
-                || meta.contains_key("thread_ts")
-                || meta.contains_key("in_reply_to")
-                || meta.contains_key("references");
+            // Helper: key exists and has a non-empty string value.
+            let has = |key: &str| {
+                meta.get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty())
+            };
+            let is_reply = has("referenced_message_id")
+                || has("thread_ts")
+                || has("in_reply_to");
             if is_reply {
+                info!(
+                    has_referenced_message_id = has("referenced_message_id"),
+                    has_thread_ts = has("thread_ts"),
+                    has_in_reply_to = has("in_reply_to"),
+                    "rejected: message is a reply (ignore_replies=true)"
+                );
                 return false;
             }
         }
@@ -1299,6 +1361,7 @@ fn payload_matches_incoming(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if msg_channel != lc {
+                info!(listen_channel_id = lc, msg_channel, "rejected: listen_channel_id mismatch");
                 return false;
             }
         }
@@ -1308,6 +1371,7 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let from = payload.get("from").and_then(|v| v.as_str()).unwrap_or("");
             if !from.to_lowercase().contains(&f.to_lowercase()) {
+                info!(from_filter = f, from, "rejected: from_filter mismatch");
                 return false;
             }
         }
@@ -1316,6 +1380,7 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let subject = payload.get("subject").and_then(|v| v.as_str()).unwrap_or("");
             if !subject.to_lowercase().contains(&f.to_lowercase()) {
+                info!(subject_filter = f, subject, "rejected: subject_filter mismatch");
                 return false;
             }
         }
@@ -1324,12 +1389,17 @@ fn payload_matches_incoming(
         if !f.is_empty() {
             let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
             if !body.to_lowercase().contains(&f.to_lowercase()) {
+                info!(body_filter = f, "rejected: body_filter mismatch");
                 return false;
             }
         }
     }
     // Legacy generic filter (substring on full payload)
-    filter_matches(payload, filter)
+    let result = filter_matches(payload, filter);
+    if !result {
+        info!(filter = ?filter, "rejected: legacy filter mismatch");
+    }
+    result
 }
 
 fn trigger_type_label(tt: &TriggerType) -> &'static str {
@@ -1725,15 +1795,28 @@ mod tests {
             &payload, "email-ch", None, None, None, None, None, false
         ));
 
-        // Also test with "references" header
+        // `references` header alone should NOT trigger reply rejection —
+        // providers like Microsoft Graph set it for conversation threading
+        // even on original (non-reply) emails.
         let payload2 = json!({
             "channel_id": "email-ch",
             "from": "bob@example.com",
             "body": "Re: thread",
             "metadata": { "references": "<msg-id@example.com>" }
         });
-        assert!(!payload_matches_incoming(
+        assert!(payload_matches_incoming(
             &payload2, "email-ch", None, None, None, None, None, true
+        ));
+
+        // But `references` WITH `in_reply_to` should still be rejected
+        let payload3 = json!({
+            "channel_id": "email-ch",
+            "from": "carol@example.com",
+            "body": "Re: thread",
+            "metadata": { "in_reply_to": "<orig@example.com>", "references": "<orig@example.com>" }
+        });
+        assert!(!payload_matches_incoming(
+            &payload3, "email-ch", None, None, None, None, None, true
         ));
     }
 
@@ -1750,6 +1833,18 @@ mod tests {
     }
 
     #[test]
+    fn test_ignore_replies_empty_values_pass() {
+        // Empty-string metadata values should NOT trigger reply rejection
+        let payload = json!({
+            "channel_id": "ch",
+            "from": "user",
+            "body": "hello",
+            "metadata": { "in_reply_to": "", "referenced_message_id": "", "thread_ts": "" }
+        });
+        assert!(payload_matches_incoming(&payload, "ch", None, None, None, None, None, true));
+    }
+
+    #[test]
     fn test_ignore_replies_no_metadata() {
         let payload = json!({
             "channel_id": "any-ch",
@@ -1758,5 +1853,257 @@ mod tests {
         });
         // No metadata at all should pass with ignore_replies=true
         assert!(payload_matches_incoming(&payload, "any-ch", None, None, None, None, None, true));
+    }
+
+    // ── End-to-end trigger tests ──────────────────────────────────
+
+    /// Helper: create a workflow definition with an IncomingMessage trigger,
+    /// save it to the store, and register it with the TriggerManager.
+    async fn setup_incoming_trigger(
+        _bus: &EventBus,
+        svc: &Arc<super::WorkflowService>,
+        tm: &TriggerManager,
+        def_id: &str,
+        def_name: &str,
+        channel_id: &str,
+    ) {
+        let def = trigger_definition(
+            def_id,
+            def_name,
+            "1.0",
+            TriggerType::IncomingMessage {
+                channel_id: channel_id.to_string(),
+                listen_channel_id: None,
+                filter: None,
+                from_filter: None,
+                subject_filter: None,
+                body_filter: None,
+                mark_as_read: false,
+                ignore_replies: false,
+            },
+        );
+        let yaml = serde_yaml::to_string(&def).unwrap();
+        svc.save_definition(&yaml).await.unwrap();
+        tm.register_definition(&def).await;
+    }
+
+    /// Build the standard event payload that `poll_connector_once` publishes.
+    fn incoming_email_payload(connector_id: &str, external_id: &str) -> Value {
+        json!({
+            "channel_id": connector_id,
+            "provider": "gmail",
+            "external_id": external_id,
+            "from": "alice@example.com",
+            "to": ["bob@example.com"],
+            "subject": "Hello",
+            "body": "Test email body",
+            "timestamp_ms": 1700000000000u64,
+            "metadata": {}
+        })
+    }
+
+    #[tokio::test]
+    async fn test_incoming_message_trigger_launches_workflow() {
+        // Wire up the full pipeline: EventBus → TriggerManager → WorkflowService
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus.clone(), Arc::clone(&store));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+
+        // Simulate the event that poll_connector_once publishes
+        let payload = incoming_email_payload("gmail-connector", "gmail:msg-001");
+        tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
+
+        // Verify: a workflow instance should have been launched
+        let result = svc.list_instances(&InstanceFilter {
+            statuses: vec![],
+            definition_names: vec!["user/email-wf".to_string()],
+            definition_id: None,
+            parent_session_id: None,
+            parent_agent_id: None,
+            mode: None,
+            limit: None,
+            offset: None,
+            include_archived: false,
+        }).await.unwrap();
+        assert_eq!(result.total, 1, "expected exactly one workflow instance to be launched");
+    }
+
+    #[tokio::test]
+    async fn test_incoming_message_wrong_channel_does_not_launch() {
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus.clone(), Arc::clone(&store));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        // Register trigger for "gmail-connector" but send event for "outlook-connector"
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+
+        let payload = incoming_email_payload("outlook-connector", "ms:msg-001");
+        tm.evaluate_event("comm.message.received.outlook-connector", &payload).await;
+
+        let result = svc.list_instances(&InstanceFilter {
+            statuses: vec![],
+            definition_names: vec!["user/email-wf".to_string()],
+            definition_id: None,
+            parent_session_id: None,
+            parent_agent_id: None,
+            mode: None,
+            limit: None,
+            offset: None,
+            include_archived: false,
+        }).await.unwrap();
+        assert_eq!(result.total, 0, "should NOT launch for wrong channel_id");
+    }
+
+    #[tokio::test]
+    async fn test_incoming_message_dedup_prevents_double_launch() {
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus.clone(), Arc::clone(&store));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+
+        let payload = incoming_email_payload("gmail-connector", "gmail:msg-dup");
+
+        // First evaluation should launch
+        tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
+        // Second evaluation with same external_id should be deduped
+        tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
+
+        let result = svc.list_instances(&InstanceFilter {
+            statuses: vec![],
+            definition_names: vec!["user/email-wf".to_string()],
+            definition_id: None,
+            parent_session_id: None,
+            parent_agent_id: None,
+            mode: None,
+            limit: None,
+            offset: None,
+            include_archived: false,
+        }).await.unwrap();
+        assert_eq!(result.total, 1, "dedup should prevent second launch for same external_id");
+    }
+
+    #[tokio::test]
+    async fn test_incoming_message_full_pipeline_via_event_bus() {
+        // Full end-to-end: publish event on bus → TriggerManager.start() picks it up → launches workflow
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = Arc::new(TriggerManager::new(bus.clone(), Arc::clone(&store)));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "test-connector").await;
+
+        // Start the TriggerManager background loop
+        tm.start().await;
+
+        // Give the event listener a moment to subscribe
+        sleep(Duration::from_millis(50)).await;
+
+        // Publish the event on the bus (simulating poll_connector_once)
+        let payload = incoming_email_payload("test-connector", "test:msg-e2e");
+        bus.publish("comm.message.received.test-connector", "connector-poll", payload).unwrap();
+
+        // Wait for the trigger manager to process the event and launch
+        sleep(Duration::from_millis(500)).await;
+
+        let result = svc.list_instances(&InstanceFilter {
+            statuses: vec![],
+            definition_names: vec!["user/email-wf".to_string()],
+            definition_id: None,
+            parent_session_id: None,
+            parent_agent_id: None,
+            mode: None,
+            limit: None,
+            offset: None,
+            include_archived: false,
+        }).await.unwrap();
+        assert_eq!(result.total, 1, "event bus → trigger manager → workflow launch should work end-to-end");
+
+        // Clean up: stop the trigger manager
+        tm.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_incoming_message_with_from_filter() {
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus.clone(), Arc::clone(&store));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        // Register trigger with from_filter
+        let def = trigger_definition(
+            "def-filtered",
+            "user/filtered-wf",
+            "1.0",
+            TriggerType::IncomingMessage {
+                channel_id: "ch1".to_string(),
+                listen_channel_id: None,
+                filter: None,
+                from_filter: Some("vip@example.com".to_string()),
+                subject_filter: None,
+                body_filter: None,
+                mark_as_read: false,
+                ignore_replies: false,
+            },
+        );
+        let yaml = serde_yaml::to_string(&def).unwrap();
+        svc.save_definition(&yaml).await.unwrap();
+        tm.register_definition(&def).await;
+
+        // Non-matching sender should not trigger
+        let payload_other = json!({
+            "channel_id": "ch1",
+            "provider": "gmail",
+            "external_id": "msg-1",
+            "from": "random@example.com",
+            "to": ["me@example.com"],
+            "subject": "Hi",
+            "body": "nope",
+            "timestamp_ms": 1700000000000u64,
+            "metadata": {}
+        });
+        tm.evaluate_event("comm.message.received.ch1", &payload_other).await;
+
+        // Matching sender should trigger
+        let payload_vip = json!({
+            "channel_id": "ch1",
+            "provider": "gmail",
+            "external_id": "msg-2",
+            "from": "vip@example.com",
+            "to": ["me@example.com"],
+            "subject": "Important",
+            "body": "hello",
+            "timestamp_ms": 1700000000001u64,
+            "metadata": {}
+        });
+        tm.evaluate_event("comm.message.received.ch1", &payload_vip).await;
+
+        let result = svc.list_instances(&InstanceFilter {
+            statuses: vec![],
+            definition_names: vec!["user/filtered-wf".to_string()],
+            definition_id: None,
+            parent_session_id: None,
+            parent_agent_id: None,
+            mode: None,
+            limit: None,
+            offset: None,
+            include_archived: false,
+        }).await.unwrap();
+        assert_eq!(result.total, 1, "only the VIP email should trigger the workflow");
     }
 }

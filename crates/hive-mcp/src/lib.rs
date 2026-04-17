@@ -529,6 +529,12 @@ impl McpService {
                         cmd.env(key, value);
                     }
 
+                    #[cfg(target_os = "windows")]
+                    {
+                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                        cmd.creation_flags(CREATE_NO_WINDOW);
+                    }
+
                     let mut child =
                         cmd.spawn().map_err(|error| McpServiceError::ConnectionFailed {
                             server_id: sid.clone(),

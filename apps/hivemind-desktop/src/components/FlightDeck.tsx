@@ -1185,6 +1185,7 @@ const FlightDeck = (props: FlightDeckProps) => {
       );
       const scope = opts?.allow_session ? ' (session)' : opts?.allow_agent ? ' (agent)' : '';
       logInfo('flight-deck', `${approved ? 'Approved' : 'Denied'}${scope} tool for agent ${agent.agent_id}`);
+      setPolledApprovals(prev => prev.filter(a => a.request_id !== request_id));
     } catch (err: any) {
       logError('flight-deck', `Failed to respond to approval ${request_id}: ${err}`);
     }
@@ -1215,6 +1216,7 @@ const FlightDeck = (props: FlightDeckProps) => {
         },
       );
       props.onQuestionAnswered?.(question.request_id, label);
+      setPolledQuestions(prev => prev.filter(q => q.request_id !== question.request_id));
       setQuestionDialogQuestion(null);
     } catch (err) {
       console.error('Failed to respond:', err);
@@ -2669,6 +2671,7 @@ const FlightDeck = (props: FlightDeckProps) => {
                 );
                 const scope = opts?.allow_session ? ' (session)' : opts?.allow_agent ? ' (agent)' : '';
                 logInfo('flight-deck', `${approved ? 'Approved' : 'Denied'}${scope} ${a.tool_id} for ${a.agent_name}`);
+                setPolledApprovals(prev => prev.filter(p => p.request_id !== a.request_id));
                 setApprovalDialogItem(null);
               } catch (err: any) {
                 logError('flight-deck', `Failed to respond: ${err}`);
