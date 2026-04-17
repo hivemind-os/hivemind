@@ -579,11 +579,17 @@ impl AgentRunner {
         };
 
         let lifecycle_hint = if self.spec.keep_alive {
-            "You are a bot. After completing a task, you will remain \
-             active and may receive additional instructions. Stay ready."
+            "You are a bot running as a background service. There is no interactive \
+             chat thread — the user cannot see your output directly. You MUST use the \
+             core.ask_user tool whenever you need to communicate with or ask something \
+             of the user. After completing a task, you will remain active and may \
+             receive additional instructions. Stay ready."
         } else {
-            "You are a one-shot agent. Complete your task, send your results back, \
-             and you will be automatically terminated."
+            "You are a one-shot agent. There is no interactive chat thread — the user \
+             cannot see your output directly. You MUST use the core.ask_user tool \
+             whenever you need to communicate with or ask something of the user. \
+             Complete your task, send your results back, and you will be automatically \
+             terminated."
         };
 
         system_parts.push(format!("{reply_target} {lifecycle_hint}"));
