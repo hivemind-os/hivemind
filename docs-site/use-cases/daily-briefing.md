@@ -29,7 +29,7 @@ For the best briefing experience, connect your calendar too — same process, ju
 
 ## Step 2: Create the Workflow
 
-1. Go to **Workflows** and click **New Workflow**.
+1. Go to the workflow definitions view (⚙ gear icon next to **Workflows** in the sidebar) and click **New Workflow**.
 2. Name it something like `Morning Briefing`.
 3. Set the mode to **Background**.
 

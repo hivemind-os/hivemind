@@ -4,7 +4,7 @@ Workflows let you chain agents, tools, and control logic into repeatable automat
 
 ## Creating Your First Workflow
 
-1. Open **Workflows** in the sidebar and click **New Workflow**.
+1. Click the **⚙ gear icon** next to **Workflows** in the sidebar, then click **New Workflow**.
 2. Give it a name (e.g. `user/daily-digest`) and pick a mode — **Background** or **Chat**.
 3. Add a **trigger** — what kicks the workflow off (schedule, event, or manual).
 4. Add **steps** — the work the workflow actually does.
@@ -325,7 +325,7 @@ HiveMind OS ships with several ready-to-use workflows. You can launch them direc
 
 ### Browsing Bundled Workflows
 
-Open **Workflows** in the sidebar — bundled workflows appear alongside your custom workflows with a `system/` prefix. Click any workflow to view its definition, then:
+Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the definitions view — bundled workflows appear alongside your custom workflows with a `system/` prefix. Click any workflow to view its definition, then:
 
 - **Launch** — run it immediately with the default or your own inputs
 - **Copy** — create a new workflow using **New Workflow → Copy from existing** to get an editable copy under your `user/` namespace
@@ -360,7 +360,7 @@ Before opening the editor, decide:
 
 ### Step 2: Create the Workflow
 
-1. Open **Workflows → New Workflow**
+1. Open the workflow definitions view (⚙ gear icon next to **Workflows** in the sidebar) and click **New Workflow**
 2. Name it `user/support-triage`
 3. Set mode to **Background**
 

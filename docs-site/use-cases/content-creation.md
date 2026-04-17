@@ -108,7 +108,7 @@ Once you're happy with the quality, consider automating content creation:
 - **Social media on autopilot** — Trigger content drafts whenever you add a new product or publish a blog post.
 - **Newsletter assembly** — Automatically pull the week's highlights and draft a newsletter every Friday.
 
-Head to **Workflows → New Workflow** to get started — the same point-and-click setup you've seen in the other use cases.
+Head to the workflow definitions view (⚙ gear icon next to **Workflows**) and click **New Workflow** to get started — the same point-and-click setup you've seen in the other use cases.
 
 ---
 

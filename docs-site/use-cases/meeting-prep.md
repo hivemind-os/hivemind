@@ -37,7 +37,7 @@ If you haven't connected email yet, go to **Settings → Connectors**, click **A
 
 ## Step 3: Create the Workflow
 
-1. Go to **Workflows** and click **New Workflow**.
+1. Go to the workflow definitions view (⚙ gear icon next to **Workflows** in the sidebar) and click **New Workflow**.
 2. Name it `Meeting Prep`.
 3. Set the mode to **Background**.
 

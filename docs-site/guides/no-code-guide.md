@@ -91,7 +91,7 @@ Email is the most versatile connector. Once connected, you can auto-reply to cus
 
 ## Building Workflows (Visual Designer)
 
-Workflows let you automate multi-step tasks. You build them in a visual designer with drag-and-drop steps, form-based configuration, and an AI assistant that can help design the workflow for you. Go to **Workflows** in the sidebar.
+Workflows let you automate multi-step tasks. You build them in a visual designer with drag-and-drop steps, form-based configuration, and an AI assistant that can help design the workflow for you. Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the workflow definitions view.
 
 ### The Creation Wizard
 
@@ -172,7 +172,7 @@ When you're happy with your workflow, save it and toggle it to **active**. It wi
 
 To run a workflow you've already created:
 
-1. Open **Workflows** in the sidebar
+1. Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the definitions view
 2. Find your workflow and click **Launch**
 3. If the workflow asks for inputs (e.g., a project name or description), fill in the form that appears
 4. Click **Run**
@@ -183,7 +183,7 @@ Workflows with automatic triggers (schedule, incoming message) run on their own 
 
 ### Try the Bundled Workflows
 
-HiveMind OS comes with several pre-built workflows ready to use — no setup required. Open **Workflows** and look for the ones with a `system/` prefix:
+HiveMind OS comes with several pre-built workflows ready to use — no setup required. Open the workflow definitions view (⚙ gear icon next to **Workflows** in the sidebar) and look for the ones with a `system/` prefix:
 
 - **Approval Workflow** — submit a request, get an AI analysis, then approve or reject it. A great way to see how interactive workflows work.
 - **Email Responder** — automatically replies to incoming customer emails using your uploaded product docs.

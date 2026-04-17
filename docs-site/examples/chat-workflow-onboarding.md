@@ -39,7 +39,7 @@ The entire flow runs inside a chat conversation with **feedback gates** that pau
 
 ## The Full Workflow
 
-Open **Workflows → New Workflow**, set mode to **Chat**, and paste:
+Open the workflow definitions view (⚙ gear icon next to **Workflows**), click **New Workflow**, set mode to **Chat**, and paste:
 
 ```yaml
 name: user/project-onboarding

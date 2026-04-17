@@ -53,7 +53,7 @@ allowed_tools:
 
 ## The Full Workflow Definition
 
-Open **Workflows → New Workflow**, switch to the YAML editor, and paste:
+Open the workflow definitions view (⚙ gear icon next to **Workflows**), click **New Workflow**, switch to the YAML editor, and paste:
 
 ```yaml
 name: user/email-support-responder

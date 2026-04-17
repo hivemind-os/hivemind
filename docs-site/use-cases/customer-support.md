@@ -64,7 +64,7 @@ The system prompt is the most important part — it shapes every reply the AI wr
 
 Now you'll connect the pieces: when an email arrives, the AI reads it, checks your manual, and sends a reply.
 
-1. Go to **Workflows** and click **New Workflow**.
+1. Go to the workflow definitions view (⚙ gear icon next to **Workflows** in the sidebar) and click **New Workflow**.
 2. Give it a name like `Customer Email Auto-Reply`.
 3. Set the mode to **Background** (this means it runs on its own, without you needing to be there).
 
