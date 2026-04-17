@@ -52,6 +52,31 @@ security:
 | `allow` | Automatically permitted (dev/testing only) |
 | `redact-and-send` | Strips sensitive tokens with `[REDACTED]` and sends without prompting |
 
+### The Approval UI
+
+When a bot triggers a `prompt` policy — for example, calling `web.search` when the session data is classified as `Internal` but the tool operates on a `Public` channel — HiveMind OS pauses the bot and surfaces an approval request.
+
+A **toast notification** appears so you can respond quickly:
+
+![Approval toast showing the agent name, tool, reason, and Approve / Deny / Allow for Agent / Allow for Session buttons](/images/approval-toast.png)
+
+For full details, open the **Tool Approval dialog**. It shows exactly what the bot wants to do — the tool name, why approval is required, and the exact input parameters:
+
+![Tool Approval Required dialog with tool name, reason, input preview, and action buttons](/images/agent-tool-aproval-dialog.png)
+
+You have four choices:
+
+| Option | Effect |
+|---|---|
+| **Approve** | Allow this single tool call to proceed |
+| **Deny** | Block this single tool call |
+| **Allow for Agent** | Auto-approve this tool for the remainder of this bot's lifetime |
+| **Allow for Session** | Auto-approve this tool for all bots in the current session |
+
+On the **Agent Stage**, bots awaiting approval display a lock badge with a count of pending requests, making it easy to spot which agents need attention:
+
+![Agent Stage showing an approval badge on the seattle-weather-agent](/images/agent-approval-badge2.png)
+
 ::: warning
 Never set `RESTRICTED` to `allow` in production. Restricted data includes credentials and secrets that must not leave the device.
 :::

@@ -68,12 +68,39 @@ The **Bots** page is your command center:
 - **Activity feed** — recent actions, tool calls, and outputs per bot
 - **Quick actions** — pause, resume, message, or delete with one click
 - **Approval badges** — bots waiting for human approval are surfaced prominently
+- **Question badges** — bots waiting for user input show a question badge so you can respond quickly
 
 ## Multi-Bot Orchestration
 
 ### The Agent Stage
 
 When multiple bots work together, the **Agent Stage** provides a visual collaboration canvas showing each bot as a node with message flows and status.
+
+![Agent Stage showing a question badge on a bot awaiting user input](/images/agent-question-badge.png)
+
+Each agent card displays its persona, model, token usage, and live status. Visual badges surface key states at a glance:
+
+- **Question badge** <span style="color: #a78bfa">(?)</span> — the bot has asked a question and is waiting for your response. The badge count shows how many pending questions there are.
+- **Approval badge** <span style="color: #f59e0b">🔒</span> — the bot needs human approval before it can proceed with a tool call (see [Security Policies](/guides/security-policies)).
+
+![Agent Stage showing an approval badge on a bot awaiting tool approval](/images/agent-approval-badge2.png)
+
+When a bot requires approval, a **toast notification** appears with quick-action buttons so you can respond without leaving the Stage:
+
+![Approval toast notification with Approve, Deny, Allow for Agent, and Allow for Session options](/images/approval-toast.png)
+
+You can also click the badge or the toast to open the full **Tool Approval dialog**, which shows the tool name, the reason approval is required, and the exact input the bot wants to send:
+
+![Tool Approval Required dialog showing tool details, reason, and input](/images/agent-tool-aproval-dialog.png)
+
+The approval options give you fine-grained control:
+
+| Option | Effect |
+|---|---|
+| **Approve** | Allow this single tool call |
+| **Deny** | Block this single tool call |
+| **Allow for Agent** | Auto-approve this tool for the rest of this bot's lifetime |
+| **Allow for Session** | Auto-approve this tool for all bots in the current session |
 
 ### Inter-Bot Messaging
 
