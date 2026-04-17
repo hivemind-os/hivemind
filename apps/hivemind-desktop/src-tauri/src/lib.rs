@@ -27,6 +27,10 @@ use std::sync::Mutex;
 
 struct AppState {
     paste_cancelled: Arc<std::sync::atomic::AtomicBool>,
+    /// Set to `true` when an update is being installed so the close-to-tray
+    /// handler allows the window to actually close (the NSIS installer needs
+    /// the process to exit).
+    update_installing: Arc<std::sync::atomic::AtomicBool>,
     /// Channel for the backend to send conflict questions and receive answers.
     paste_conflict_tx: Mutex<Option<std::sync::mpsc::Sender<PasteConflict>>>,
     paste_conflict_rx: Mutex<Option<std::sync::mpsc::Receiver<PasteConflict>>>,
@@ -269,6 +273,16 @@ async fn daemon_stop() -> Result<(), String> {
     .await
     .map_err(|error| error.to_string())?
     .map_err(|error: anyhow::Error| error.to_string())
+}
+
+/// Signal that an update install is about to begin so the close-to-tray
+/// handler allows the window to actually close (the NSIS installer needs
+/// the app process to exit).
+#[tauri::command(rename_all = "snake_case")]
+fn set_update_installing(state: tauri::State<'_, AppState>) {
+    state
+        .update_installing
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -5178,6 +5192,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             paste_cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            update_installing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             paste_conflict_tx: Mutex::new(None),
             paste_conflict_rx: Mutex::new(None),
             paste_conflict_response_tx: Mutex::new(None),
@@ -5217,6 +5232,7 @@ pub fn run() {
             daemon_status,
             daemon_start,
             daemon_stop,
+            set_update_installing,
             config_show,
             config_get,
             config_save,

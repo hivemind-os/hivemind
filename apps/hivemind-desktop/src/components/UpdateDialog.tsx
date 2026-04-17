@@ -50,6 +50,8 @@ export function UpdateDialog(props: UpdateDialogProps) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('daemon_stop');
+        // Allow the NSIS installer to close the window (bypasses close-to-tray).
+        await invoke('set_update_installing');
       } catch {
         // Daemon might already be stopped — continue with update.
       }
