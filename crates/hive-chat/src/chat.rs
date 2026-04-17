@@ -7645,8 +7645,8 @@ impl ChatService {
     //  Bot KG persistence (delegated to BotService)
 
     #[allow(dead_code)]
-    async fn persist_bot_config(&self, config: &BotConfig) -> Result<(), ChatServiceError> {
-        self.bot_service.persist_bot_config(config).await
+    async fn persist_bot_config(&self, config: &BotConfig, allow_insert: bool) -> Result<(), ChatServiceError> {
+        self.bot_service.persist_bot_config(config, allow_insert).await
     }
 
     #[allow(dead_code)]
@@ -11203,5 +11203,145 @@ mod tests {
         } else {
             panic!("expected Question kind");
         }
+    }
+
+    // ── Bot deletion / persistence tests ──────────────────────
+
+    fn make_test_bot_config(id: &str) -> BotConfig {
+        BotConfig {
+            id: id.to_string(),
+            friendly_name: format!("Test Bot {id}"),
+            description: String::new(),
+            avatar: None,
+            color: None,
+            model: None,
+            preferred_models: None,
+            loop_strategy: None,
+            tool_execution_mode: None,
+            system_prompt: "you are a test bot".to_string(),
+            launch_prompt: "hello".to_string(),
+            allowed_tools: vec![],
+            data_class: DataClass::Public,
+            role: AgentRole::default(),
+            mode: hive_agents::BotMode::default(),
+            active: true,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            timeout_secs: None,
+            permission_rules: vec![],
+            tool_limits: None,
+            persona_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_bot_removes_from_configs_and_kg() {
+        let tmp = tempdir().unwrap();
+        let kg_path = tmp.path().join("kg");
+        let svc = test_chat_service(kg_path);
+
+        let bot = make_test_bot_config("bot-del-1");
+        // Insert into in-memory configs.
+        svc.bot_service.bot_configs.write().await.insert(bot.id.clone(), bot.clone());
+        // Persist to KG.
+        svc.bot_service.persist_bot_config(&bot, true).await.unwrap();
+
+        // Verify it's in memory.
+        assert!(svc.bot_service.bot_configs.read().await.contains_key("bot-del-1"));
+        // Verify it's in KG.
+        let kg_configs = svc.bot_service.load_bot_configs().await.unwrap();
+        assert!(kg_configs.iter().any(|c| c.id == "bot-del-1"));
+
+        // Delete the bot.
+        svc.bot_service.delete_bot("bot-del-1").await.unwrap();
+
+        // Verify gone from memory.
+        assert!(!svc.bot_service.bot_configs.read().await.contains_key("bot-del-1"));
+        // Verify gone from KG.
+        let kg_configs = svc.bot_service.load_bot_configs().await.unwrap();
+        assert!(!kg_configs.iter().any(|c| c.id == "bot-del-1"));
+    }
+
+    #[tokio::test]
+    async fn deleted_bot_not_restored_after_restore_bots() {
+        let tmp = tempdir().unwrap();
+        let kg_path = tmp.path().join("kg");
+        let svc = test_chat_service(kg_path);
+
+        let bot = make_test_bot_config("bot-restore-1");
+        svc.bot_service.bot_configs.write().await.insert(bot.id.clone(), bot.clone());
+        svc.bot_service.persist_bot_config(&bot, true).await.unwrap();
+
+        // Delete and verify gone.
+        svc.bot_service.delete_bot("bot-restore-1").await.unwrap();
+        assert!(svc.bot_service.list_bots().await.is_empty());
+
+        // Restore bots (simulates daemon restart).
+        svc.bot_service.restore_bots().await.unwrap();
+
+        // The deleted bot must NOT come back.
+        assert!(
+            !svc.bot_service.list_bots().await.iter().any(|b| b.config.id == "bot-restore-1"),
+            "deleted bot should not reappear after restore_bots"
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_bot_config_update_only_does_not_insert() {
+        let tmp = tempdir().unwrap();
+        let kg_path = tmp.path().join("kg");
+        let svc = test_chat_service(kg_path);
+
+        let bot = make_test_bot_config("bot-no-insert");
+        // Persist with allow_insert = false when nothing exists in KG.
+        svc.bot_service.persist_bot_config(&bot, false).await.unwrap();
+
+        // Verify nothing was inserted.
+        let kg_configs = svc.bot_service.load_bot_configs().await.unwrap();
+        assert!(
+            !kg_configs.iter().any(|c| c.id == "bot-no-insert"),
+            "persist with allow_insert=false should not create a new KG node"
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_bot_config_update_only_updates_existing() {
+        let tmp = tempdir().unwrap();
+        let kg_path = tmp.path().join("kg");
+        let svc = test_chat_service(kg_path);
+
+        let mut bot = make_test_bot_config("bot-update");
+        // Insert into KG first.
+        svc.bot_service.persist_bot_config(&bot, true).await.unwrap();
+
+        // Modify and update with allow_insert=false.
+        bot.system_prompt = "updated prompt".to_string();
+        bot.active = false;
+        svc.bot_service.persist_bot_config(&bot, false).await.unwrap();
+
+        // Verify the KG node was updated.
+        let kg_configs = svc.bot_service.load_bot_configs().await.unwrap();
+        let found = kg_configs.iter().find(|c| c.id == "bot-update").expect("bot should exist");
+        assert_eq!(found.system_prompt, "updated prompt");
+        assert!(!found.active);
+    }
+
+    #[tokio::test]
+    async fn remove_persisted_bot_propagates_node_removal_result() {
+        let tmp = tempdir().unwrap();
+        let kg_path = tmp.path().join("kg");
+        let svc = test_chat_service(kg_path);
+
+        let bot = make_test_bot_config("bot-remove-1");
+        svc.bot_service.persist_bot_config(&bot, true).await.unwrap();
+
+        // Remove should succeed.
+        svc.bot_service.remove_persisted_bot("bot-remove-1").await.unwrap();
+
+        // Verify gone from KG.
+        let kg_configs = svc.bot_service.load_bot_configs().await.unwrap();
+        assert!(!kg_configs.iter().any(|c| c.id == "bot-remove-1"));
+
+        // Removing again should be a no-op (no matching node), not an error.
+        svc.bot_service.remove_persisted_bot("bot-remove-1").await.unwrap();
     }
 }

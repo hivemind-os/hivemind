@@ -243,7 +243,7 @@ impl BotService {
                                         }
                                     };
                                     if let Some(config) = to_persist {
-                                        let _ = bot_svc.persist_bot_config(&config).await;
+                                        let _ = bot_svc.persist_bot_config(&config, false).await;
                                     }
                                 }
                             }
@@ -358,7 +358,7 @@ impl BotService {
         let agent_id = config.id.clone();
         let launch_prompt = config.launch_prompt.clone();
 
-        self.persist_bot_config(&config).await?;
+        self.persist_bot_config(&config, true).await?;
         self.bot_configs.write().await.insert(agent_id.clone(), config.clone());
 
         let agent_perms = if config.permission_rules.is_empty() {
@@ -566,7 +566,7 @@ impl BotService {
             }
         };
         if let Some(config) = to_persist {
-            let _ = self.persist_bot_config(&config).await;
+            let _ = self.persist_bot_config(&config, false).await;
         }
         Ok(())
     }
@@ -580,7 +580,7 @@ impl BotService {
             config.active = true;
             config.clone()
         };
-        let _ = self.persist_bot_config(&config).await;
+        let _ = self.persist_bot_config(&config, false).await;
 
         let supervisor = self.get_or_create_bot_supervisor().await?;
         let spec = config.to_agent_spec();
@@ -611,13 +611,18 @@ impl BotService {
     }
 
     pub async fn delete_bot(&self, agent_id: &str) -> Result<(), ChatServiceError> {
+        // Remove from in-memory configs BEFORE killing the agent. This
+        // prevents the bot supervisor bridge from re-persisting the config
+        // when it receives the AgentStatusChanged { Done } event triggered
+        // by the Kill signal.
+        self.bot_configs.write().await.remove(agent_id);
+
         let supervisor = self.bot_supervisor.read().await;
         if let Some(sup) = supervisor.as_ref() {
             let _ = sup.kill_agent(agent_id).await;
         }
         drop(supervisor);
 
-        self.bot_configs.write().await.remove(agent_id);
         self.remove_persisted_bot(agent_id).await?;
 
         let agent_workspace = self.bot_workspace.join(agent_id);
@@ -680,7 +685,7 @@ impl BotService {
             }
         };
         if let Some(config) = to_persist {
-            let _ = self.persist_bot_config(&config).await;
+            let _ = self.persist_bot_config(&config, false).await;
         }
         Ok(())
     }
@@ -813,9 +818,16 @@ impl BotService {
 
     // ── KG persistence ─────────────────────────────────────
 
+    /// Persist a bot config to the knowledge graph.
+    ///
+    /// When `allow_insert` is `false`, the method only updates an existing KG
+    /// node — it will NOT create a new one. This prevents the bot supervisor
+    /// bridge (and other update-only callers) from accidentally re-inserting a
+    /// config that was already deleted.
     pub(crate) async fn persist_bot_config(
         &self,
         config: &BotConfig,
+        allow_insert: bool,
     ) -> Result<(), ChatServiceError> {
         let graph_path = Arc::clone(&self.knowledge_graph_path);
         let agent_id = config.id.clone();
@@ -853,7 +865,7 @@ impl BotService {
                         detail: e.to_string(),
                     }
                 })?;
-            } else {
+            } else if allow_insert {
                 graph
                     .insert_node(&hive_knowledge::NewNode {
                         name: format!("bot:{agent_id}"),
@@ -875,7 +887,7 @@ impl BotService {
         })?
     }
 
-    async fn load_bot_configs(&self) -> Result<Vec<BotConfig>, ChatServiceError> {
+    pub(crate) async fn load_bot_configs(&self) -> Result<Vec<BotConfig>, ChatServiceError> {
         let graph_path = Arc::clone(&self.knowledge_graph_path);
         tokio::task::spawn_blocking(move || {
             let graph = open_graph(&graph_path)?;
@@ -910,7 +922,7 @@ impl BotService {
         })?
     }
 
-    async fn remove_persisted_bot(&self, agent_id: &str) -> Result<(), ChatServiceError> {
+    pub(crate) async fn remove_persisted_bot(&self, agent_id: &str) -> Result<(), ChatServiceError> {
         let graph_path = Arc::clone(&self.knowledge_graph_path);
         let agent_id = agent_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -933,7 +945,12 @@ impl BotService {
                 if let Some(content) = &node.content {
                     if let Ok(config) = serde_json::from_str::<BotConfig>(content) {
                         if config.id == agent_id {
-                            let _ = graph.remove_node(node.id);
+                            graph.remove_node(node.id).map_err(|e| {
+                                ChatServiceError::KnowledgeGraphFailed {
+                                    operation: "remove_persisted_bot",
+                                    detail: e.to_string(),
+                                }
+                            })?;
                             break;
                         }
                     }
