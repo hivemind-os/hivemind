@@ -710,12 +710,32 @@ impl BotService {
     pub fn list_bot_workspace_files(
         &self,
         bot_id: &str,
+        subdir: Option<&str>,
     ) -> Result<Vec<WorkspaceEntry>, ChatServiceError> {
         let workspace = self.bot_workspace.join(bot_id);
         if !workspace.exists() {
             return Ok(vec![]);
         }
-        Ok(list_workspace_dir(&workspace, &workspace))
+        let target_dir = match subdir {
+            Some(rel) => {
+                let safe_rel = normalize_workspace_relative_path(rel)?;
+                let full = workspace.join(&safe_rel);
+                let canonical = full.canonicalize().map_err(|e| ChatServiceError::Internal {
+                    detail: format!("directory not found: {e}"),
+                })?;
+                let canonical_ws = workspace
+                    .canonicalize()
+                    .map_err(|e| ChatServiceError::Internal { detail: e.to_string() })?;
+                if !canonical.starts_with(&canonical_ws) {
+                    return Err(ChatServiceError::Internal {
+                        detail: "Path traversal not allowed".to_string(),
+                    });
+                }
+                canonical
+            }
+            None => workspace.clone(),
+        };
+        Ok(list_workspace_dir(&workspace, &target_dir))
     }
 
     pub fn read_bot_workspace_file(

@@ -4927,8 +4927,9 @@ impl ChatService {
     pub fn list_bot_workspace_files(
         &self,
         bot_id: &str,
+        subdir: Option<&str>,
     ) -> Result<Vec<WorkspaceEntry>, ChatServiceError> {
-        self.bot_service.list_bot_workspace_files(bot_id)
+        self.bot_service.list_bot_workspace_files(bot_id, subdir)
     }
 
     pub fn read_bot_workspace_file(

@@ -1576,7 +1576,7 @@ const App = () => {
     try {
       const isBot = sessionEntityType() === 'bot';
       const files = isBot
-        ? await invoke<any[]>('bot_workspace_list_files')
+        ? await invoke<any[]>('bot_workspace_list_files', { bot_id: session_id })
         : await invoke<any[]>('workspace_list_files', { session_id });
       setWorkspaceFiles(files);
       setWorkspaceLoadedForSession(session_id);
@@ -1595,9 +1595,9 @@ const App = () => {
     if (!session_id) return;
     try {
       const isBot = sessionEntityType() === 'bot';
-      // Bots don't support subdir listing yet — skip
-      if (isBot) return;
-      const children = await invoke<any[]>('workspace_list_files', { session_id, path: dirPath });
+      const children = isBot
+        ? await invoke<any[]>('bot_workspace_list_files', { bot_id: session_id, path: dirPath })
+        : await invoke<any[]>('workspace_list_files', { session_id, path: dirPath });
       setWorkspaceFiles((prev) => mergeChildrenIntoTree(prev, dirPath, children));
     } catch (error) {
       console.error(`Failed to load directory children for ${dirPath}:`, error);
@@ -1638,7 +1638,7 @@ const App = () => {
     try {
       const isBot = sessionEntityType() === 'bot';
       const content = isBot
-        ? await invoke<any>('bot_workspace_read_file', { path: filePath })
+        ? await invoke<any>('bot_workspace_read_file', { bot_id: session_id, path: filePath })
         : await invoke<any>('workspace_read_file', { session_id, path: filePath });
       setFileContent(content);
       if (!content.is_binary) {

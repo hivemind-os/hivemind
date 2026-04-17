@@ -2426,13 +2426,18 @@ async fn set_bot_permissions(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn bot_workspace_list_files(bot_id: String) -> Result<serde_json::Value, String> {
+async fn bot_workspace_list_files(bot_id: String, path: Option<String>) -> Result<serde_json::Value, String> {
     let base_url = daemon_url(None).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        blocking_get_json::<serde_json::Value>(
-            &base_url,
-            &format!("/api/v1/bots/{}/workspace/files", urlencoding::encode(&bot_id)),
-        )
+        let url = match &path {
+            Some(p) => format!(
+                "/api/v1/bots/{}/workspace/files?path={}",
+                urlencoding::encode(&bot_id),
+                urlencoding::encode(p),
+            ),
+            None => format!("/api/v1/bots/{}/workspace/files", urlencoding::encode(&bot_id)),
+        };
+        blocking_get_json::<serde_json::Value>(&base_url, &url)
     })
     .await
     .map_err(|error| error.to_string())?
