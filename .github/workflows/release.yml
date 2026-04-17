@@ -247,9 +247,9 @@ jobs:
           Write-Host "Using signed installer: $($setupExe.Name)"
 
           # Repackage the .nsis.zip so the updater delivers the signed exe.
-          # IMPORTANT: Use .NET ZipFile with CompressionLevel Optimal (Deflate)
-          # instead of Compress-Archive, which may use Deflate64 on newer
-          # Windows — a method the Tauri updater zip crate does not support.
+          # IMPORTANT: Use .NET ZipFile with NoCompression (Stored, method 0).
+          # The tauri-plugin-updater uses the `zip` crate without deflate
+          # support, so it can ONLY extract Stored entries (method 0).
           $oldZip = Get-ChildItem -Path $nsisDir |
                     Where-Object { $_.Name -like "*.nsis.zip" } |
                     Select-Object -First 1
@@ -260,9 +260,19 @@ jobs:
             $zip = [System.IO.Compression.ZipFile]::Open($oldZip.FullName, 'Create')
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
               $zip, $setupExe.FullName, $setupExe.Name,
-              [System.IO.Compression.CompressionLevel]::Optimal)
+              [System.IO.Compression.CompressionLevel]::NoCompression)
             $zip.Dispose()
             Write-Host "Repackaged updater bundle: $($oldZip.Name)"
+
+            # Verify the zip uses Stored (method 0) — the tauri updater
+            # cannot handle any other compression method.
+            $bytes = [System.IO.File]::ReadAllBytes($oldZip.FullName)
+            $method = [BitConverter]::ToUInt16($bytes, 8)
+            if ($method -ne 0) {
+              Write-Error "FATAL: nsis.zip uses compression method $method (expected 0 = Stored). The Tauri updater will reject this."
+              exit 1
+            }
+            Write-Host "Verified: compression method = Stored (0)"
 
             # Re-sign the .nsis.zip with Tauri Ed25519 key
             Push-Location apps/hivemind-desktop
