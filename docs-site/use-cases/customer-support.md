@@ -122,10 +122,6 @@ Before turning on automatic replies, do a quick test run to make sure everything
 4. Click **Workflows** in the sidebar (not the gear icon) to see running and completed instances. Check the result to make sure the AI drafted a sensible reply.
 5. Once you're satisfied, go back to the workflow definition and toggle the trigger to **Enabled** for automatic runs.
 
-::: info 📸 Screenshot needed
-_The Workflows sidebar view showing a completed instance of the Customer Email Auto-Reply workflow with its output._
-:::
-
 ## Step 6: Activate
 
 Once your test looks good:

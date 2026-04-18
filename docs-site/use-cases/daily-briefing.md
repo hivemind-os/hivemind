@@ -54,7 +54,7 @@ A [workflow](/glossary#workflow) chains AI tasks into a repeatable automation. H
 7. You can use the default [persona](/glossary#persona) or create a dedicated one (something like "Executive Assistant"). Make sure your email and calendar connectors allow this persona — click **Settings** in the sidebar, then click **Connectors**, edit the connector, and add the persona to its **Allowed Personas** list.
 8. In the instructions, type:
 
-> Read my recent emails and check my calendar for today. Summarize everything into a concise morning briefing organized by priority. Highlight anything urgent, list today's meetings, and suggest what I should focus on first.
+> Read my recent emails and check my calendar for today. Summarize everything into a concise morning briefing organized by priority. Highlight anything urgent, list today's meetings, and suggest what I should focus on first. Email the finished briefing to me.
 
 9. Click **Save**.
 
