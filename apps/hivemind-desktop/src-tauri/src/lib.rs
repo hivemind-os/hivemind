@@ -1960,6 +1960,52 @@ async fn mcp_server_logs(server_id: String) -> Result<Vec<McpServerLog>, String>
     .map_err(|error| error.to_string())?
 }
 
+/// Proxy MCP registry searches through the Rust backend so the Tauri
+/// webview doesn't need to fetch external HTTPS URLs directly (which is
+/// blocked as mixed-content in production builds).
+#[tauri::command(rename_all = "snake_case")]
+async fn mcp_registry_search(
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut url = reqwest::Url::parse(
+            "https://registry.modelcontextprotocol.io/v0.1/servers",
+        )
+        .map_err(|e| e.to_string())?;
+        url.query_pairs_mut().append_pair("version", "latest");
+        if let Some(ref q) = search {
+            if !q.is_empty() {
+                url.query_pairs_mut().append_pair("search", q);
+            }
+        }
+        if let Some(ref c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.unwrap_or(30).to_string());
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client.get(url).send().map_err(|e| {
+            if e.is_timeout() {
+                "Registry request timed out. Check your network connection.".to_string()
+            } else {
+                format!("Registry request failed: {e}")
+            }
+        })?;
+        if !resp.status().is_success() {
+            return Err(format!("Registry search failed: {}", resp.status()));
+        }
+        resp.json::<serde_json::Value>().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn tools_list() -> Result<Vec<ToolDefinition>, String> {
     let base_url = daemon_url(None).map_err(|error| error.to_string())?;
@@ -5312,6 +5358,7 @@ pub fn run() {
             mcp_list_prompts,
             mcp_list_notifications,
             mcp_server_logs,
+            mcp_registry_search,
             tools_list,
             local_models_list,
             local_models_get,

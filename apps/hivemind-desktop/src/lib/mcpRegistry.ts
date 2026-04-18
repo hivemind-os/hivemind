@@ -6,6 +6,7 @@
  */
 
 import type { McpServerConfig, McpHeaderValue } from '../types';
+import { invoke } from '@tauri-apps/api/core';
 
 // ---------------------------------------------------------------------------
 // Registry API Types
@@ -104,37 +105,18 @@ export interface RegistrySearchResponse {
 // API Client
 // ---------------------------------------------------------------------------
 
-const REGISTRY_BASE = 'https://registry.modelcontextprotocol.io/v0.1';
-
 export async function searchRegistryServers(
   params: { search?: string; cursor?: string; limit?: number },
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<RegistrySearchResponse> {
-  const url = new URL(`${REGISTRY_BASE}/servers`);
-  url.searchParams.set('version', 'latest');
-  if (params.search) url.searchParams.set('search', params.search);
-  if (params.cursor) url.searchParams.set('cursor', params.cursor);
-  url.searchParams.set('limit', String(params.limit ?? 30));
-
-  // Combine caller signal with a 15-second timeout to avoid infinite hangs
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), 15_000);
-  const combinedSignal = signal
-    ? AbortSignal.any([signal, timeoutController.signal])
-    : timeoutController.signal;
-
-  try {
-    const resp = await fetch(url.toString(), { signal: combinedSignal });
-    if (!resp.ok) throw new Error(`Registry search failed: ${resp.status}`);
-    return resp.json();
-  } catch (err) {
-    if (timeoutController.signal.aborted && !(signal?.aborted)) {
-      throw new Error('Registry request timed out. Check your network connection.');
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
+  // Route through the Rust backend to avoid mixed-content / CSP issues
+  // in the Tauri webview.
+  const result = await invoke<RegistrySearchResponse>('mcp_registry_search', {
+    search: params.search ?? null,
+    cursor: params.cursor ?? null,
+    limit: params.limit ?? 30,
+  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
