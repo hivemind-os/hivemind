@@ -111,12 +111,18 @@ export async function searchRegistryServers(
 ): Promise<RegistrySearchResponse> {
   // Route through the Rust backend to avoid mixed-content / CSP issues
   // in the Tauri webview.
-  const result = await invoke<RegistrySearchResponse>('mcp_registry_search', {
-    search: params.search ?? null,
-    cursor: params.cursor ?? null,
-    limit: params.limit ?? 30,
-  });
-  return result;
+  try {
+    const result = await invoke<RegistrySearchResponse>('mcp_registry_search', {
+      search: params.search ?? null,
+      cursor: params.cursor ?? null,
+      limit: params.limit ?? 30,
+    });
+    return result;
+  } catch (err) {
+    // Tauri invoke rejects with a plain string; wrap it as an Error so
+    // callers can read `.message`.
+    throw new Error(typeof err === 'string' ? err : String(err));
+  }
 }
 
 // ---------------------------------------------------------------------------
