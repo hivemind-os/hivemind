@@ -47,7 +47,7 @@ impl SkillsService {
         Ok(Self { index, config: RwLock::new(config), cache_dir, personas_dir, model_router })
     }
 
-    pub async fn discover(&self) -> Result<Vec<DiscoveredSkill>, SkillsServiceError> {
+    pub async fn discover(&self, persona_id: Option<&str>) -> Result<Vec<DiscoveredSkill>, SkillsServiceError> {
         let config = self.config.read().await.clone();
         if !config.enabled {
             return Ok(Vec::new());
@@ -93,7 +93,7 @@ impl SkillsService {
         }
 
         self.index.insert_discovered(&all_skills)?;
-        Ok(self.index.list_discovered(None)?)
+        Ok(self.index.list_discovered(persona_id)?)
     }
 
     pub async fn list_installed(
@@ -322,7 +322,7 @@ impl SkillsService {
 
     pub async fn rebuild_index(&self) -> Result<Vec<DiscoveredSkill>, SkillsServiceError> {
         self.index.clear_discovered()?;
-        self.discover().await
+        self.discover(None).await
     }
 
     /// Build a catalog containing only skills installed for a specific persona.

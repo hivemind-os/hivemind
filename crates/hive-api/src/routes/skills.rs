@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
     Json,
@@ -13,10 +13,16 @@ use hive_contracts::{
     SkillSourceConfig,
 };
 
+#[derive(Deserialize)]
+pub(crate) struct DiscoverQuery {
+    pub persona_id: Option<String>,
+}
+
 pub(crate) async fn api_discover_skills(
     State(state): State<AppState>,
+    Query(query): Query<DiscoverQuery>,
 ) -> Result<Json<Vec<DiscoveredSkill>>, (StatusCode, String)> {
-    state.skills.discover().await.map(Json).map_err(skills_error)
+    state.skills.discover(query.persona_id.as_deref()).await.map(Json).map_err(skills_error)
 }
 
 pub(crate) async fn api_get_skill_sources(

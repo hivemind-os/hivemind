@@ -83,7 +83,7 @@ const SkillsTab = (props: SkillsTabProps) => {
     setDiscovering(true);
     setError(null);
     try {
-      const skills = await invoke<DiscoveredSkill[]>('skills_discover');
+      const skills = await invoke<DiscoveredSkill[]>('skills_discover', { persona_id: props.persona_id });
       setDiscoveredSkills(skills);
       setView('discover');
     } catch (e: any) {

@@ -3802,10 +3802,14 @@ async fn fetch_provider_models(
 // ── Skills commands ─────────────────────────────────────────────────
 
 #[tauri::command(rename_all = "snake_case")]
-async fn skills_discover() -> Result<Vec<DiscoveredSkill>, String> {
+async fn skills_discover(persona_id: Option<String>) -> Result<Vec<DiscoveredSkill>, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        blocking_post_empty::<Vec<DiscoveredSkill>>(&base_url, "/api/v1/skills/discover")
+        let path = match &persona_id {
+            Some(pid) => format!("/api/v1/skills/discover?persona_id={}", urlencoding::encode(pid)),
+            None => "/api/v1/skills/discover".to_string(),
+        };
+        blocking_post_empty::<Vec<DiscoveredSkill>>(&base_url, &path)
     })
     .await
     .map_err(|e| e.to_string())?
