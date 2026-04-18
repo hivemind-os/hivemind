@@ -12,9 +12,7 @@ Check the [Glossary](/glossary) for plain-English definitions of terms like pers
 
 When you first open HiveMind OS, a **Setup Wizard** walks you through everything you need. It takes about five minutes. You'll connect an AI provider, optionally add email or chat connectors, enable web search, pick your default model, and get a quick tour of the app. You can skip any step and come back to it later in **Settings**. For a detailed walkthrough of first launch, see the [Quickstart](/getting-started/quickstart).
 
-::: info 📸 Screenshot needed
-The Setup Wizard walking through first-time configuration.
-:::
+
 
 
 ## Adding AI Providers
@@ -106,9 +104,7 @@ Workflows let you automate multi-step tasks. You build them in a visual designer
 
 Click **New Workflow** to open the creation wizard.
 
-::: info 📸 Screenshot needed
-The workflow creation wizard showing the first step (Start from scratch / Copy from existing / Start from a template).
-:::
+
 
 It walks you through six steps:
 

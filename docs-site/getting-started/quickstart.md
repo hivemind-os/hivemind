@@ -6,9 +6,7 @@ You installed HiveMind OS — nice. Let's get you from zero to a working AI agen
 
 Open HiveMind OS. On first launch you'll see a **Setup Wizard** that walks you through everything step by step:
 
-::: info 📸 Screenshot needed
-The Setup Wizard welcome screen on first launch.
-:::
+
 
 | Step | What you do |
 |------|-------------|
@@ -25,9 +23,7 @@ You only need to complete the **Providers** step to start chatting. Everything e
 
 In the Providers step, pick a provider card and fill in the details:
 
-::: info 📸 Screenshot needed
-Provider selection screen showing the available provider cards.
-:::
+
 
 ### Option A: OpenAI-Compatible API Key (simplest)
 
