@@ -139,6 +139,10 @@ Sometimes a bot needs your input before it can continue — for example, to clar
 
 ![A bot showing a question badge, indicating it needs your input](/images/bot-question.png)
 
+When you click the badge, a dialog opens where you can read the bot's question and type your response:
+
+![The bot's question dialog where you can read and respond](/images/bot-question-prompt.png)
+
 ---
 
 ## 🚀 You're Just Getting Started
