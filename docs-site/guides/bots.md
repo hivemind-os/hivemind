@@ -12,7 +12,13 @@ This guide walks you through launching, configuring, and orchestrating bots in H
 6. **Configure permissions** — set data classification, adjust tool access, add approval rules
 7. Click **Launch** — the bot spins up immediately and starts working
 
-![The Launch Bot dialog](/images/launch-bot.png)
+![Launch Bot wizard — Step 1: Choose a persona](/images/launch-bot.png)
+
+![Launch Bot wizard — Step 2: Set launch prompt and mode](/images/launch-bot-step2.png)
+
+![Launch Bot wizard — Step 3: Configure permissions](/images/launch-bot-step3.png)
+
+![Launch Bot wizard — Step 4: Review and launch](/images/launch-bot-step4.png)
 
 ## Bot Modes Deep-Dive
 

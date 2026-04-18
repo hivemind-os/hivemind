@@ -254,7 +254,7 @@ Bots are persistent AI agents that work on tasks in the background. They're like
 
 5. Click **Launch**
 
-![The Launch Bot dialog](/images/launch-bot.png)
+![The Launch Bot wizard](/images/launch-bot.png)
 
 ### Watching Your Bot Work
 
