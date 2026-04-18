@@ -223,6 +223,7 @@ const SkillsTab = (props: SkillsTabProps) => {
   // --- Source management ---
   const [newSourceOwner, setNewSourceOwner] = createSignal('');
   const [newSourceRepo, setNewSourceRepo] = createSignal('');
+  const [newLocalPath, setNewLocalPath] = createSignal('');
 
   const addSource = async () => {
     const owner = newSourceOwner().trim();
@@ -237,6 +238,32 @@ const SkillsTab = (props: SkillsTabProps) => {
       setNewSourceRepo('');
     } catch (e) {
       console.error('Failed to add source:', e);
+    }
+  };
+
+  const addLocalSource = async () => {
+    const path = newLocalPath().trim();
+    if (!path) return;
+    const newSrc: SkillSourceConfig = { type: 'local_directory', path, enabled: true };
+    const updated = [...sources(), newSrc];
+    try {
+      await invoke('skills_set_sources', { sources: updated });
+      setSources(updated);
+      setNewLocalPath('');
+    } catch (e) {
+      console.error('Failed to add local source:', e);
+    }
+  };
+
+  const browseLocalFolder = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({ directory: true, title: 'Select skill source folder' });
+      if (selected) {
+        setNewLocalPath(selected as string);
+      }
+    } catch (e) {
+      console.error('Failed to open folder dialog:', e);
     }
   };
 
@@ -387,13 +414,16 @@ const SkillsTab = (props: SkillsTabProps) => {
       <Show when={view() === 'sources'}>
         <div class="settings-section">
           <h3>Skill Sources</h3>
-          <p class="text-muted-foreground text-sm">GitHub repositories to scan for skills.</p>
+          <p class="text-muted-foreground text-sm">GitHub repositories and local folders to scan for skills.</p>
           <div class="flex flex-col gap-2 mb-4">
             <For each={sources()}>
               {(source, idx) => (
                 <div class="flex items-center gap-2 px-3 py-2 bg-secondary rounded-md">
                   <span class="flex-1">
-                    <code>{source.owner}/{source.repo}</code>
+                    {source.type === 'github'
+                      ? <code>{source.owner}/{source.repo}</code>
+                      : <><Badge variant="outline" class="mr-1">Local</Badge><code class="text-xs">{source.path}</code></>
+                    }
                   </span>
                   <Button variant="destructive" size="sm" onClick={() => void removeSource(idx())}>
                     Remove
@@ -402,7 +432,9 @@ const SkillsTab = (props: SkillsTabProps) => {
               )}
             </For>
           </div>
-          <div class="flex gap-2 items-end">
+
+          <h4 class="text-sm font-medium mb-2">Add GitHub Repository</h4>
+          <div class="flex gap-2 items-end mb-4">
             <div class="flex-1">
               <label class="text-xs text-muted-foreground">Owner</label>
               <input
@@ -424,6 +456,26 @@ const SkillsTab = (props: SkillsTabProps) => {
               />
             </div>
             <Button size="sm" onClick={() => void addSource()} disabled={!newSourceOwner().trim() || !newSourceRepo().trim()}>
+              Add
+            </Button>
+          </div>
+
+          <h4 class="text-sm font-medium mb-2">Add Local Folder</h4>
+          <div class="flex gap-2 items-end">
+            <div class="flex-1">
+              <label class="text-xs text-muted-foreground">Folder Path</label>
+              <input
+                type="text"
+                placeholder="/path/to/skills"
+                value={newLocalPath()}
+                onInput={(e) => setNewLocalPath(e.currentTarget.value)}
+                class="w-full"
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void browseLocalFolder()}>
+              Browse…
+            </Button>
+            <Button size="sm" onClick={() => void addLocalSource()} disabled={!newLocalPath().trim()}>
               Add
             </Button>
           </div>
