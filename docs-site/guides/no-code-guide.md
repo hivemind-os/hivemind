@@ -270,6 +270,47 @@ The **Chat** view is where you have direct conversations with your AI personas.
 - **Everything stays on your machine.** Your conversations are stored locally, not in the cloud.
 
 
+## The Flight Deck
+
+The **Flight Deck** is your mission control for everything that's currently running in HiveMind OS. Open it by clicking the **rocket button** (🚀) in the top-right corner of the app.
+
+It gives you a global, real-time view of all active agents, workflows, and other system activity — so you always know what's happening and can step in when needed.
+
+### Agents tab
+
+Shows every active agent (bots and workflow agents) with live status updates:
+
+![The Flight Deck Agents panel showing running bots](/images/flightdeck-agents.png)
+
+- **Status indicators** — see at a glance which agents are active, waiting, paused, or blocked
+- **Gate badges** — approval and question badges appear when an agent needs your input. Click them to respond immediately
+- **Live metrics** — token usage, LLM calls, tool calls, and runtime update in real time
+- **Actions** — click any agent to pause, resume, reconfigure, restart, or stop it
+
+### Workflows tab
+
+Shows all running and pending workflow instances:
+
+![The Flight Deck Workflows panel showing active workflows](/images/flightdeck-workflows.png)
+
+- **Instance status** — running, paused, pending, or waiting for input/event
+- **Step details** — click a workflow to see its individual steps, variables, and output
+- **Gate badges** — just like agents, workflows show approval and question badges when they need your attention
+- **Actions** — pause, resume, or stop any workflow instance
+
+### Other tabs
+
+The Flight Deck also includes tabs for:
+
+- **Triggers** — active triggers listening for events (schedules, incoming messages, etc.)
+- **Sessions** — open chat sessions and their status
+- **Models** — which AI models are loaded and available
+- **Events** — a live stream of system events
+- **Services** — background services and their health
+- **Health** — overall system status
+- **Knowledge** — the knowledge graph and stored memories
+
+
 ## What's Next?
 
 Now that you know your way around the app, explore these resources to go deeper:

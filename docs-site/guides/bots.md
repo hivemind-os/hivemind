@@ -90,6 +90,10 @@ The **Bots** page is your command center:
 
 ![The Bots dashboard](/images/flightdeck-agents.png)
 
+::: tip Flight Deck
+You can also monitor all active bots from the **Flight Deck** — click the 🚀 rocket button in the top-right corner for a global view of every running agent and workflow. See the [No-Code Guide](/guides/no-code-guide#the-flight-deck) for details.
+:::
+
 ## Multi-Bot Orchestration
 
 ### The Agent Stage

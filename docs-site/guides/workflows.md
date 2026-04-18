@@ -310,6 +310,10 @@ Open the **Workflows** page to see all active and completed instances:
 - **Step progress** — see which step is currently executing and review outputs from completed steps
 - **Live updates** — the page updates in real time as steps complete
 
+::: tip Flight Deck
+For a global view of all running workflows and agents in one place, open the **Flight Deck** — click the 🚀 rocket button in the top-right corner. See the [No-Code Guide](/guides/no-code-guide#the-flight-deck) for details.
+:::
+
 ### Responding to Gates
 
 When a running workflow reaches a `feedback_gate`, it pauses and waits for your input. In **chat workflows**, the gate appears as a message in your conversation. For **background workflows**, the gate surfaces on the Workflows page as a pending action.
