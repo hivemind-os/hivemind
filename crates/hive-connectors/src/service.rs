@@ -1090,6 +1090,22 @@ impl ConnectorService {
                         );
                     }
 
+                    // Prune old poll-dedup entries every ~100 cycles to
+                    // prevent unbounded growth.  30-day retention window.
+                    const PRUNE_CYCLES: u64 = 100;
+                    const POLL_DEDUP_MAX_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+                    if cycle % PRUNE_CYCLES == 1 {
+                        match svc.audit_log.prune_poll_dedup(POLL_DEDUP_MAX_AGE_MS) {
+                            Ok(n) if n > 0 => {
+                                info!(connector_id = %cid, deleted = n, "pruned old poll dedup entries");
+                            }
+                            Err(e) => {
+                                warn!(connector_id = %cid, error = %e, "failed to prune poll dedup");
+                            }
+                            _ => {}
+                        }
+                    }
+
                     // Back off on consecutive failures
                     if consecutive_failures > 0 {
                         let backoff = (poll_interval
@@ -1217,17 +1233,43 @@ impl ConnectorService {
         self.last_poll_with_messages_ms.store(now, Ordering::Relaxed);
 
         for msg in &inbound {
-            // Connector-side dedup: skip messages we already published in
-            // this poll task's lifetime.  Insert only after successful
-            // publish so transient failures don't permanently suppress a
-            // message.
+            // Fast in-memory dedup: skip messages already published in this
+            // poll task's lifetime.
             if published_ids.contains(&msg.external_id) {
                 debug!(
                     connector_id,
                     external_id = %msg.external_id,
-                    "skipping already-published message"
+                    "skipping already-published message (in-memory)"
                 );
                 continue;
+            }
+
+            // Persistent dedup: skip messages published in a previous daemon
+            // session.  Uses atomic INSERT OR IGNORE — returns false if the
+            // external_id was already recorded.
+            match self.audit_log.try_mark_poll_published(connector_id, &msg.external_id) {
+                Ok(true) => { /* first time seeing this message — proceed */ }
+                Ok(false) => {
+                    debug!(
+                        connector_id,
+                        external_id = %msg.external_id,
+                        "skipping already-published message (persistent)"
+                    );
+                    // Backfill the in-memory set so subsequent cycles skip
+                    // the DB lookup for this message.
+                    published_ids.insert(msg.external_id.clone());
+                    continue;
+                }
+                Err(e) => {
+                    // DB failure — warn and proceed to avoid dropping events.
+                    // Trigger-level dedup (trigger_dedup_v2) is the safety net.
+                    warn!(
+                        error = %e,
+                        connector_id,
+                        external_id = %msg.external_id,
+                        "poll dedup check failed, proceeding with publish"
+                    );
+                }
             }
 
             let input_class = {

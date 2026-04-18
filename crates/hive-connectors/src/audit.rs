@@ -83,6 +83,13 @@ impl SqliteAuditStore {
                 ON connector_audit(agent_id, timestamp_ms);
             CREATE INDEX IF NOT EXISTS idx_connector_audit_direction
                 ON connector_audit(direction, timestamp_ms);
+
+            CREATE TABLE IF NOT EXISTS poll_dedup (
+                connector_id  TEXT NOT NULL,
+                external_id   TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                PRIMARY KEY (connector_id, external_id)
+            );
             ",
         )
         .context("initializing connector audit schema")?;
@@ -206,6 +213,45 @@ impl AuditStore for SqliteAuditStore {
 
     fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+impl SqliteAuditStore {
+    /// Atomically mark an external_id as published for a connector.
+    ///
+    /// Returns `true` if this call inserted a new row (i.e. the message was
+    /// NOT previously published). Returns `false` if the row already existed
+    /// (i.e. this is a duplicate).
+    ///
+    /// Uses `INSERT OR IGNORE` so the check+insert is a single atomic
+    /// statement, eliminating races between overlapping poll tasks.
+    pub fn try_mark_poll_published(
+        &self,
+        connector_id: &str,
+        external_id: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock();
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO poll_dedup (connector_id, external_id, created_at_ms)
+                 VALUES (?1, ?2, ?3)",
+                params![connector_id, external_id, now_ms() as i64],
+            )
+            .context("poll dedup insert")?;
+        Ok(inserted > 0)
+    }
+
+    /// Remove poll-dedup entries older than `max_age_ms` milliseconds.
+    pub fn prune_poll_dedup(&self, max_age_ms: u64) -> Result<usize> {
+        let conn = self.conn.lock();
+        let cutoff = now_ms().saturating_sub(max_age_ms as u128) as i64;
+        let deleted = conn
+            .execute(
+                "DELETE FROM poll_dedup WHERE created_at_ms <= ?1",
+                params![cutoff],
+            )
+            .context("pruning poll dedup")?;
+        Ok(deleted)
     }
 }
 
@@ -430,5 +476,78 @@ mod tests {
             .unwrap();
         assert_eq!(cal_only.len(), 1);
         assert_eq!(cal_only[0].id, "cal-1");
+    }
+
+    #[test]
+    fn poll_dedup_first_insert_returns_true() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        assert!(log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+    }
+
+    #[test]
+    fn poll_dedup_duplicate_returns_false() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        assert!(log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+        assert!(!log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+    }
+
+    #[test]
+    fn poll_dedup_different_connectors_are_independent() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        assert!(log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+        assert!(log.try_mark_poll_published("conn-2", "ext-abc").unwrap());
+    }
+
+    #[test]
+    fn poll_dedup_survives_reopen() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("audit.db");
+
+        {
+            let log = ConnectorAuditLog::open(&db_path).unwrap();
+            assert!(log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+        }
+
+        // Simulate daemon restart by re-opening the DB
+        let log = ConnectorAuditLog::open(&db_path).unwrap();
+        assert!(!log.try_mark_poll_published("conn-1", "ext-abc").unwrap());
+    }
+
+    #[test]
+    fn poll_dedup_prune_removes_old_entries() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        log.try_mark_poll_published("conn-1", "ext-old").unwrap();
+        log.try_mark_poll_published("conn-1", "ext-new").unwrap();
+
+        // Prune with zero max_age removes everything
+        let deleted = log.prune_poll_dedup(0).unwrap();
+        assert_eq!(deleted, 2);
+
+        // Both should be insertable again
+        assert!(log.try_mark_poll_published("conn-1", "ext-old").unwrap());
+        assert!(log.try_mark_poll_published("conn-1", "ext-new").unwrap());
+    }
+
+    #[test]
+    fn poll_dedup_prune_keeps_recent_entries() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        log.try_mark_poll_published("conn-1", "ext-recent").unwrap();
+
+        // Prune with very large max_age keeps everything
+        let deleted = log.prune_poll_dedup(365 * 24 * 60 * 60 * 1000).unwrap();
+        assert_eq!(deleted, 0);
+
+        // Still a duplicate
+        assert!(!log.try_mark_poll_published("conn-1", "ext-recent").unwrap());
     }
 }
