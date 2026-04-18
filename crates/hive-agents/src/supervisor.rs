@@ -813,6 +813,23 @@ impl AgentSupervisor {
         self.agents.get(agent_id).map(|h| h.status.clone())
     }
 
+    /// Return the agent plus all its transitive descendants (depth-first).
+    /// Useful for snapshotting which agents will be affected by a kill before
+    /// the actual kill removes them from the map.
+    pub fn get_descendant_ids(&self, agent_id: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut stack = vec![agent_id.to_string()];
+        while let Some(current) = stack.pop() {
+            result.push(current.clone());
+            for entry in self.agents.iter() {
+                if entry.value().parent_id.as_deref() == Some(&current) {
+                    stack.push(entry.key().clone());
+                }
+            }
+        }
+        result
+    }
+
     /// Get the parent ID of an agent.
     /// Returns `None` if the agent is not found.
     /// Returns `Some(None)` if the agent exists but has no parent (root-level).
@@ -1433,5 +1450,41 @@ mod tests {
 
         // All agents should be gone
         assert!(sup.get_all_agents().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_descendant_ids_returns_self_and_children() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let child1 =
+            sup.spawn_agent(test_spec("child1"), Some(root.clone()), None, None, None).await.unwrap();
+        let child2 =
+            sup.spawn_agent(test_spec("child2"), Some(root.clone()), None, None, None).await.unwrap();
+        let grandchild =
+            sup.spawn_agent(test_spec("gc"), Some(child1.clone()), None, None, None).await.unwrap();
+
+        let mut ids = sup.get_descendant_ids(&root);
+        ids.sort();
+        let mut expected = vec![root.clone(), child1, child2, grandchild];
+        expected.sort();
+        assert_eq!(ids, expected);
+
+        // Leaf node returns just itself
+        let leaf_ids = sup.get_descendant_ids("gc");
+        assert_eq!(leaf_ids, vec!["gc".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn kill_agent_removes_descendants_from_supervisor() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let _child =
+            sup.spawn_agent(test_spec("child"), Some(root.clone()), None, None, None).await.unwrap();
+        let _grandchild =
+            sup.spawn_agent(test_spec("gc"), Some("child".to_string()), None, None, None).await.unwrap();
+
+        assert_eq!(sup.agent_count(), 3);
+        sup.kill_agent(&root).await.unwrap();
+        assert_eq!(sup.agent_count(), 0, "kill_agent should remove target + descendants");
     }
 }

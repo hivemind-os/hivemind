@@ -4246,11 +4246,23 @@ impl ChatService {
         session_id: &str,
         agent_id: &str,
     ) -> Result<(), ChatServiceError> {
-        self.get_or_create_supervisor(session_id)
-            .await?
-            .kill_agent(agent_id)
-            .await
-            .map_err(Self::map_agent_error)
+        let supervisor = self.get_or_create_supervisor(session_id).await?;
+
+        // Snapshot agent + all descendants BEFORE the kill removes them from
+        // the supervisor's map. This lets us clean up persisted KG state even
+        // if the broadcast events are missed (e.g. the persistence handler has
+        // already been dropped).
+        let doomed_ids = supervisor.get_descendant_ids(agent_id);
+
+        supervisor.kill_agent(agent_id).await.map_err(Self::map_agent_error)?;
+
+        // Explicitly remove persisted agent nodes from the KG so pending
+        // interactions (approval requests, etc.) don't resurface.
+        for id in &doomed_ids {
+            let _ = self.remove_persisted_agent(id).await;
+        }
+
+        Ok(())
     }
 
     /// Restart an agent, optionally with a new model. Returns the new agent ID.
