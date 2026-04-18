@@ -210,9 +210,9 @@ The running instance appears on the **Workflows** page (click **Workflows** in t
 4. Fill in any required inputs and click **Launch**
 5. The workflow runs inside your conversation — it sends messages and can ask you questions along the way
 
-::: info 📸 Screenshot needed
-The Chat view composer showing the "Launch a chat workflow" button and workflow picker dialog.
-:::
+![The "Launch a chat workflow" button in the composer](/images/chat-workflow-launch-button.png)
+
+![The chat workflow picker dialog](/images/launch-chat-workflow.png)
 
 Workflows with automatic triggers (schedule, incoming message) run on their own once saved — no need to launch them manually.
 

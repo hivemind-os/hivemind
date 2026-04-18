@@ -264,9 +264,9 @@ Chat workflows are launched from the **Chat view** using the workflow button in 
 6. The workflow attaches to your conversation — agent steps produce messages in the thread, and `feedback_gate` steps pause to present you with choices or a text input
 7. Your responses feed back into the workflow, and execution continues
 
-::: info 📸 Screenshot needed
-The Chat view with the "Launch a chat workflow" button in the composer and the workflow picker dialog.
-:::
+![The "Launch a chat workflow" button in the composer](/images/chat-workflow-launch-button.png)
+
+![The chat workflow picker dialog](/images/launch-chat-workflow.png)
 
 This makes chat workflows ideal for guided processes — onboarding, approval flows, interactive research — where you need to participate at key moments.
 
