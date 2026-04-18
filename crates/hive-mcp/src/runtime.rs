@@ -203,11 +203,10 @@ pub fn resolve_command_in_path(command: &str, path_var: &str) -> Option<PathBuf>
 /// Search for `name` in the directories listed in `path_var`.
 fn find_in_path_var(name: &str, path_var: &str) -> Option<PathBuf> {
     for dir in std::env::split_paths(path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        // On Windows, also check with common extensions.
+        // On Windows, check executable extensions FIRST.  Node.js ships
+        // both `npx` (a Unix shell script) and `npx.cmd` (the Windows
+        // batch wrapper).  The extensionless file is not a valid Win32
+        // binary, so we must prefer .exe/.cmd/.bat.
         if cfg!(target_os = "windows") {
             for ext in &[".exe", ".cmd", ".bat"] {
                 let with_ext = dir.join(format!("{name}{ext}"));
@@ -215,6 +214,10 @@ fn find_in_path_var(name: &str, path_var: &str) -> Option<PathBuf> {
                     return Some(with_ext);
                 }
             }
+        }
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None
