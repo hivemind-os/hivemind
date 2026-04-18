@@ -1,6 +1,7 @@
 //! GitHub repo skill source — discovers skills by cloning repos.
 
-use crate::parser::{self, ParsedSkill};
+use crate::parser;
+use crate::scan;
 use hive_contracts::{DiscoveredSkill, SkillSourceConfig};
 use std::path::{Path, PathBuf};
 
@@ -79,7 +80,7 @@ impl GitHubRepoSource {
 
         let mut skills = Vec::new();
         let source_id = self.source_id();
-        scan_directory(&self.cache_dir, &self.cache_dir, &source_id, &mut skills, 0).await;
+        scan::scan_directory(&self.cache_dir, &self.cache_dir, &source_id, &mut skills, 0).await;
         Ok(skills)
     }
 
@@ -99,7 +100,7 @@ impl GitHubRepoSource {
             .map_err(|e| SourceError::ParseFailed(e.to_string()))?;
 
         let mut files = std::collections::BTreeMap::new();
-        collect_skill_files(&skill_dir, &skill_dir, &mut files).await;
+        scan::collect_skill_files(&skill_dir, &skill_dir, &mut files).await;
 
         Ok(hive_contracts::SkillContent { skill_md, body: parsed.body, files })
     }
@@ -202,128 +203,6 @@ fn reset_worktree(
     index.write(gix::index::write::Options::default())?;
 
     Ok(())
-}
-
-const MAX_SCAN_DEPTH: u32 = 6;
-const SKIP_DIRS: &[&str] = &[".git", "node_modules", "__pycache__", ".venv", "target"];
-
-async fn scan_directory(
-    base: &Path,
-    dir: &Path,
-    source_id: &str,
-    results: &mut Vec<DiscoveredSkill>,
-    depth: u32,
-) {
-    if depth > MAX_SCAN_DEPTH {
-        return;
-    }
-
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let name_str = file_name.to_string_lossy();
-
-        if !path.is_dir() {
-            continue;
-        }
-        if SKIP_DIRS.contains(&name_str.as_ref()) || name_str.starts_with('.') {
-            continue;
-        }
-
-        let skill_md_path = path.join("SKILL.md");
-        if skill_md_path.exists() {
-            match tokio::fs::read_to_string(&skill_md_path).await {
-                Ok(content) => match parser::parse_skill_md(&content) {
-                    Ok(ParsedSkill { manifest, .. }) => {
-                        let source_path =
-                            path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
-                        results.push(DiscoveredSkill {
-                            manifest,
-                            source_id: source_id.to_string(),
-                            source_path,
-                            installed: false,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!("Skipping {}: {}", skill_md_path.display(), e);
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("Failed to read {}: {}", skill_md_path.display(), e);
-                }
-            }
-        } else {
-            // Recurse into subdirectories
-            Box::pin(scan_directory(base, &path, source_id, results, depth + 1)).await;
-        }
-    }
-}
-
-/// Collect all text files in a skill directory (for audit).
-async fn collect_skill_files(
-    base: &Path,
-    dir: &Path,
-    files: &mut std::collections::BTreeMap<String, String>,
-) {
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        if name.starts_with('.') {
-            continue;
-        }
-
-        if path.is_file() && name != "SKILL.md" {
-            // Only include text-like files (skip binaries)
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let is_text = matches!(
-                ext,
-                "md" | "txt"
-                    | "py"
-                    | "js"
-                    | "ts"
-                    | "sh"
-                    | "bash"
-                    | "yaml"
-                    | "yml"
-                    | "json"
-                    | "toml"
-                    | "rs"
-                    | "go"
-                    | "rb"
-                    | "pl"
-                    | "r"
-                    | "sql"
-                    | "html"
-                    | "css"
-                    | "xml"
-                    | "csv"
-                    | "cfg"
-                    | "ini"
-                    | "conf"
-            ) || ext.is_empty();
-
-            if is_text {
-                if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                    let rel =
-                        path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
-                    files.insert(rel, content);
-                }
-            }
-        } else if path.is_dir() && !SKIP_DIRS.contains(&name.as_str()) {
-            Box::pin(collect_skill_files(base, &path, files)).await;
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

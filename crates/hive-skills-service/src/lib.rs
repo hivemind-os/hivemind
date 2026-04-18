@@ -6,7 +6,7 @@ use hive_contracts::{
     SkillRiskSeverity, SkillSourceConfig, SkillsConfig,
 };
 use hive_model::{CompletionMessage, CompletionRequest, ModelRouter};
-use hive_skills::{parse_skill_md, GitHubRepoSource, SkillCatalog, SkillIndex, SkillIndexStore};
+use hive_skills::{parse_skill_md, GitHubRepoSource, LocalDirSource, SkillCatalog, SkillIndex, SkillIndexStore};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -55,11 +55,38 @@ impl SkillsService {
 
         let mut all_skills = Vec::new();
         for source_config in &config.sources {
-            if let Some(source) = GitHubRepoSource::from_config(source_config, &self.cache_dir) {
-                match source.discover().await {
-                    Ok(skills) => all_skills.extend(skills),
-                    Err(error) => {
-                        tracing::warn!("Failed to discover from {}: {}", source.source_id(), error);
+            if !source_config.is_enabled() {
+                continue;
+            }
+            match source_config {
+                SkillSourceConfig::GitHub { .. } => {
+                    if let Some(source) =
+                        GitHubRepoSource::from_config(source_config, &self.cache_dir)
+                    {
+                        match source.discover().await {
+                            Ok(skills) => all_skills.extend(skills),
+                            Err(error) => {
+                                tracing::warn!(
+                                    "Failed to discover from {}: {}",
+                                    source.source_id(),
+                                    error
+                                );
+                            }
+                        }
+                    }
+                }
+                SkillSourceConfig::LocalDirectory { .. } => {
+                    if let Some(source) = LocalDirSource::from_config(source_config) {
+                        match source.discover().await {
+                            Ok(skills) => all_skills.extend(skills),
+                            Err(error) => {
+                                tracing::warn!(
+                                    "Failed to discover from {}: {}",
+                                    source.source_id(),
+                                    error
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -396,23 +423,55 @@ impl SkillsService {
             .source_for_id(source_id)
             .await
             .ok_or_else(|| SkillsServiceError::SourceNotFound(source_id.to_string()))?;
-        source.fetch_skill_content(source_path).await.map_err(Into::into)
+        match source {
+            AnySkillSource::GitHub(s) => {
+                s.fetch_skill_content(source_path).await.map_err(Into::into)
+            }
+            AnySkillSource::Local(s) => {
+                s.fetch_skill_content(source_path).await.map_err(Into::into)
+            }
+        }
     }
 
-    async fn source_for_id(&self, source_id: &str) -> Option<GitHubRepoSource> {
+    async fn source_for_id(&self, source_id: &str) -> Option<AnySkillSource> {
         let config = self.config.read().await.clone();
-        config.sources.iter().find_map(|source_config| match source_config {
-            SkillSourceConfig::GitHub { owner, repo, .. }
-                if source_config.source_id() == source_id =>
-            {
-                Some(GitHubRepoSource::new(
-                    owner.clone(),
-                    repo.clone(),
-                    self.cache_dir.join(format!("{owner}_{repo}")),
-                ))
+        config.sources.iter().find_map(|source_config| {
+            if source_config.source_id() != source_id {
+                return None;
             }
-            _ => None,
+            match source_config {
+                SkillSourceConfig::GitHub { owner, repo, .. } => {
+                    Some(AnySkillSource::GitHub(GitHubRepoSource::new(
+                        owner.clone(),
+                        repo.clone(),
+                        self.cache_dir.join(format!("{owner}_{repo}")),
+                    )))
+                }
+                SkillSourceConfig::LocalDirectory { path, .. } => {
+                    let p = PathBuf::from(path);
+                    if p.is_absolute() && p.is_dir() {
+                        Some(AnySkillSource::Local(LocalDirSource::new(p)))
+                    } else {
+                        None
+                    }
+                }
+            }
         })
+    }
+}
+
+/// Wrapper enum so the service can work with either source type.
+enum AnySkillSource {
+    GitHub(GitHubRepoSource),
+    Local(LocalDirSource),
+}
+
+impl AnySkillSource {
+    fn head_commit_sha(&self) -> Option<String> {
+        match self {
+            Self::GitHub(s) => s.head_commit_sha(),
+            Self::Local(s) => s.head_commit_sha(),
+        }
     }
 }
 
@@ -422,6 +481,8 @@ pub enum SkillsServiceError {
     Index(#[from] hive_skills::index::IndexError),
     #[error(transparent)]
     Source(#[from] hive_skills::github_source::SourceError),
+    #[error(transparent)]
+    LocalSource(#[from] hive_skills::local_dir_source::LocalSourceError),
     #[error("I/O error for {path}: {detail}")]
     Io { path: String, detail: String },
     #[error("source `{0}` was not found")]

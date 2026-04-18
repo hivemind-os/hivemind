@@ -2133,6 +2133,7 @@ pub(crate) fn skills_error(error: SkillsServiceError) -> (StatusCode, String) {
         SkillsServiceError::Config(_) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         SkillsServiceError::Index(_)
         | SkillsServiceError::Source(_)
+        | SkillsServiceError::LocalSource(_)
         | SkillsServiceError::Io { .. } => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }

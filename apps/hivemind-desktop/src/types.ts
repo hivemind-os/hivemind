@@ -831,7 +831,8 @@ export type InstalledSkill = {
 };
 
 export type SkillSourceConfig =
-  | { type: 'github'; owner: string; repo: string; enabled: boolean };
+  | { type: 'github'; owner: string; repo: string; enabled: boolean }
+  | { type: 'local_directory'; path: string; enabled: boolean };
 
 export type SkillsConfig = {
   enabled: boolean;

@@ -128,7 +128,7 @@ pub enum SkillRiskSeverity {
 
 // ── Skill Source Config ────────────────────────────────────────────
 
-/// Configuration for a source of skills (e.g. a GitHub repo).
+/// Configuration for a source of skills (e.g. a GitHub repo or local directory).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SkillSourceConfig {
@@ -143,7 +143,16 @@ pub enum SkillSourceConfig {
         #[serde(default = "default_true")]
         enabled: bool,
     },
-    // Future: OCI registry, local directory, etc.
+    /// A local directory containing skills with SKILL.md files.
+    /// The path must be an absolute, canonicalized directory path.
+    #[serde(rename = "local_directory")]
+    LocalDirectory {
+        /// Absolute path to the directory.
+        path: String,
+        /// Whether this source is enabled for discovery.
+        #[serde(default = "default_true")]
+        enabled: bool,
+    },
 }
 
 impl SkillSourceConfig {
@@ -151,12 +160,13 @@ impl SkillSourceConfig {
     pub fn source_id(&self) -> String {
         match self {
             Self::GitHub { owner, repo, .. } => format!("github:{owner}/{repo}"),
+            Self::LocalDirectory { path, .. } => format!("local:{path}"),
         }
     }
 
     pub fn is_enabled(&self) -> bool {
         match self {
-            Self::GitHub { enabled, .. } => *enabled,
+            Self::GitHub { enabled, .. } | Self::LocalDirectory { enabled, .. } => *enabled,
         }
     }
 }
@@ -238,5 +248,64 @@ impl SkillContent {
             hasher.update(body.as_bytes());
         }
         format!("{:x}", hasher.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_github_source() {
+        let config = SkillSourceConfig::GitHub {
+            owner: "anthropics".to_string(),
+            repo: "skills".to_string(),
+            enabled: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: SkillSourceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, deserialized);
+        assert!(json.contains(r#""type":"github""#));
+    }
+
+    #[test]
+    fn serde_roundtrip_local_directory_source() {
+        let config = SkillSourceConfig::LocalDirectory {
+            path: "/home/user/my-skills".to_string(),
+            enabled: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: SkillSourceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, deserialized);
+        assert!(json.contains(r#""type":"local_directory""#));
+    }
+
+    #[test]
+    fn source_id_github() {
+        let config = SkillSourceConfig::GitHub {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            enabled: true,
+        };
+        assert_eq!(config.source_id(), "github:owner/repo");
+    }
+
+    #[test]
+    fn source_id_local_directory() {
+        let config = SkillSourceConfig::LocalDirectory {
+            path: "/tmp/skills".to_string(),
+            enabled: false,
+        };
+        assert_eq!(config.source_id(), "local:/tmp/skills");
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn deserialize_local_directory_from_json() {
+        let json = r#"{"type":"local_directory","path":"/opt/skills","enabled":true}"#;
+        let config: SkillSourceConfig = serde_json::from_str(json).unwrap();
+        assert!(matches!(config, SkillSourceConfig::LocalDirectory { .. }));
+        assert_eq!(config.source_id(), "local:/opt/skills");
+        assert!(config.is_enabled());
     }
 }

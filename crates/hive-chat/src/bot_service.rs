@@ -555,7 +555,30 @@ impl BotService {
 
     pub async fn deactivate_bot(&self, agent_id: &str) -> Result<(), ChatServiceError> {
         let supervisor = self.get_or_create_bot_supervisor().await?;
+
+        // Snapshot descendants BEFORE killing so we can clean up persisted
+        // state even if broadcast events are missed.
+        let doomed_ids = supervisor.get_descendant_ids(agent_id);
+
         supervisor.kill_agent(agent_id).await.map_err(Self::map_agent_error)?;
+
+        // Remove any persisted "session_agent" KG nodes for the bot and its
+        // children so pending interactions don't resurface as ghost approvals.
+        let graph_path = Arc::clone(&self.knowledge_graph_path);
+        let _ = tokio::task::spawn_blocking(move || -> Result<(), ChatServiceError> {
+            let graph = open_graph(&graph_path)?;
+            for id in &doomed_ids {
+                let agent_name = format!("agent-{id}");
+                if let Ok(Some(node)) =
+                    graph.find_node_by_type_and_name("session_agent", &agent_name)
+                {
+                    let _ = graph.remove_node(node.id);
+                }
+            }
+            Ok(())
+        })
+        .await;
+
         let to_persist = {
             let mut configs = self.bot_configs.write().await;
             if let Some(config) = configs.get_mut(agent_id) {
@@ -619,7 +642,26 @@ impl BotService {
 
         let supervisor = self.bot_supervisor.read().await;
         if let Some(sup) = supervisor.as_ref() {
+            // Snapshot descendants before kill for KG cleanup.
+            let doomed_ids = sup.get_descendant_ids(agent_id);
             let _ = sup.kill_agent(agent_id).await;
+
+            // Remove persisted session_agent nodes for children so pending
+            // interactions don't become ghost approvals.
+            let graph_path = Arc::clone(&self.knowledge_graph_path);
+            let _ = tokio::task::spawn_blocking(move || -> Result<(), ChatServiceError> {
+                let graph = open_graph(&graph_path)?;
+                for id in &doomed_ids {
+                    let agent_name = format!("agent-{id}");
+                    if let Ok(Some(node)) =
+                        graph.find_node_by_type_and_name("session_agent", &agent_name)
+                    {
+                        let _ = graph.remove_node(node.id);
+                    }
+                }
+                Ok(())
+            })
+            .await;
         }
         drop(supervisor);
 
