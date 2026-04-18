@@ -59,9 +59,7 @@ You can add more providers later in **Settings → Providers**. HiveMind OS rout
 
 Once connected, you land in the **Chat** view with a greeting from your agent. Let's try something practical.
 
-::: info 📸 Screenshot needed
-The Chat view with the agent greeting after completing setup.
-:::
+![The Chat view with the agent greeting after completing setup](/images/first-message.png)
 
 **Step 1 — Ask a real business question.** Type (or copy-paste):
 

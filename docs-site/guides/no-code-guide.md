@@ -44,9 +44,7 @@ To add a provider, click its card, enter the required credentials, and click **S
 
 Personas are the AI assistants you talk to. Each one has its own personality, instructions, and capabilities. Go to **Settings → Personas** and click **New Persona**.
 
-::: info 📸 Screenshot needed
-The Persona editor form showing name, avatar, system prompt, and tools fields.
-:::
+![The Persona editor form](/images/new-persona.png)
 
 Here's what each field means:
 
@@ -148,9 +146,7 @@ Since chat workflows run inside a conversation, they always start when you launc
 
 After the wizard, you land in the **visual designer** — a canvas-based editor where you build your workflow.
 
-::: info 📸 Screenshot needed
-The visual workflow designer showing the canvas with step palette, node editor, and AI Assist panel.
-:::
+![The visual workflow designer](/images/workflow-designer1.png)
 
 It has four main areas:
 
@@ -204,9 +200,7 @@ Background and chat workflows are launched from **different places**.
 
 The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress.
 
-::: info 📸 Screenshot needed
-The background workflow launch dialog from the definitions view.
-:::
+![The workflow definitions view with Launch button](/images/workflow-defs.png)
 
 **Chat workflows** — launch from the Chat view:
 
@@ -260,9 +254,7 @@ Bots are persistent AI agents that work on tasks in the background. They're like
 
 5. Click **Launch**
 
-::: info 📸 Screenshot needed
-The Launch Bot dialog showing persona picker, launch prompt, and mode selection.
-:::
+![The Launch Bot dialog](/images/launch-bot.png)
 
 ### Watching Your Bot Work
 

@@ -31,9 +31,7 @@ A [connector](/glossary#connector) links HiveMind OS to an external service — 
 4. Follow the on-screen prompts to sign in and authorize access.
 5. You'll see a green checkmark when your calendar is connected.
 
-::: info 📸 Screenshot needed
-_The Connectors settings page showing a calendar connector with a green checkmark._
-:::
+![The Connectors settings page](/images/connectors.png)
 
 ::: tip
 If you've already connected a Microsoft 365 or Gmail account for email, your calendar may already be available — check the connector details to confirm.
@@ -67,10 +65,6 @@ A [workflow](/glossary#workflow) chains AI tasks into a repeatable automation. H
 > Check my calendar for today's meetings. For each meeting, search my recent emails involving the attendees for relevant context — ongoing projects, open questions, recent decisions. Then compile a preparation brief for each meeting that includes: meeting name and time, attendee list, summary of relevant email context, and 3–5 suggested talking points. Send the compiled briefs to me via email.
 
 9. Click **Save**.
-
-::: info 📸 Screenshot needed
-_The workflow editor showing the Meeting Prep workflow with a schedule trigger set to weekday mornings and an Invoke Agent step._
-:::
 
 ## Step 4: Test Before Going Live
 
@@ -124,9 +118,6 @@ Each morning, you'll get a notification with a brief for every meeting on your c
 > 2. Discuss the social media scheduler update — timeline and alternatives
 > 3. Review the customer success blog draft — any final edits before publishing?
 
-::: info 📸 Screenshot needed
-_A completed Meeting Prep workflow instance showing the generated meeting briefs._
-:::
 
 ---
 

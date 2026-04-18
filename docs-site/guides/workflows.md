@@ -22,9 +22,7 @@ HiveMind OS gives you three ways to build workflows:
 Start in the visual designer to learn the step types, then switch to YAML once you're comfortable — the two stay in sync automatically.
 :::
 
-::: info 📸 Screenshot needed
-The visual workflow designer canvas with step palette on the left, graph in the center, and node editor on the right.
-:::
+![The visual workflow designer](/images/workflow-designer1.png)
 
 ## Background Workflows
 
@@ -252,9 +250,7 @@ Background workflows are launched from the **workflow definitions view** (⚙ ge
 
 The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress in real time.
 
-::: info 📸 Screenshot needed
-The workflow definitions view showing the Launch button and the launch wizard overlay.
-:::
+![The workflow definitions view](/images/workflow-defs.png)
 
 ### Launching Chat Workflows
 

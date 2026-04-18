@@ -65,10 +65,6 @@ Include examples of phrases you love (and ones you hate) in the system prompt fo
 
 5. Click **Save**.
 
-::: info 📸 Screenshot needed
-_The New Persona form with the Content Writer name, description, and system prompt filled in._
-:::
-
 ## Step 2: Start Creating
 
 Select your **Content Writer** persona from the persona picker at the top of the chat, then type what you need. Here are some examples to try:
@@ -93,10 +89,6 @@ Select your **Content Writer** persona from the persona picker at the top of the
 > Write a product description for our Premium Support Plan ($49/month). Highlight: 24/7 email support, 1-hour response time, dedicated account manager. Keep it under 150 words.
 
 The AI drafts content right in the chat. You can reply with feedback like "make it more casual" or "add a call-to-action at the end" and it will revise immediately.
-
-::: info 📸 Screenshot needed
-_The Chat view showing a conversation with the Content Writer persona, including a drafted blog post and a follow-up revision request._
-:::
 
 ## Step 3: Teach It Your Brand
 
@@ -133,10 +125,6 @@ When you set up an automated content workflow:
 3. Follow the launch wizard: select the trigger, fill in any inputs, review, and click **Launch**.
 4. Click **Workflows** in the sidebar (not the gear icon) to see running and completed instances. Review the generated content.
 5. Once satisfied with the output, go back to the workflow definition and toggle the trigger to **Enabled** for automatic runs.
-
-::: info 📸 Screenshot needed
-_The workflow definitions view showing a Content Writer workflow with the Launch button highlighted._
-:::
 
 ---
 

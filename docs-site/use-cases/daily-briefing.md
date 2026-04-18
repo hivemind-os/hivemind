@@ -31,9 +31,7 @@ Otherwise, click **Settings** in the sidebar, then click **Connectors**. Click *
 For the best briefing experience, connect your calendar too — same process, just select your calendar provider.
 :::
 
-::: info 📸 Screenshot needed
-_The Connectors settings page showing both an email and a calendar connector with green checkmarks._
-:::
+![The Connectors settings page](/images/connectors.png)
 
 ## Step 2: Create the Workflow
 
@@ -58,9 +56,7 @@ A [workflow](/glossary#workflow) chains AI tasks into a repeatable automation. H
 
 9. Click **Save**.
 
-::: info 📸 Screenshot needed
-_The workflow editor showing the Morning Briefing workflow with a schedule trigger and an Invoke Agent step._
-:::
+![The Morning Briefing workflow](/images/morning-brief-workflow.png)
 
 ## Step 3: Test Before Going Live
 
@@ -99,9 +95,6 @@ Every morning, a notification appears with something like this:
 > 2. Review the CloudHost invoice
 > 3. Prep talking points for the marketing review
 
-::: info 📸 Screenshot needed
-_A completed Morning Briefing workflow instance in the Workflows view showing the briefing output._
-:::
 
 ---
 

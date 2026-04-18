@@ -33,9 +33,7 @@ A [connector](/glossary#connector) links HiveMind OS to an external service — 
 4. Follow the on-screen prompts to authorize access. For Gmail and Microsoft 365, you'll sign in with your existing account. For IMAP, enter your server details and credentials.
 5. Once connected, you'll see a green checkmark next to your email connector.
 
-::: info 📸 Screenshot needed
-_The Connectors settings page showing a connected Gmail account with a green checkmark._
-:::
+![The Connectors settings page](/images/connectors.png)
 
 ::: tip
 You can connect multiple email accounts if you handle support from more than one inbox.
@@ -70,9 +68,7 @@ The [system prompt](/glossary#system-prompt) is the most important part — it s
 
 5. Click **Save**.
 
-::: info 📸 Screenshot needed
-_The New Persona form with the Name, Description, Avatar, and System Prompt fields filled in._
-:::
+![The New Persona form](/images/new-persona.png)
 
 ## Step 3: Create the Workflow
 

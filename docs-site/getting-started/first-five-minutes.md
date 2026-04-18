@@ -22,9 +22,7 @@ What are the best practices for running a productive weekly team meeting?
 
 **What to expect:** A thoughtful, structured answer — not a list of links. HiveMind OS synthesizes information and gives you a real response you can act on immediately. Feel free to ask follow-up questions in the same conversation; it keeps full context of what you've discussed.
 
-::: info 📸 Screenshot needed
-_The Chat view with the General persona selected and a sample conversation showing a question and response._
-:::
+![The Chat view with the General persona selected and a sample conversation](/images/sample-conversation.png)
 
 ---
 
@@ -79,9 +77,7 @@ Keep the tone friendly but professional. Always suggest a subject line.
 Don't want to write a system prompt from scratch? On the Personas page, look for the option to **browse templates** — there are ready-made personas you can use or customize.
 :::
 
-::: info 📸 Screenshot needed
-_The Settings → Personas page showing the New Persona form filled out with the "Email Helper" example._
-:::
+![The New Persona form](/images/new-persona.png)
 
 ---
 
@@ -104,9 +100,7 @@ Workflows are pre-built automations that come with HiveMind OS. They handle mult
 Some examples that ship with the app: **Approval Workflow**, **Email Responder**, **Email Triage**, **Plan & Implement**, **Major Feature**, and **3D Print Design**. More may be added over time.
 :::
 
-::: info 📸 Screenshot needed
-_The workflow definitions view showing the list of bundled workflows, with the Launch button visible on one of them._
-:::
+![The workflow definitions view showing bundled workflows](/images/workflow-defs.png)
 
 ---
 
@@ -129,9 +123,7 @@ Summarize my latest 5 emails and highlight anything that needs a reply today.
 
 **What to expect:** The bot starts working in the background. You can close the dialog and keep using HiveMind OS for other things. When the bot finishes, you'll find its results in the Bots section. Unlike a chat conversation, bots don't require you to stay on the page — they run independently.
 
-::: info 📸 Screenshot needed
-_The Bots section showing the Launch Bot dialog with a persona selected and a task description filled in._
-:::
+![The Launch Bot dialog](/images/launch-bot.png)
 
 ---
 

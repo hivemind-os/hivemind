@@ -13,9 +13,7 @@ This guide walks you through creating, configuring, and managing personas in Hiv
 7. Choose a **loop strategy**: `react` (default), `sequential`, or `plan_then_execute`
 8. Click **Save**. Your persona appears under the `user/` namespace.
 
-::: info 📸 Screenshot needed
-The New Persona editor showing the name, avatar, system prompt, model preferences, and tool access fields.
-:::
+![The New Persona editor](/images/new-persona.png)
 
 ## Creating from a Template
 
