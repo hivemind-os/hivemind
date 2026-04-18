@@ -2,6 +2,10 @@
 
 Start every day knowing exactly what needs your attention. HiveMind OS checks your email and calendar each morning, then delivers a clear summary — before you've finished your coffee.
 
+::: tip
+New to HiveMind OS? Check the [Glossary](/glossary) for quick definitions of terms like persona, connector, workflow, and trigger.
+:::
+
 ```mermaid
 flowchart LR
     A["⏰ 9 AM trigger"] --> B["🤖 AI reads emails\n& calendar"] --> C["📋 Briefing\ndelivered"]
@@ -21,32 +25,48 @@ flowchart LR
 
 If you've already connected your email (for example, from the [Customer Support](/use-cases/customer-support) use case), you can skip this step.
 
-Otherwise, go to **Settings → Connectors**, click **Add Connector**, and choose your email provider. Follow the prompts to authorize access.
+Otherwise, click **Settings** in the sidebar, then click **Connectors**. Click **Add Connector** and choose your email provider. Follow the prompts to authorize access. A [connector](/glossary#connector) links HiveMind OS to an external service like Gmail or Google Calendar.
 
 ::: tip
 For the best briefing experience, connect your calendar too — same process, just select your calendar provider.
 :::
 
+![The Connectors settings page](/images/connectors.png)
+
 ## Step 2: Create the Workflow
 
-1. Go to **Workflows** and click **New Workflow**.
+A [workflow](/glossary#workflow) chains AI tasks into a repeatable automation. Here you'll create one that runs every morning.
+
+1. Click the **⚙ gear icon** next to **Workflows** in the sidebar to open the workflow definitions view, then click **New Workflow**.
 2. Name it something like `Morning Briefing`.
 3. Set the mode to **Background**.
 
 ### Add a Schedule Trigger
 
 4. Click **Add Trigger** and select **Schedule**.
-5. Set it to run on **weekdays at 9:00 AM**. In the schedule field, enter the cron expression: `0 9 * * 1-5` (don't worry — the app shows a plain-English preview like "Every weekday at 9:00 AM" so you can confirm it's right).
+5. Set it to run on **weekdays at 9:00 AM**. In the schedule field, enter the [cron expression](/glossary#cron-expression): `0 9 * * 1-5` (weekdays at 9:00 AM). Don't worry — the app shows a plain-English preview like "Every weekday at 9:00 AM" so you can confirm it's right.
 
 ### Add the Step
 
 6. Click **Add Step** and choose **Invoke Agent**.
-7. You can use the default persona or create a dedicated one (something like "Executive Assistant"). Make sure your email and calendar connectors allow this persona — go to **Settings → Connectors**, edit the connector, and add the persona to its **Allowed Personas** list.
+7. You can use the default [persona](/glossary#persona) or create a dedicated one (something like "Executive Assistant"). Make sure your email and calendar connectors allow this persona — click **Settings** in the sidebar, then click **Connectors**, edit the connector, and add the persona to its **Allowed Personas** list.
 8. In the instructions, type:
 
-> Read my recent emails and check my calendar for today. Summarize everything into a concise morning briefing organized by priority. Highlight anything urgent, list today's meetings, and suggest what I should focus on first.
+> Read my recent emails and check my calendar for today. Summarize everything into a concise morning briefing organized by priority. Highlight anything urgent, list today's meetings, and suggest what I should focus on first. Email the finished briefing to me.
 
-9. Click **Save** and toggle the workflow to **Enabled**.
+9. Click **Save**.
+
+![The Morning Briefing workflow](/images/morning-brief-workflow.png)
+
+## Step 3: Test Before Going Live
+
+Before enabling the schedule, verify the workflow produces a useful briefing.
+
+1. Leave the [trigger](/glossary#trigger) **disabled** after saving.
+2. In the workflow definitions view (click the **⚙ gear icon** next to **Workflows** in the sidebar), find your `Morning Briefing` workflow and click the **Launch** button.
+3. Follow the launch wizard: select the trigger, review, and click **Launch**.
+4. Click **Workflows** in the sidebar (not the gear icon) to see running and completed instances. Check the briefing output.
+5. If the results look good, go back to the workflow definition and toggle the trigger to **Enabled** for automatic daily runs.
 
 ---
 
@@ -75,17 +95,18 @@ Every morning, a notification appears with something like this:
 > 2. Review the CloudHost invoice
 > 3. Prep talking points for the marketing review
 
+
 ---
 
 ## Make It Yours
 
 ### Change the Schedule
 
-Edit the workflow trigger to adjust the time. Early riser? Set it to 7 AM. Want a weekend edition? Change the cron to include Saturday and Sunday.
+Edit the workflow trigger to adjust the time. Early riser? Set it to `0 7 * * 1-5` (weekdays at 7:00 AM). Want a weekend edition? Change the cron to `0 9 * * *` (every day at 9:00 AM) — the app preview will update so you can confirm.
 
 ### Create an End-of-Day Recap
 
-Duplicate the workflow, change the schedule to 5 PM, and adjust the instructions to summarize what happened today and what's carrying over to tomorrow.
+Duplicate the workflow, change the schedule to `0 17 * * 1-5` (weekdays at 5:00 PM), and adjust the instructions to summarize what happened today and what's carrying over to tomorrow.
 
 ---
 

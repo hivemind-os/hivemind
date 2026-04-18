@@ -2,6 +2,10 @@
 
 Turn rough ideas into polished content — blog posts, social media updates, email campaigns, and more. Just describe what you need, and HiveMind OS writes a first draft you can refine and publish.
 
+::: tip
+New to HiveMind OS? Check the [Glossary](/glossary) for quick definitions of terms like persona, connector, workflow, and trigger.
+:::
+
 ```mermaid
 flowchart LR
     A["💡 Your idea"] --> B["🔍 AI researches"]
@@ -14,7 +18,7 @@ flowchart LR
 
 | Item | Details |
 |------|---------|
-| **AI provider** | At least one provider configured (see [Quickstart](/getting-started/quickstart)) |
+| **AI provider** | At least one [provider](/glossary#provider) configured (see [Quickstart](/getting-started/quickstart)) |
 | **Time** | About 5 minutes to create the persona |
 
 That's it — no connectors required for basic content creation. You'll chat directly with HiveMind OS.
@@ -23,9 +27,9 @@ That's it — no connectors required for basic content creation. You'll chat dir
 
 ## Step 1: Create a Content Writer Persona
 
-A persona shapes *how* the AI writes. By creating a dedicated Content Writer, every piece of content will match your brand's voice.
+A [persona](/glossary#persona) shapes *how* the AI writes. By creating a dedicated Content Writer, every piece of content will match your brand's voice.
 
-1. Go to **Settings → Personas**.
+1. Click **Settings** in the sidebar, then click **Personas**.
 2. Click **New Persona**.
 3. Fill in the fields:
 
@@ -53,8 +57,10 @@ A persona shapes *how* the AI writes. By creating a dedicated Content Writer, ev
 > - For social media: keep it punchy and under the character limit
 > - For emails: get to the point in the first sentence
 
+The [system prompt](/glossary#system-prompt) is your brand voice blueprint — the more specific you make it, the less editing you'll need.
+
 ::: tip
-The more specific your system prompt, the less editing you'll need to do. Include examples of phrases you love (and ones you hate) for even better results.
+Include examples of phrases you love (and ones you hate) in the system prompt for even better results.
 :::
 
 5. Click **Save**.
@@ -92,7 +98,7 @@ The more HiveMind OS knows about your business, the better the content gets. Use
 - *"Our company tagline is 'Grow smarter, not harder.' Work it into blog posts when natural."*
 - *"We never badmouth competitors. Focus on our strengths instead."*
 
-HiveMind OS stores this in its **knowledge graph**, so you won't have to repeat yourself. Next time you ask for content, it already knows your preferences.
+HiveMind OS stores this in its [knowledge graph](/concepts/knowledge-graph) (the AI's long-term memory), so you won't have to repeat yourself. Next time you ask for content, it already knows your preferences.
 
 ::: tip
 Think of the knowledge graph as your brand style guide that the AI actually reads and follows. The more you teach it, the less you'll need to edit.
@@ -102,13 +108,23 @@ Think of the knowledge graph as your brand style guide that the AI actually read
 
 ## Level Up: Automate with Workflows
 
-Once you're happy with the quality, consider automating content creation:
+Once you're happy with the quality, consider automating content creation with [workflows](/glossary#workflow):
 
-- **Weekly blog drafts** — Create a workflow with a schedule trigger (every Monday at 9 AM) that generates a blog post draft based on trending topics in your industry.
+- **Weekly blog drafts** — Create a workflow with a schedule [trigger](/glossary#trigger) (every Monday at 9 AM) that generates a blog post draft based on trending topics in your industry.
 - **Social media on autopilot** — Trigger content drafts whenever you add a new product or publish a blog post.
 - **Newsletter assembly** — Automatically pull the week's highlights and draft a newsletter every Friday.
 
-Head to **Workflows → New Workflow** to get started — the same point-and-click setup you've seen in the other use cases.
+To create a workflow, click the **⚙ gear icon** next to **Workflows** in the sidebar to open the workflow definitions view, then click **New Workflow** — the same point-and-click setup you've seen in the other use cases.
+
+### Test Before Going Live
+
+When you set up an automated content workflow:
+
+1. Save the workflow but leave the trigger **disabled** at first.
+2. In the workflow definitions view (click the **⚙ gear icon** next to **Workflows** in the sidebar), find your workflow and click the **Launch** button to run it once manually.
+3. Follow the launch wizard: select the trigger, fill in any inputs, review, and click **Launch**.
+4. Click **Workflows** in the sidebar (not the gear icon) to see running and completed instances. Review the generated content.
+5. Once satisfied with the output, go back to the workflow definition and toggle the trigger to **Enabled** for automatic runs.
 
 ---
 

@@ -12,6 +12,24 @@ This guide walks you through launching, configuring, and orchestrating bots in H
 6. **Configure permissions** — set data classification, adjust tool access, add approval rules
 7. Click **Launch** — the bot spins up immediately and starts working
 
+![Launch Bot wizard — Step 1: Choose a persona](/images/launch-bot.png)
+
+![Launch Bot wizard — Step 2: Set launch prompt and mode](/images/launch-bot-step2.png)
+
+![Launch Bot wizard — Step 3: Configure permissions](/images/launch-bot-step3.png)
+
+![Launch Bot wizard — Step 4: Review and launch](/images/launch-bot-step4.png)
+
+Once launched, the bot appears on the Bots dashboard where you can monitor its progress:
+
+![A running bot on the dashboard](/images/bot-1.png)
+
+If the bot needs your input — for example, to clarify instructions or make a decision — it shows a question badge. Click it to see the question and respond:
+
+![A bot with a question badge](/images/bot-question.png)
+
+![The bot's question prompt](/images/bot-question-prompt.png)
+
 ## Bot Modes Deep-Dive
 
 ### One-Shot
@@ -69,6 +87,12 @@ The **Bots** page is your command center:
 - **Quick actions** — pause, resume, message, or delete with one click
 - **Approval badges** — bots waiting for human approval are surfaced prominently
 - **Question badges** — bots waiting for user input show a question badge so you can respond quickly
+
+![The Bots dashboard](/images/flightdeck-agents.png)
+
+::: tip Flight Deck
+You can also monitor all active bots from the **Flight Deck** — click the 🚀 rocket button in the top-right corner for a global view of every running agent and workflow. See the [No-Code Guide](/guides/no-code-guide#the-flight-deck) for details.
+:::
 
 ## Multi-Bot Orchestration
 

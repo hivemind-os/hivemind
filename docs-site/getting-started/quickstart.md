@@ -6,6 +6,8 @@ You installed HiveMind OS — nice. Let's get you from zero to a working AI agen
 
 Open HiveMind OS. On first launch you'll see a **Setup Wizard** that walks you through everything step by step:
 
+
+
 | Step | What you do |
 |------|-------------|
 | **Welcome** | Click **Get Started** |
@@ -20,6 +22,8 @@ You only need to complete the **Providers** step to start chatting. Everything e
 ## 2. Connect a Model Provider
 
 In the Providers step, pick a provider card and fill in the details:
+
+
 
 ### Option A: OpenAI-Compatible API Key (simplest)
 
@@ -50,6 +54,8 @@ You can add more providers later in **Settings → Providers**. HiveMind OS rout
 ## 3. Your First Conversation
 
 Once connected, you land in the **Chat** view with a greeting from your agent. Let's try something practical.
+
+![The Chat view with the agent greeting after completing setup](/images/first-message.png)
 
 **Step 1 — Ask a real business question.** Type (or copy-paste):
 

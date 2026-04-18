@@ -88,31 +88,54 @@ Workflows carry a **variable bag** — a JSON object that any step can read from
 ```yaml
 - id: review
   type: task
-  kind: invoke_agent
-  persona_id: user/code-reviewer
-  task: "Review the diff"
+  task:
+    kind: invoke_agent
+    persona_id: user/code-reviewer
+    task: "Review the diff"
+  outputs:
+    summary: "{{result}}"
 
 - id: post
   type: task
-  kind: call_tool
-  tool_id: comm.send_external_message
-  arguments:
-    body: "{{steps.review.output}}"
+  task:
+    kind: call_tool
+    tool_id: connector.send_message
+    arguments:
+      body: "{{steps.review.outputs.summary}}"
 ```
 
 <!-- prettier-ignore -->
 ::: v-pre
-Expressions like `{{steps.review.output}}`, `{{variables.repo_url}}`, and `{{trigger.inputs.branch}}` are resolved at runtime against the workflow's execution context.
+Expressions like `{{steps.review.outputs.summary}}`, `{{variables.repo_url}}`, and `{{trigger.inputs.branch}}` are resolved at runtime against the workflow's execution context.
 :::
 
 ## Building Workflows
 
-HiveMind OS offers two ways to author workflows:
+HiveMind OS offers three ways to author workflows:
 
 1. **Visual Designer** — drag-and-drop canvas for wiring up triggers, steps, and branches.
-2. **YAML Editor** — write definitions directly, version-control them, and share them.
+2. **YAML Editor** — write definitions directly in the built-in editor. Definitions are stored in HiveMind's internal database, not as standalone files.
+3. **AI Assist** — describe what you want in natural language and let HiveMind OS generate or modify the YAML for you.
 
-You can also **generate workflows from natural language** — describe what you want and let the AI scaffold the YAML for you.
+## Launching Workflows
+
+A workflow runs when its **trigger** fires. This creates an **instance** — a live execution of the workflow with its own state and progress.
+
+- **Manual trigger** — you launch the workflow yourself. Background and chat workflows are launched from different places (see below).
+- **Automatic triggers** (schedule, event, incoming message) — fire on their own once the workflow is saved. You can pause and resume triggers without deleting the workflow.
+- **Nested launch** — a `launch_workflow` step inside one workflow starts another, enabling composition.
+
+**Background workflows** are launched from the **workflow definitions view** (⚙ gear icon next to **Workflows** in the sidebar) — click the **Launch** button on a definition, fill in any inputs, and the instance appears on the Workflows page where you can track it.
+
+**Chat workflows** are launched from the **Chat view** — click the **Launch a chat workflow** button in the composer toolbar, pick a workflow, and it attaches to your conversation. Agent outputs appear as messages, and `feedback_gate` steps pause to ask questions or present choices.
+
+You can **monitor**, **pause**, **resume**, or **kill** running instances from the Workflows page at any time.
+
+## Bundled Workflows
+
+HiveMind OS ships with several ready-to-use workflows under the `system/` namespace — including an approval workflow, email responder, email triage, software feature lifecycle, and more. You can launch them directly or **copy** them to create a customized version under your own `user/` namespace.
+
+See the [Workflows Guide → Bundled Workflows](/guides/workflows#bundled-workflows) for the full list.
 
 ## Example: Email Auto-Reply with Product Knowledge
 
@@ -142,28 +165,33 @@ steps:
       persona_id: user/support-agent
       task: |
         Reply to this customer email using the product manual.
-        From: {{trigger.message.from}}
-        Subject: {{trigger.message.subject}}
-        Body: {{trigger.message.body}}
+        From: {{trigger.from}}
+        Subject: {{trigger.subject}}
+        Body: {{trigger.body}}
       attachments:
         - product-manual
+    outputs:
+      reply: "{{result}}"
 
   - id: send
     type: task
     task:
       kind: call_tool
-      tool_id: comm.send_external_message
+      tool_id: connector.send_message
       arguments:
         channel_id: email-support
-        message_id: "{{trigger.message.id}}"
-        body: "{{steps.respond.output}}"
+        to: "{{trigger.from}}"
+        subject: "Re: {{trigger.subject}}"
+        body: "{{steps.respond.outputs.reply}}"
 ```
 
 When an email arrives, HiveMind OS spawns a support agent with access to the uploaded product manual, drafts a knowledgeable response, and sends it — no human in the loop required.
 
 ## Learn More
 
-- [Workflows Guide](/guides/workflows) — Step-by-step tutorial for building your first workflow
+- [Workflows Guide](/guides/workflows) — Step-by-step tutorial for building, launching, and managing workflows
 - [Email Support Workflow](/examples/pr-review-workflow) — Full end-to-end example with classification and attachments
+- [Onboarding Chat Workflow](/examples/chat-workflow-onboarding) — Interactive guided workflow with feedback gates
+- [Daily Automation](/examples/daily-automation) — Scheduled background workflow recipes
 - [Tools & MCP](./tools-and-mcp) — How tools integrate with workflow steps
 - [Personas](./personas) — Creating the AI agents your workflows invoke
