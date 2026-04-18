@@ -9,6 +9,7 @@ import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '~/ui/collapsible';
 import { Button } from '~/ui/button';
 import { ConfirmDialog } from '~/ui/confirm-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/ui/dialog';
 import { McpServerWizard } from './McpServerWizard';
 import SkillsTab from './SkillsTab';
 import PromptSchemaEditor, { type PromptSchemaField } from './PromptSchemaEditor';
@@ -1515,23 +1516,28 @@ const PersonasTab = (props: PersonasTabProps) => {
       </Show>
 
       {/* ── Skills Management Dialog ────────────────────────── */}
-      <Show when={showSkillsDialog() && editingId() && editingId() !== NEW_AGENT_SENTINEL}>
-        <div class="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); } }}>
-          <div class="modal-content" style="max-width: 720px; max-height: 85vh; overflow-y: auto;" onClick={(e) => e.stopPropagation()}>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-              <h3 style="margin: 0;">Manage Skills</h3>
-              <button class="small" onClick={() => { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); }}>✕</button>
-            </div>
+      <Dialog
+        open={showSkillsDialog() && !!editingId() && editingId() !== NEW_AGENT_SENTINEL}
+        onOpenChange={(open) => { if (!open) { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); } }}
+      >
+        <DialogContent class="max-w-[720px] w-[90vw] max-h-[85vh] flex flex-col overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
+          <DialogHeader class="flex flex-row items-center justify-between">
+            <DialogTitle>Manage Skills</DialogTitle>
+            <button class="text-muted-foreground hover:text-foreground text-lg" onClick={() => { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); }}>✕</button>
+          </DialogHeader>
+          <Show when={editingId() && editingId() !== NEW_AGENT_SENTINEL}>
             <SkillsTab availableModels={props.availableModels} persona_id={editingId()!} />
-          </div>
-        </div>
-      </Show>
+          </Show>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Copy from Template Dialog ────────────────────────── */}
-      <Show when={showCopyDialog()}>
-        <div class="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowCopyDialog(false); }}>
-          <div class="modal-content" style="max-width: 480px;" onClick={(e) => e.stopPropagation()}>
-            <h3 style="margin-top: 0;">Copy from Template</h3>
+      <Dialog open={showCopyDialog()} onOpenChange={(open) => { if (!open) setShowCopyDialog(false); }}>
+        <DialogContent class="max-w-[480px] w-[90vw]" onInteractOutside={(e) => e.preventDefault()}>
+          <DialogHeader class="flex flex-row items-center justify-between">
+            <DialogTitle>Copy from Template</DialogTitle>
+            <button class="text-muted-foreground hover:text-foreground text-lg" onClick={() => setShowCopyDialog(false)}>✕</button>
+          </DialogHeader>
             <p class="muted" style="font-size: 0.85rem; margin-bottom: 1rem;">
               Create a new persona by copying an existing one.
             </p>
@@ -1566,9 +1572,8 @@ const PersonasTab = (props: PersonasTabProps) => {
               </Button>
               <Button variant="outline" onClick={() => setShowCopyDialog(false)}>Cancel</Button>
             </div>
-          </div>
-        </div>
-      </Show>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={!!confirmResetId()}
