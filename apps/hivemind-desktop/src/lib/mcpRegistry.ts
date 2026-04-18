@@ -116,9 +116,25 @@ export async function searchRegistryServers(
   if (params.cursor) url.searchParams.set('cursor', params.cursor);
   url.searchParams.set('limit', String(params.limit ?? 30));
 
-  const resp = await fetch(url.toString(), { signal });
-  if (!resp.ok) throw new Error(`Registry search failed: ${resp.status}`);
-  return resp.json();
+  // Combine caller signal with a 15-second timeout to avoid infinite hangs
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), 15_000);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal;
+
+  try {
+    const resp = await fetch(url.toString(), { signal: combinedSignal });
+    if (!resp.ok) throw new Error(`Registry search failed: ${resp.status}`);
+    return resp.json();
+  } catch (err) {
+    if (timeoutController.signal.aborted && !(signal?.aborted)) {
+      throw new Error('Registry request timed out. Check your network connection.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ---------------------------------------------------------------------------
