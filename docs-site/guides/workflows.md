@@ -22,6 +22,10 @@ HiveMind OS gives you three ways to build workflows:
 Start in the visual designer to learn the step types, then switch to YAML once you're comfortable — the two stay in sync automatically.
 :::
 
+::: info 📸 Screenshot needed
+The visual workflow designer canvas with step palette on the left, graph in the center, and node editor on the right.
+:::
+
 ## Background Workflows
 
 Background workflows run autonomously without user interaction. They're ideal for automations that should just *happen*.
@@ -248,6 +252,10 @@ Background workflows are launched from the **workflow definitions view** (⚙ ge
 
 The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress in real time.
 
+::: info 📸 Screenshot needed
+The workflow definitions view showing the Launch button and the launch wizard overlay.
+:::
+
 ### Launching Chat Workflows
 
 Chat workflows are launched from the **Chat view** using the workflow button in the message composer:
@@ -259,6 +267,10 @@ Chat workflows are launched from the **Chat view** using the workflow button in 
 5. Fill in any required inputs and click **Launch**
 6. The workflow attaches to your conversation — agent steps produce messages in the thread, and `feedback_gate` steps pause to present you with choices or a text input
 7. Your responses feed back into the workflow, and execution continues
+
+::: info 📸 Screenshot needed
+The Chat view with the "Launch a chat workflow" button in the composer and the workflow picker dialog.
+:::
 
 This makes chat workflows ideal for guided processes — onboarding, approval flows, interactive research — where you need to participate at key moments.
 

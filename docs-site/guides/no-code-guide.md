@@ -4,10 +4,17 @@ Everything in HiveMind OS can be done from the desktop app — no terminal, no c
 
 Whether you're a small business owner, a team lead, or someone who just wants AI to handle the boring stuff, this page is for you. We'll cover setup, providers, personas, connectors, workflows, bots, and chat — all from the app window.
 
+::: tip New to the terminology?
+Check the [Glossary](/glossary) for plain-English definitions of terms like persona, workflow, connector, and more.
+:::
 
 ## Getting Set Up
 
 When you first open HiveMind OS, a **Setup Wizard** walks you through everything you need. It takes about five minutes. You'll connect an AI provider, optionally add email or chat connectors, enable web search, pick your default model, and get a quick tour of the app. You can skip any step and come back to it later in **Settings**. For a detailed walkthrough of first launch, see the [Quickstart](/getting-started/quickstart).
+
+::: info 📸 Screenshot needed
+The Setup Wizard walking through first-time configuration.
+:::
 
 
 ## Adding AI Providers
@@ -36,6 +43,10 @@ To add a provider, click its card, enter the required credentials, and click **S
 ## Creating Personas
 
 Personas are the AI assistants you talk to. Each one has its own personality, instructions, and capabilities. Go to **Settings → Personas** and click **New Persona**.
+
+::: info 📸 Screenshot needed
+The Persona editor form showing name, avatar, system prompt, and tools fields.
+:::
 
 Here's what each field means:
 
@@ -95,7 +106,13 @@ Workflows let you automate multi-step tasks. You build them in a visual designer
 
 ### The Creation Wizard
 
-Click **New Workflow** to open the creation wizard. It walks you through six steps:
+Click **New Workflow** to open the creation wizard.
+
+::: info 📸 Screenshot needed
+The workflow creation wizard showing the first step (Start from scratch / Copy from existing / Start from a template).
+:::
+
+It walks you through six steps:
 
 **Step 1 — Choose how to start:**
 
@@ -129,7 +146,13 @@ Since chat workflows run inside a conversation, they always start when you launc
 
 ### The Visual Designer
 
-After the wizard, you land in the **visual designer** — a canvas-based editor where you build your workflow. It has four main areas:
+After the wizard, you land in the **visual designer** — a canvas-based editor where you build your workflow.
+
+::: info 📸 Screenshot needed
+The visual workflow designer showing the canvas with step palette, node editor, and AI Assist panel.
+:::
+
+It has four main areas:
 
 **Step Palette (left side)** — Lists all the step types you can add. Drag a step onto the canvas, or click it to add it to your workflow. The available steps are:
 
@@ -181,6 +204,10 @@ Background and chat workflows are launched from **different places**.
 
 The running instance appears on the **Workflows** page (click **Workflows** in the sidebar) where you can track its progress.
 
+::: info 📸 Screenshot needed
+The background workflow launch dialog from the definitions view.
+:::
+
 **Chat workflows** — launch from the Chat view:
 
 1. Open the **Chat view** and start or select a conversation
@@ -188,6 +215,10 @@ The running instance appears on the **Workflows** page (click **Workflows** in t
 3. Pick your workflow from the searchable list that appears
 4. Fill in any required inputs and click **Launch**
 5. The workflow runs inside your conversation — it sends messages and can ask you questions along the way
+
+::: info 📸 Screenshot needed
+The Chat view composer showing the "Launch a chat workflow" button and workflow picker dialog.
+:::
 
 Workflows with automatic triggers (schedule, incoming message) run on their own once saved — no need to launch them manually.
 
@@ -228,6 +259,10 @@ Bots are persistent AI agents that work on tasks in the background. They're like
    | **Continuous** | Keeps running and working on its own. Use for ongoing monitoring. |
 
 5. Click **Launch**
+
+::: info 📸 Screenshot needed
+The Launch Bot dialog showing persona picker, launch prompt, and mode selection.
+:::
 
 ### Watching Your Bot Work
 

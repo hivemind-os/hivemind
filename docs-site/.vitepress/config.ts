@@ -58,6 +58,10 @@ export default withMermaid(
                 text: "First Five Minutes",
                 link: "/getting-started/first-five-minutes",
               },
+              {
+                text: "First Five Minutes (Developer)",
+                link: "/getting-started/first-five-minutes-developer",
+              },
             ],
           },
           {
@@ -123,8 +127,8 @@ export default withMermaid(
             ],
           },
           {
-            text: "Guides",
-            collapsed: true,
+            text: "User Guides",
+            collapsed: false,
             items: [
               {
                 text: "No-Code Guide",
@@ -137,6 +141,17 @@ export default withMermaid(
                 text: "Configure Providers",
                 link: "/guides/configure-providers",
               },
+              {
+                text: "Connectors",
+                link: "/guides/messaging-bridges",
+              },
+              { text: "Scheduling", link: "/guides/scheduling" },
+            ],
+          },
+          {
+            text: "Advanced Guides",
+            collapsed: true,
+            items: [
               { text: "MCP Servers", link: "/guides/mcp-servers" },
               {
                 text: "Security Policies",
@@ -155,12 +170,7 @@ export default withMermaid(
                 link: "/guides/agents-and-roles",
               },
               { text: "Skills", link: "/guides/skills" },
-              { text: "Scheduling", link: "/guides/scheduling" },
               { text: "Local Models", link: "/guides/local-models" },
-              {
-                text: "Connectors",
-                link: "/guides/messaging-bridges",
-              },
               { text: "Spatial Chat", link: "/guides/spatial-chat" },
             ],
           },
@@ -221,6 +231,7 @@ export default withMermaid(
             text: "Help",
             collapsed: true,
             items: [
+              { text: "Glossary", link: "/glossary" },
               { text: "FAQ", link: "/help/faq" },
               {
                 text: "Troubleshooting",

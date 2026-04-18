@@ -13,12 +13,20 @@ This guide walks you through creating, configuring, and managing personas in Hiv
 7. Choose a **loop strategy**: `react` (default), `sequential`, or `plan_then_execute`
 8. Click **Save**. Your persona appears under the `user/` namespace.
 
+::: info 📸 Screenshot needed
+The New Persona editor showing the name, avatar, system prompt, model preferences, and tool access fields.
+:::
+
 ## Creating from a Template
 
 1. In **Settings → Personas**, click **Browse Templates**
 2. Pick a template and click **Use Template** — this pre-fills every field
 3. Customise the name, prompt, tools, or models to fit your use case
 4. Click **Save** to create your copy under `user/`
+
+::: info 📸 Screenshot needed
+The persona template browser showing available templates to start from.
+:::
 
 ::: tip
 Templates are a great starting point. Even if you plan to change everything, they show you what a well-structured persona looks like.
@@ -89,6 +97,10 @@ Prompt templates are reusable Handlebars snippets attached to a persona, invokab
 
 Open the persona in **Settings → Personas**, scroll to **Prompt Templates → Add Template**:
 
+::: info 📸 Screenshot needed
+The Prompt Templates section in the persona editor.
+:::
+
 ```yaml
 prompts:
   - id: summarize-logs
@@ -128,6 +140,10 @@ Each persona can have its own set of skills — domain-specific knowledge packs 
 2. Click **Manage Skills** to open the skills dialog
 3. Browse available skills, toggle them on/off for this persona
 4. Enabled skills appear as pills in the persona editor
+
+::: info 📸 Screenshot needed
+The Manage Skills dialog showing available skills with toggle switches.
+:::
 
 ::: tip
 Skills are scoped to individual personas. Install a "Kubernetes" skill on your DevOps persona without cluttering your other personas.

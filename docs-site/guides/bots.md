@@ -12,6 +12,10 @@ This guide walks you through launching, configuring, and orchestrating bots in H
 6. **Configure permissions** — set data classification, adjust tool access, add approval rules
 7. Click **Launch** — the bot spins up immediately and starts working
 
+::: info 📸 Screenshot needed
+The Bots page showing the Launch Bot dialog with persona picker, launch prompt field, and mode selection.
+:::
+
 ## Bot Modes Deep-Dive
 
 ### One-Shot
@@ -69,6 +73,10 @@ The **Bots** page is your command center:
 - **Quick actions** — pause, resume, message, or delete with one click
 - **Approval badges** — bots waiting for human approval are surfaced prominently
 - **Question badges** — bots waiting for user input show a question badge so you can respond quickly
+
+::: info 📸 Screenshot needed
+The Bots dashboard showing bot status indicators, activity feed, and approval/question badges.
+:::
 
 ## Multi-Bot Orchestration
 
