@@ -20,6 +20,16 @@ This guide walks you through launching, configuring, and orchestrating bots in H
 
 ![Launch Bot wizard — Step 4: Review and launch](/images/launch-bot-step4.png)
 
+Once launched, the bot appears on the Bots dashboard where you can monitor its progress:
+
+![A running bot on the dashboard](/images/bot-1.png)
+
+If the bot needs your input — for example, to clarify instructions or make a decision — it shows a question badge. Click it to see the question and respond:
+
+![A bot with a question badge](/images/bot-question.png)
+
+![The bot's question prompt](/images/bot-question-prompt.png)
+
 ## Bot Modes Deep-Dive
 
 ### One-Shot
