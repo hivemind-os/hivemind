@@ -1516,7 +1516,7 @@ const PersonasTab = (props: PersonasTabProps) => {
 
       {/* ── Skills Management Dialog ────────────────────────── */}
       <Show when={showSkillsDialog() && editingId() && editingId() !== NEW_AGENT_SENTINEL}>
-        <div class="modal-overlay" onClick={() => { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); }}>
+        <div class="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); } }}>
           <div class="modal-content" style="max-width: 720px; max-height: 85vh; overflow-y: auto;" onClick={(e) => e.stopPropagation()}>
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
               <h3 style="margin: 0;">Manage Skills</h3>
@@ -1529,7 +1529,7 @@ const PersonasTab = (props: PersonasTabProps) => {
 
       {/* ── Copy from Template Dialog ────────────────────────── */}
       <Show when={showCopyDialog()}>
-        <div class="modal-overlay" onClick={() => setShowCopyDialog(false)}>
+        <div class="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowCopyDialog(false); }}>
           <div class="modal-content" style="max-width: 480px;" onClick={(e) => e.stopPropagation()}>
             <h3 style="margin-top: 0;">Copy from Template</h3>
             <p class="muted" style="font-size: 0.85rem; margin-bottom: 1rem;">
