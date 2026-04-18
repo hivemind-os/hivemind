@@ -84,6 +84,8 @@ Now you'll connect the pieces: when an email arrives, the AI reads it, checks yo
 5. Select **Incoming Message**.
 6. Choose the email connector you set up in Step 1.
 
+![Adding an Incoming Message trigger to the workflow](/images/incoming-message-step.png)
+
 A [trigger](/glossary#trigger) is the event that starts a workflow — here, it fires every time a new email lands in your inbox.
 
 ### Add the Step
@@ -93,6 +95,8 @@ A [trigger](/glossary#trigger) is the event that starts a workflow — here, it 
 9. In the instructions, type:
 
 > Read the incoming customer email and consult the attached product manual. Draft a helpful reply, then use the ask_user tool to show me the draft and get my approval before sending. Once approved, send the reply to the customer.
+
+![Configuring the Invoke Agent step with the Customer Support persona](/images/invoke-agent-step.png)
 
 ## Step 4: Upload Your Product Manual
 
