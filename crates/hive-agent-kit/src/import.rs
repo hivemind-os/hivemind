@@ -280,6 +280,10 @@ fn import_workflow<R: Read + Seek>(
     // Also rewrite the workflow name itself
     let final_yaml = rewrite_workflow_name(&rewritten_yaml, new_name)?;
 
+    // Generate a new unique ID so the imported definition doesn't collide
+    // with the original workflow's external_id in the store.
+    let final_yaml = rewrite_workflow_id(&final_yaml)?;
+
     // Collect attachment files
     let attachments_prefix = format!("{}/attachments/", &entry.path);
     let attachment_paths: Vec<String> = (0..archive.len())
@@ -334,6 +338,23 @@ fn rewrite_workflow_name(yaml: &str, new_name: &str) -> Result<String, AgentKitE
         map.insert(
             serde_yaml::Value::String("name".to_string()),
             serde_yaml::Value::String(new_name.to_string()),
+        );
+    }
+
+    Ok(serde_yaml::to_string(&value)?)
+}
+
+/// Replace the `id` field in a workflow YAML with a freshly generated UUID.
+///
+/// Imported workflows are new definitions and must have unique IDs so they
+/// don't collide with the original workflow's `external_id` in the store.
+fn rewrite_workflow_id(yaml: &str) -> Result<String, AgentKitError> {
+    let mut value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+
+    if let serde_yaml::Value::Mapping(ref mut map) = value {
+        map.insert(
+            serde_yaml::Value::String("id".to_string()),
+            serde_yaml::Value::String(uuid::Uuid::new_v4().to_string()),
         );
     }
 
@@ -669,5 +690,53 @@ steps:
 
         // "a/b/bot" -> root "a" replaced with "x/y" -> "x/y/b/bot"
         assert_eq!(preview.items[0].new_id, "x/y/b/bot");
+    }
+
+    #[test]
+    fn import_generates_new_workflow_id() {
+        // Workflow YAML with an explicit `id` field (simulating an exported workflow)
+        let original_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let workflow_yaml = format!(
+            "id: {}\nname: acme/flow\nsteps:\n  - id: t1\n    type: trigger\n    trigger:\n      kind: manual\n    next:\n      - s1\n  - id: s1\n    type: task\n    task:\n      kind: invoke_agent\n      persona_id: acme/bot\n      task: do work\n",
+            original_id
+        );
+
+        let request = ExportRequest {
+            kit_name: "test".to_string(),
+            description: None,
+            author: None,
+            personas: vec![],
+            workflows: vec![WorkflowExportData {
+                name: "acme/flow".to_string(),
+                workflow_yaml: workflow_yaml.into_bytes(),
+                attachment_files: HashMap::new(),
+            }],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        export_kit(&request, &mut buf).unwrap();
+        let kit = buf.into_inner();
+
+        let ps = MemPersonaSaver::new(vec![]);
+        let ws = MemWorkflowSaver::new(vec![]);
+
+        let apply_request = ImportApplyRequest {
+            target_namespace: "newns".to_string(),
+            selected_items: vec!["newns/flow".to_string()],
+        };
+
+        let result = apply_import(Cursor::new(&kit), &apply_request, &ps, &ws).unwrap();
+        assert_eq!(result.imported_workflows.len(), 1);
+
+        // Verify the saved YAML has a new id, not the original
+        let saved = ws.saved.lock().unwrap();
+        let (_, yaml_bytes, _) = &saved[0];
+        let yaml_str = std::str::from_utf8(yaml_bytes).unwrap();
+        assert!(
+            !yaml_str.contains(original_id),
+            "imported workflow should have a new id, but still contains the original: {}",
+            original_id
+        );
+        // Verify the YAML has an `id:` field (a new UUID was written)
+        assert!(yaml_str.contains("id:"), "imported workflow YAML should have an id field");
     }
 }
