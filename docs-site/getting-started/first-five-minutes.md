@@ -131,6 +131,14 @@ Summarize my latest 5 emails and highlight anything that needs a reply today.
 
 ![Launch Bot wizard — Step 4: Review and launch](/images/launch-bot-step4.png)
 
+Once launched, the bot appears on the dashboard and starts working on your task:
+
+![A running bot on the dashboard](/images/bot-1.png)
+
+Sometimes a bot needs your input before it can continue — for example, to clarify something or ask you to make a choice. When that happens, a **question badge** appears on the bot. Click it to read the question and reply:
+
+![A bot showing a question badge, indicating it needs your input](/images/bot-question.png)
+
 ---
 
 ## 🚀 You're Just Getting Started
