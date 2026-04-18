@@ -123,7 +123,13 @@ Summarize my latest 5 emails and highlight anything that needs a reply today.
 
 **What to expect:** The bot starts working in the background. You can close the dialog and keep using HiveMind OS for other things. When the bot finishes, you'll find its results in the Bots section. Unlike a chat conversation, bots don't require you to stay on the page — they run independently.
 
-![The Launch Bot wizard](/images/launch-bot.png)
+![Launch Bot wizard — Step 1: Choose a persona](/images/launch-bot.png)
+
+![Launch Bot wizard — Step 2: Set launch prompt and mode](/images/launch-bot-step2.png)
+
+![Launch Bot wizard — Step 3: Configure permissions](/images/launch-bot-step3.png)
+
+![Launch Bot wizard — Step 4: Review and launch](/images/launch-bot-step4.png)
 
 ---
 
