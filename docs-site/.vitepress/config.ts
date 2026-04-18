@@ -144,6 +144,7 @@ export default withMermaid(
                 link: "/guides/messaging-bridges",
               },
               { text: "Scheduling", link: "/guides/scheduling" },
+              { text: "AFK Mode", link: "/guides/afk-mode" },
             ],
           },
           {
