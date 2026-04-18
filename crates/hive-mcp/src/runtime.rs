@@ -180,17 +180,37 @@ pub fn check_runtime(
 /// Look up a binary on the system PATH.
 fn which_binary(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var("PATH").ok()?;
-    let sep = if cfg!(target_os = "windows") { ';' } else { ':' };
+    find_in_path_var(name, &path_var)
+}
 
-    for dir in path_var.split(sep) {
-        let candidate = PathBuf::from(dir).join(name);
+/// Resolve a command name to its full path using the given PATH string.
+///
+/// On Windows, `Command::new("npx").env("PATH", child_path).spawn()` resolves
+/// the executable using the **parent** process's PATH, not the child's.  Call
+/// this before `Command::new` to resolve bare command names against the
+/// effective child PATH so the spawn finds the right binary.
+///
+/// Returns `None` if the command already contains a path separator (i.e. it's
+/// already a path) or if it isn't found on the given PATH.
+pub fn resolve_command_in_path(command: &str, path_var: &str) -> Option<PathBuf> {
+    // Skip if the command is already an absolute/relative path.
+    if command.contains('/') || command.contains('\\') || command.contains(':') {
+        return None;
+    }
+    find_in_path_var(command, path_var)
+}
+
+/// Search for `name` in the directories listed in `path_var`.
+fn find_in_path_var(name: &str, path_var: &str) -> Option<PathBuf> {
+    for dir in std::env::split_paths(path_var) {
+        let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
         }
         // On Windows, also check with common extensions.
         if cfg!(target_os = "windows") {
             for ext in &[".exe", ".cmd", ".bat"] {
-                let with_ext = PathBuf::from(dir).join(format!("{name}{ext}"));
+                let with_ext = dir.join(format!("{name}{ext}"));
                 if with_ext.is_file() {
                     return Some(with_ext);
                 }
@@ -303,5 +323,18 @@ mod tests {
         assert!(!install_hint(McpRuntime::Docker).is_empty());
         assert!(!install_hint(McpRuntime::Dotnet).is_empty());
         assert!(!install_hint(McpRuntime::Unknown).is_empty());
+    }
+
+    #[test]
+    fn resolve_command_skips_paths() {
+        // Commands that already contain path separators should return None.
+        assert!(resolve_command_in_path("/usr/bin/node", "/usr/bin").is_none());
+        assert!(resolve_command_in_path("C:\\node\\npx.cmd", "C:\\node").is_none());
+        assert!(resolve_command_in_path("./my-server", "/tmp").is_none());
+    }
+
+    #[test]
+    fn resolve_command_finds_nothing_in_empty_path() {
+        assert!(resolve_command_in_path("npx", "").is_none());
     }
 }

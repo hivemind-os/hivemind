@@ -479,6 +479,33 @@ impl McpService {
                     // _temp_files must live until child is spawned.
                     let _temp_files: Vec<tempfile::TempPath>;
 
+                    // On Windows, Command::new() resolves bare command names
+                    // using the *parent* process's PATH, not the child's
+                    // environment.  Pre-resolve the command against the
+                    // effective child PATH so managed runtimes are found.
+                    #[cfg(target_os = "windows")]
+                    let command = {
+                        // Build effective PATH: runtime_env PATH takes
+                        // precedence over config env PATH, both override
+                        // the system PATH.
+                        let effective_path = runtime_env
+                            .get("PATH")
+                            .or_else(|| runtime_env.get("Path"))
+                            .cloned()
+                            .or_else(|| {
+                                resolve_env(&config).ok().and_then(|pairs| {
+                                    pairs.into_iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v)
+                                })
+                            });
+                        if let Some(ref path_var) = effective_path {
+                            runtime::resolve_command_in_path(&command, path_var)
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or(command)
+                        } else {
+                            command
+                        }
+                    };
+
                     let mut cmd = if let Some((program, sandbox_args, temps)) = sandboxed {
                         _temp_files = temps;
                         let mut c = Command::new(&program);
