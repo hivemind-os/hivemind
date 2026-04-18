@@ -50,7 +50,7 @@ The config file has the following top-level sections:
 | `compaction` | Context compaction settings |
 | `personas` | Agent persona configurations (usually managed via persona YAML files) |
 | `skills` | Skill configurations |
-| `afk` | AFK (idle) mode settings |
+| `afk` | [AFK (idle) mode settings](/guides/afk-mode) |
 | `python` | [Managed Python runtime](/concepts/managed-runtimes) configuration |
 | `node` | [Managed Node.js runtime](/concepts/managed-runtimes) configuration |
 | `tool_limits` | Per-tool rate and size limits |
