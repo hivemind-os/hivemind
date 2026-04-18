@@ -133,6 +133,7 @@ export default withMermaid(
               },
               { text: "Personas", link: "/guides/personas" },
               { text: "Workflows", link: "/guides/workflows" },
+              { text: "Agent Kits", link: "/guides/agent-kits" },
               { text: "Bots", link: "/guides/bots" },
               {
                 text: "Configure Providers",

@@ -76,15 +76,9 @@ If a workspace is classified as `RESTRICTED`, all facts remembered inside it inh
 
 ## Agent Kits
 
-To share agent configurations across environments, use **Agent Kits**. Kits export personas, workflows, skills, and attachments as a portable `.agentkit` ZIP file. Agent Kits are managed via the API:
+To share agent configurations across environments, use **Agent Kits**. Kits export personas, workflows, skills, and attachments as a portable `.agentkit` ZIP file — but not knowledge graph data. Knowledge is managed separately per instance.
 
-- `POST /api/v1/agent-kits/export` — create a kit
-- `POST /api/v1/agent-kits/preview` — inspect a kit before importing
-- `POST /api/v1/agent-kits/import` — apply a kit to your instance
-
-::: tip
-Agent Kits include personas, workflows, skills, and attachments — but not knowledge graph data. Knowledge is managed separately per instance.
-:::
+See the [Agent Kits guide](/guides/agent-kits) for full details on exporting, importing, and namespace remapping.
 
 ## Next Steps
 

@@ -99,21 +99,7 @@ A skill that accesses external APIs or production systems should be used in sess
 
 ## Agent Kits
 
-Bundle personas, workflows, skills, and attachments into a portable `.agentkit` ZIP archive to share complete agent configurations with your team.
-
-Agent Kits are managed via the API:
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /api/v1/agent-kits/export` | Create an `.agentkit` ZIP containing selected personas, workflows, skills, and attachments |
-| `POST /api/v1/agent-kits/preview` | Inspect the contents of an `.agentkit` file before importing |
-| `POST /api/v1/agent-kits/import` | Apply an `.agentkit` to your instance |
-
-The exported ZIP contains a `manifest.json` plus all persona YAML, workflow definitions, skill files, and attachments.
-
-::: tip
-Agent Kits are self-contained ZIP files. Share them via Git, email, or a shared drive.
-:::
+Bundle personas, workflows, skills, and attachments into a portable `.agentkit` ZIP archive to share complete agent configurations with your team. See the [Agent Kits guide](/guides/agent-kits) for full details on exporting, importing, and namespace remapping.
 
 ## Learn More
 
