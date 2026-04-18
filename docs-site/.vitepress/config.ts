@@ -58,10 +58,7 @@ export default withMermaid(
                 text: "First Five Minutes",
                 link: "/getting-started/first-five-minutes",
               },
-              {
-                text: "First Five Minutes (Developer)",
-                link: "/getting-started/first-five-minutes-developer",
-              },
+
             ],
           },
           {

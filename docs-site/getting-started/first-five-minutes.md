@@ -37,7 +37,7 @@ HiveMind OS has a built-in knowledge graph that remembers things you tell it —
 1. In the same chat, type something personal or work-related. For example:
 
 ```
-My company name is Acme Corp. I prefer dark mode in all apps and I like concise, bullet-point answers.
+My name is John, store this in your knowledge base.
 ```
 
 2. Press **Enter**.
@@ -48,9 +48,6 @@ My company name is Acme Corp. I prefer dark mode in all apps and I like concise,
 You don't have to teach it everything at once. Mention things naturally as they come up — "I use Gmail for work email," "My team follows two-week sprints," "I'm based in London" — and the knowledge graph keeps growing.
 :::
 
-::: info 📸 Screenshot needed
-_The Chat view showing the user teaching HiveMind OS a preference, with the AI acknowledging it._
-:::
 
 ---
 
@@ -152,6 +149,4 @@ Ready to go deeper? Here are some great next stops:
 Words like *persona*, *workflow*, *bot*, and *knowledge graph* have specific meanings in HiveMind OS. Check the [Glossary](/glossary) whenever something is unclear.
 :::
 
-::: info 🛠️ Are you a developer?
-If you prefer working with config files, the CLI, and MCP servers, see [First Five Minutes (Developer)](/getting-started/first-five-minutes-developer) for the technical walkthrough.
-:::
+
