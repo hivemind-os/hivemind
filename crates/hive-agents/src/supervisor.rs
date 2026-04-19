@@ -101,6 +101,11 @@ pub struct AgentSupervisor {
     persona_registries:
         Arc<DashMap<String, (Arc<ToolRegistry>, Option<Arc<hive_skills::SkillCatalog>>)>>,
     pub telemetry: Arc<TokenAccumulator>,
+    /// Serializes topology mutations (spawn/kill) so that kill_agent's
+    /// descendant snapshot + removal is atomic with respect to spawn_agent's
+    /// parent validation + insertion. Without this, a child could be spawned
+    /// between the snapshot and the parent's removal, creating an orphan.
+    topology_lock: tokio::sync::Mutex<()>,
     // Keeps the event-listener task alive; dropped when the supervisor is dropped.
     _event_listener: JoinHandle<()>,
 }
@@ -124,6 +129,7 @@ impl AgentSupervisor {
             execution: None,
             persona_registries: Arc::new(DashMap::new()),
             telemetry,
+            topology_lock: tokio::sync::Mutex::new(()),
             _event_listener,
         }
     }
@@ -208,6 +214,7 @@ impl AgentSupervisor {
             }),
             persona_registries: Arc::new(DashMap::new()),
             telemetry,
+            topology_lock: tokio::sync::Mutex::new(()),
             _event_listener,
         }
     }
@@ -391,9 +398,24 @@ impl AgentSupervisor {
         let interaction_gate = Arc::new(UserInteractionGate::new());
         let cancellation_token = CancellationToken::new();
 
-        // Atomically claim the slot. If already taken, return error.
-        // Using entry() prevents the TOCTOU race between contains_key and insert.
+        // Topology lock serializes parent validation + placeholder insertion
+        // against concurrent kill_agent/kill_all operations. This prevents the
+        // race where a child is inserted after kill_agent snapshots descendants
+        // but before the parent is removed.
         {
+            let _topo = self.topology_lock.lock().await;
+
+            // Validate parent is still alive (not being killed or already removed).
+            if let Some(ref pid) = parent_id {
+                if !self.agents.contains_key(pid) {
+                    return Err(AgentError::TopologyError(format!(
+                        "parent agent '{pid}' not found — it may have been terminated"
+                    )));
+                }
+            }
+
+            // Atomically claim the slot. If already taken, return error.
+            // Using entry() prevents the TOCTOU race between contains_key and insert.
             use dashmap::mapref::entry::Entry;
             match self.agents.entry(id.clone()) {
                 Entry::Occupied(_) => return Err(AgentError::AlreadyExists(id)),
@@ -424,9 +446,9 @@ impl AgentSupervisor {
                     });
                 }
             }
-        }
+        } // topology lock released — async setup runs concurrently
 
-        // Do async setup outside the DashMap entry. On failure, remove the
+        // Do async setup outside the topology lock. On failure, remove the
         // placeholder so the slot can be reused.
         let setup_result = async {
             // Resolve persona-specific tools + skills when the agent's persona
@@ -492,11 +514,18 @@ impl AgentSupervisor {
         match setup_result {
             Ok((resolved_tools, effective_permissions, conversation_journal, task)) => {
                 // Update the placeholder with the fully-initialized handle.
+                // If the handle was removed during async setup (e.g., by a
+                // concurrent kill_all), abort the task we just spawned.
                 if let Some(mut handle) = self.agents.get_mut(&id) {
                     handle.resolved_tools = resolved_tools;
                     handle.task = Some(task);
                     handle.conversation_journal = Some(conversation_journal);
                     handle.permissions = Some(effective_permissions);
+                } else {
+                    task.abort();
+                    return Err(AgentError::TopologyError(format!(
+                        "agent '{id}' removed during setup — concurrent kill likely in progress"
+                    )));
                 }
             }
             Err(e) => {
@@ -676,56 +705,48 @@ impl AgentSupervisor {
 
     /// Kill an agent, its descendants, and remove them from the map.
     ///
-    /// **Race condition note:** The child snapshot (lines below) is racy with
-    /// concurrent `spawn_agent` calls.  A new child may be spawned between the
-    /// snapshot and the parent's removal from the DashMap.  This is mitigated at
-    /// the chat-service layer by [`ChatService::kill_session_agent`], which
-    /// snapshots descendants via [`get_descendant_ids`] *before* calling this
-    /// method and performs explicit KnowledgeGraph cleanup for all descendants
-    /// regardless of whether they were still in the map at kill time.
+    /// Uses the topology lock to ensure no new children can be spawned under
+    /// this agent (or any descendant) while the kill is in progress.
     pub async fn kill_agent(&self, agent_id: &str) -> Result<(), AgentError> {
-        // Collect child agents (those with parent_id == agent_id) for recursive kill.
-        // NOTE: This snapshot is inherently racy — see doc comment above.
-        let children: Vec<String> = self
-            .agents
-            .iter()
-            .filter(|entry| entry.value().parent_id.as_deref() == Some(agent_id))
-            .map(|entry| entry.key().clone())
-            .collect();
+        // Under topology lock: collect all descendants and remove them all from
+        // the map atomically. This prevents spawn_agent from inserting new
+        // children between the snapshot and the removal.
+        let removed_handles: Vec<(String, AgentHandle)> = {
+            let _topo = self.topology_lock.lock().await;
 
-        // Kill children first (depth-first cascade)
-        for child_id in children {
-            if let Err(e) = Box::pin(self.kill_agent(&child_id)).await {
-                warn!(agent = %child_id, parent = %agent_id, error = %e, "failed to kill child agent");
+            if !self.agents.contains_key(agent_id) {
+                return Err(AgentError::AgentNotFound(agent_id.to_string()));
             }
-        }
 
-        // Close the interaction gate and cancel the token to interrupt
-        // in-flight model/tool calls before sending the Kill signal.
-        if let Some(handle) = self.agents.get(agent_id) {
+            let descendant_ids = self.get_descendant_ids(agent_id);
+            descendant_ids
+                .iter()
+                .filter_map(|id| self.agents.remove(id))
+                .collect()
+        }; // topology lock released
+
+        // Cancel all tokens and close gates to interrupt in-flight work.
+        for (_, handle) in &removed_handles {
             handle.cancellation_token.cancel();
             handle.interaction_gate.close();
         }
 
-        // Remove from map — dropping inbox_tx ensures the runner exits
-        if let Some((_, mut handle)) = self.agents.remove(agent_id) {
+        // Send Kill signals and await tasks (outside the topology lock to
+        // avoid holding it across slow awaits).
+        for (id, mut handle) in removed_handles {
             if let Err(e) = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await {
-                debug!(agent = %agent_id, error = %e, "failed to send kill signal to agent inbox");
+                debug!(agent = %id, error = %e, "failed to send kill signal to agent inbox");
             }
             if let Some(task) = handle.task.take() {
                 let abort_handle = task.abort_handle();
                 if tokio::time::timeout(std::time::Duration::from_secs(5), task).await.is_err() {
-                    warn!(agent = %agent_id, "agent task did not shut down in time, aborting");
+                    warn!(agent = %id, "agent task did not shut down in time, aborting");
                     abort_handle.abort();
                 }
             }
-        } else {
-            return Err(AgentError::AgentNotFound(agent_id.to_string()));
+            self.event_history.remove(&id);
+            self.telemetry.remove_agent(&id);
         }
-
-        // Clean up per-agent event history to avoid leaking memory
-        self.event_history.remove(agent_id);
-        self.telemetry.remove_agent(agent_id);
 
         info!(agent = %agent_id, "agent killed");
         Ok(())
@@ -786,31 +807,33 @@ impl AgentSupervisor {
 
     /// Kill all agents.
     pub async fn kill_all(&self) -> Result<(), AgentError> {
+        // Under topology lock: drain all entries from the map. This prevents
+        // concurrent spawn_agent from inserting new agents while we're shutting
+        // down.
+        let removed: Vec<(String, AgentHandle)> = {
+            let _topo = self.topology_lock.lock().await;
+            let keys: Vec<String> = self.agents.iter().map(|e| e.key().clone()).collect();
+            keys.iter().filter_map(|k| self.agents.remove(k)).collect()
+        }; // topology lock released
+
         // Cancel all tokens and close interaction gates FIRST so agents
         // blocked in model/tool calls or approval waits are interrupted.
-        for entry in self.agents.iter() {
-            entry.value().cancellation_token.cancel();
-            entry.value().interaction_gate.close();
+        for (_, handle) in &removed {
+            handle.cancellation_token.cancel();
+            handle.interaction_gate.close();
         }
-
-        // Snapshot senders to avoid holding DashMap shard locks across await
-        let targets: Vec<mpsc::Sender<AgentMessage>> =
-            self.agents.iter().map(|entry| entry.value().inbox_tx.clone()).collect();
 
         // Send kill signal to all agents
-        for tx in targets {
-            let _ = tx.send(AgentMessage::Control(ControlSignal::Kill)).await;
+        for (_, handle) in &removed {
+            let _ = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await;
         }
 
-        // Drain all agents, awaiting their tasks concurrently with a
-        // single shared timeout so we never block longer than 5s total.
-        let keys: Vec<String> = self.agents.iter().map(|e| e.key().clone()).collect();
+        // Await their tasks concurrently with a single shared timeout
+        // so we never block longer than 5s total.
         let mut join_set = tokio::task::JoinSet::new();
-        for key in &keys {
-            if let Some((_, mut handle)) = self.agents.remove(key) {
-                if let Some(task) = handle.task.take() {
-                    join_set.spawn(task);
-                }
+        for (_, mut handle) in removed {
+            if let Some(task) = handle.task.take() {
+                join_set.spawn(task);
             }
         }
         if !join_set.is_empty() {
@@ -1600,5 +1623,84 @@ mod tests {
         let result = tokio::time::timeout(std::time::Duration::from_millis(100), rx).await;
         assert!(result.is_ok(), "receiver should not timeout — gate was closed");
         assert!(result.unwrap().is_err(), "should get RecvError when gate is closed");
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_dead_parent() {
+        let sup = test_supervisor();
+        let parent = sup.spawn_agent(test_spec("parent"), None, None, None, None).await.unwrap();
+        sup.kill_agent(&parent).await.unwrap();
+
+        // Spawning with a killed parent should fail with TopologyError
+        let result = sup
+            .spawn_agent(test_spec("child"), Some(parent.clone()), None, None, None)
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::TopologyError(msg) => {
+                assert!(msg.contains("parent"), "error should mention parent: {msg}");
+            }
+            other => panic!("expected TopologyError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_agent_flat_removes_entire_subtree() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let child = sup
+            .spawn_agent(test_spec("child"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let gc1 = sup
+            .spawn_agent(test_spec("gc1"), Some(child.clone()), None, None, None)
+            .await
+            .unwrap();
+        let gc2 = sup
+            .spawn_agent(test_spec("gc2"), Some(child.clone()), None, None, None)
+            .await
+            .unwrap();
+
+        // Grab tokens before kill
+        let tokens: Vec<_> = [&root, &child, &gc1, &gc2]
+            .iter()
+            .map(|id| sup.agents.get(*id).unwrap().cancellation_token.clone())
+            .collect();
+
+        assert_eq!(sup.agent_count(), 4);
+        sup.kill_agent(&root).await.unwrap();
+
+        assert_eq!(sup.agent_count(), 0, "flat kill should remove entire subtree");
+        for (i, token) in tokens.iter().enumerate() {
+            assert!(token.is_cancelled(), "token {i} should be cancelled");
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_middle_node_preserves_siblings() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let left = sup
+            .spawn_agent(test_spec("left"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let right = sup
+            .spawn_agent(test_spec("right"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let left_child = sup
+            .spawn_agent(test_spec("lc"), Some(left.clone()), None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(sup.agent_count(), 4);
+        sup.kill_agent(&left).await.unwrap();
+
+        // Left and its child should be gone, but root and right should remain
+        assert_eq!(sup.agent_count(), 2);
+        assert!(sup.agents.contains_key(&root));
+        assert!(sup.agents.contains_key(&right));
+        assert!(!sup.agents.contains_key(&left));
+        assert!(!sup.agents.contains_key(&left_child));
     }
 }
