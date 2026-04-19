@@ -1,0 +1,43 @@
+{
+  "name": "@hivemind/connector-github-issues",
+  "version": "0.1.0",
+  "description": "Hivemind connector plugin for GitHub Issues — reference implementation for plugin developers",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hivemind/plugin-sdk": "file:../../plugin-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "hivemind": {
+    "type": "connector",
+    "displayName": "GitHub Issues",
+    "description": "Connect to GitHub for issue tracking, creation, and notifications",
+    "icon": "assets/icon.svg",
+    "categories": ["project-management", "issue-tracking", "developer-tools"],
+    "services": ["issues", "notifications"],
+    "permissions": [
+      "network:api.github.com",
+      "secrets:read",
+      "secrets:write",
+      "loop:background"
+    ],
+    "minHostVersion": "0.1.0"
+  },
+  "keywords": [
+    "hivemind",
+    "plugin",
+    "connector",
+    "github",
+    "issues"
+  ],
+  "license": "MIT"
+}

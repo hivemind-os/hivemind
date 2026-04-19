@@ -1,0 +1,35 @@
+{
+  "name": "@hivemind/test-plugin",
+  "version": "0.1.0",
+  "description": "E2E test plugin for the Hivemind plugin system — exercises every host API",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hivemind/plugin-sdk": "file:../plugin-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "hivemind": {
+    "type": "connector",
+    "displayName": "Test Plugin",
+    "description": "E2E test plugin that exercises every host API",
+    "categories": ["testing"],
+    "services": ["testing"],
+    "permissions": [
+      "secrets:read",
+      "secrets:write",
+      "loop:background"
+    ],
+    "minHostVersion": "0.1.0"
+  },
+  "license": "MIT",
+  "private": true
+}
