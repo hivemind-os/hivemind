@@ -21,15 +21,19 @@
 
 pub mod bridge;
 pub mod config_schema;
+pub mod health;
 pub mod host;
 pub mod manifest;
 pub mod message_router;
 pub mod protocol;
 pub mod registry;
+pub mod sandbox;
 
 pub use bridge::PluginBridgeTool;
 pub use config_schema::ConfigSchema;
+pub use health::{HealthConfig, HealthMonitor, RestartDecision};
 pub use host::{PluginHost, PluginProcess};
 pub use manifest::PluginManifest;
 pub use message_router::PluginMessageRouter;
 pub use registry::PluginRegistry;
+pub use sandbox::{PluginSandbox, ResourceLimits};
