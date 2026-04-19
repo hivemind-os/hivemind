@@ -32,7 +32,7 @@ pub mod sandbox;
 pub use bridge::PluginBridgeTool;
 pub use config_schema::ConfigSchema;
 pub use health::{HealthConfig, HealthMonitor, RestartDecision};
-pub use host::{PluginHost, PluginProcess};
+pub use host::{PluginEvent, PluginHost, PluginProcess};
 pub use manifest::PluginManifest;
 pub use message_router::PluginMessageRouter;
 pub use registry::PluginRegistry;

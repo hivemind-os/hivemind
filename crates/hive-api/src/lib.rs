@@ -869,6 +869,10 @@ impl AppState {
             Arc::clone(workflows.store()),
         ));
 
+        // Clone event_bus before it is moved into AppState so the
+        // plugin host handler can publish notifications.
+        let plugin_notify_bus = event_bus.clone();
+
         Ok(Self {
             start_time: Instant::now(),
             shutdown,
@@ -909,7 +913,132 @@ impl AppState {
             plugin_host: {
                 let plugins_dir = paths.hivemind_home.join("plugins");
                 let data_dir = paths.hivemind_home.join("plugin-data");
-                Arc::new(hive_plugins::PluginHost::new(plugins_dir, data_dir))
+                let mut host = hive_plugins::PluginHost::new(plugins_dir, data_dir.clone());
+
+                // Set up host handler for plugin→host API calls (secrets via OS keyring,
+                // store via filesystem).
+                let store_base = data_dir;
+                let notify_event_bus = plugin_notify_bus.clone();
+                host = host.with_host_handler(Arc::new(move |method: &str, params: serde_json::Value| {
+                    let method = method.to_string();
+                    let store_base = store_base.clone();
+                    let notify_bus = notify_event_bus.clone();
+                    Box::pin(async move {
+                        match method.as_str() {
+                            "host/secretGet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                let value = hive_core::secret_store::load(&scoped_key);
+                                Ok(serde_json::json!({ "value": value }))
+                            }
+                            "host/secretSet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let value = params["value"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                hive_core::secret_store::save(&scoped_key, value);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/secretDelete" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                hive_core::secret_store::delete(&scoped_key);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/secretHas" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                let exists = hive_core::secret_store::load(&scoped_key).is_some();
+                                Ok(serde_json::json!({ "exists": exists }))
+                            }
+                            "host/storeGet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let path = dir.join(format!("{}.json", key));
+                                match std::fs::read_to_string(&path) {
+                                    Ok(raw) => {
+                                        let val = serde_json::from_str::<serde_json::Value>(&raw)
+                                            .unwrap_or(serde_json::Value::Null);
+                                        Ok(serde_json::json!({ "value": val }))
+                                    }
+                                    Err(_) => Ok(serde_json::json!({ "value": null })),
+                                }
+                            }
+                            "host/storeSet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let value = params.get("value").cloned().unwrap_or(serde_json::Value::Null);
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                std::fs::create_dir_all(&dir)?;
+                                let path = dir.join(format!("{}.json", key));
+                                std::fs::write(&path, serde_json::to_string(&value)?)?;
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/storeDelete" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let path = dir.join(format!("{}.json", key));
+                                let _ = std::fs::remove_file(&path);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/storeKeys" => {
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let keys: Vec<String> = std::fs::read_dir(&dir)
+                                    .ok()
+                                    .map(|entries| {
+                                        entries
+                                            .filter_map(|e| e.ok())
+                                            .filter_map(|e| {
+                                                let p = e.path();
+                                                if p.extension().and_then(|x| x.to_str()) == Some("json") {
+                                                    p.file_stem().map(|s| s.to_string_lossy().to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                Ok(serde_json::json!({ "keys": keys }))
+                            }
+                            "host/notify" => {
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let title = params["title"].as_str().unwrap_or("");
+                                let body = params["body"].as_str().unwrap_or("");
+                                tracing::info!(
+                                    plugin_id,
+                                    title,
+                                    body,
+                                    "Plugin notification"
+                                );
+                                let _ = notify_bus.publish(
+                                    "plugin.notification",
+                                    format!("plugin:{}", plugin_id),
+                                    serde_json::json!({
+                                        "pluginId": plugin_id,
+                                        "title": title,
+                                        "body": body,
+                                    }),
+                                );
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/httpFetch" => {
+                                anyhow::bail!("host/httpFetch not yet implemented in host handler")
+                            }
+                            _ => {
+                                anyhow::bail!("Unknown host method: {}", method)
+                            }
+                        }
+                    })
+                }));
+
+                Arc::new(host)
             },
             scheduler_tool_executor,
             python_env,
@@ -1046,6 +1175,34 @@ impl AppState {
         // Start connector background polling for inbound messages.
         if let Some(ref connector_svc) = self.connectors {
             connector_svc.start_background_poll();
+        }
+
+        // Forward plugin events into the core EventBus so they can trigger
+        // workflows and appear in the SSE event stream.
+        {
+            let mut plugin_rx = self.plugin_host.subscribe_events();
+            let bus = self.event_bus.clone();
+            tokio::spawn(async move {
+                loop {
+                    match plugin_rx.recv().await {
+                        Ok(evt) => {
+                            let topic = format!("plugin.event.{}", evt.event_type);
+                            let source = format!("plugin:{}", evt.plugin_id);
+                            if let Err(e) = bus.publish(&topic, &source, evt.payload) {
+                                tracing::warn!(
+                                    error = %e,
+                                    topic,
+                                    "failed to publish plugin event to EventBus"
+                                );
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(skipped = n, "plugin event subscriber lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
         }
 
         // Restore bots and backfill entity graph in the background.

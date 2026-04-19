@@ -18,8 +18,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, warn};
+
+/// An event emitted by a plugin via `host/emitEvent`.
+#[derive(Debug, Clone)]
+pub struct PluginEvent {
+    pub plugin_id: String,
+    pub event_type: String,
+    pub payload: Value,
+}
 
 /// A running plugin process.
 pub struct PluginProcess {
@@ -94,10 +102,13 @@ pub struct PluginHost {
     host_info: HostInfo,
     host_handler: Option<HostHandler>,
     health: Arc<HealthMonitor>,
+    /// Broadcast channel for plugin events emitted via `host/emitEvent`.
+    plugin_event_tx: broadcast::Sender<PluginEvent>,
 }
 
 impl PluginHost {
     pub fn new(plugins_dir: PathBuf, data_dir: PathBuf) -> Self {
+        let (plugin_event_tx, _) = broadcast::channel(256);
         Self {
             plugins_dir,
             data_dir,
@@ -117,6 +128,7 @@ impl PluginHost {
             },
             host_handler: None,
             health: Arc::new(HealthMonitor::new(HealthConfig::default())),
+            plugin_event_tx,
         }
     }
 
@@ -130,6 +142,13 @@ impl PluginHost {
     pub fn with_host_handler(mut self, handler: HostHandler) -> Self {
         self.host_handler = Some(handler);
         self
+    }
+
+    /// Subscribe to plugin events emitted via `host/emitEvent`.
+    /// Returns a broadcast receiver that yields `PluginEvent`s from all
+    /// running plugins.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<PluginEvent> {
+        self.plugin_event_tx.subscribe()
     }
 
     /// Spawn a plugin process from its package directory.
@@ -185,7 +204,7 @@ impl PluginHost {
 
         // Message and event channels
         let (message_tx, _message_rx) = mpsc::channel::<IncomingMessage>(256);
-        let (event_tx, _event_rx) = mpsc::channel::<(String, Value)>(256);
+        let (event_tx, mut event_rx) = mpsc::channel::<(String, Value)>(256);
 
         // Shared status for both process struct and reader task
         let status = Arc::new(parking_lot::RwLock::new(PluginStatus {
@@ -226,6 +245,21 @@ impl PluginHost {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 debug!(plugin_id = %pid, "[stderr] {}", line);
+            }
+        });
+
+        // Plugin event forwarder — bridge the per-process mpsc into the
+        // shared broadcast channel so external subscribers (e.g. EventBus)
+        // receive plugin events.
+        let broadcast_tx = self.plugin_event_tx.clone();
+        let event_plugin_id = plugin_id.to_string();
+        tokio::spawn(async move {
+            while let Some((event_type, payload)) = event_rx.recv().await {
+                let _ = broadcast_tx.send(PluginEvent {
+                    plugin_id: event_plugin_id.clone(),
+                    event_type,
+                    payload,
+                });
             }
         });
 
@@ -332,6 +366,12 @@ impl PluginHost {
                     // Handle host API calls from the plugin
                     match method {
                         protocol::host_methods::EMIT_MESSAGE => {
+                            // Forward to host handler for testing/capture
+                            if let Some(ref handler) = host_handler {
+                                let h = handler.clone();
+                                let p = params.clone();
+                                tokio::spawn(async move { let _ = h("host/emitMessage", p).await; });
+                            }
                             // Rate limit check for messages
                             if let Some(ref sandbox) = reader_sandbox {
                                 if let Err(reason) = sandbox.check_message_rate() {
@@ -362,6 +402,12 @@ impl PluginHost {
                             }
                         }
                         protocol::host_methods::EMIT_EVENT => {
+                            // Forward to host handler for testing/capture
+                            if let Some(ref handler) = host_handler {
+                                let h = handler.clone();
+                                let p = params.clone();
+                                tokio::spawn(async move { let _ = h("host/emitEvent", p).await; });
+                            }
                             // Rate limit check for events
                             if let Some(ref sandbox) = reader_sandbox {
                                 if let Err(reason) = sandbox.check_event_rate() {
@@ -390,6 +436,12 @@ impl PluginHost {
                             }
                         }
                         protocol::host_methods::UPDATE_STATUS => {
+                            // Forward to host handler for testing/capture
+                            if let Some(ref handler) = host_handler {
+                                let h = handler.clone();
+                                let p = params.clone();
+                                tokio::spawn(async move { let _ = h("host/updateStatus", p).await; });
+                            }
                             if let Ok(status) = serde_json::from_value::<PluginStatus>(params.clone()) {
                                 *process_status.write() = status;
                             }
