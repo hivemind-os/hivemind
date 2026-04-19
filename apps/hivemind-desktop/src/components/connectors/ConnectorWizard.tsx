@@ -824,7 +824,7 @@ export function ConnectorWizard(props: ConnectorWizardProps) {
         <div style={{ 'margin-top': '1rem' }}>
           <div style={{ 'font-weight': '600', 'margin-bottom': '0.5rem' }}>Allowed Personas</div>
           <p style={{ 'font-size': '0.85rem', color: 'hsl(var(--muted-foreground))', 'margin-bottom': '0.5rem' }}>
-            Select which personas can access this connector. Leave empty to allow all.
+            Select which personas can access this connector.
           </p>
           <PersonaSelector
             multiple

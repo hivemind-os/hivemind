@@ -451,7 +451,7 @@ export function ConnectorEditDialog(props: ConnectorEditDialogProps) {
             <Show when={editTab() === 'personas'}>
               <div>
                 <p style={{ 'font-size': '0.85rem', color: 'hsl(var(--muted-foreground))', 'margin-bottom': '0.75rem' }}>
-                  Select which personas can access this connector. Leave empty to allow all personas.
+                  Select which personas can access this connector.
                 </p>
                 <PersonaSelector
                   multiple
