@@ -111,7 +111,7 @@ const App = () => {
   const [session, setSession] = createSignal<ChatSessionSnapshot | null>(null);
   const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(null);
   const [personas, setPersonas] = createSignal<Persona[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = createSignal<string>('general');
+  const [selectedAgentId, setSelectedAgentId] = createSignal<string>('system/general');
   const [sessionMemory, setSessionMemory] = createSignal<ChatMemoryItem[]>([]);
   const [memoryQuery, setMemoryQuery] = createSignal<string>('');
   const [memoryResults, setMemoryResults] = createSignal<ChatMemoryItem[]>([]);
@@ -828,11 +828,11 @@ const App = () => {
     if (sid && s && s.persona_id) {
       setSelectedAgentId(s.persona_id);
     } else {
-      setSelectedAgentId('general');
+      setSelectedAgentId('system/general');
     }
   });
 
-  const availableModels = createMemo(() => {
+  const availableModels= createMemo(() => {
     const router = modelRouter();
     if (!router) return [];
     const models: { id: string; label: string }[] = [];
@@ -1010,7 +1010,7 @@ const App = () => {
 
   const loadInstalledSkills = async () => {
     try {
-      const persona_id = selectedAgentId() === 'general' ? 'system/general' : selectedAgentId();
+      const persona_id = selectedAgentId();
       setInstalledSkills(await invoke<InstalledSkill[]>('skills_list_installed_for_persona', { persona_id }));
     } catch (e) {
       console.error('Failed to load installed skills:', e);
@@ -1021,8 +1021,8 @@ const App = () => {
     try {
       const defs = await invoke<Persona[]>('list_personas');
       setPersonas(defs);
-      if (selectedAgentId() !== 'general' && !defs.some((agent) => agent.id === selectedAgentId())) {
-        setSelectedAgentId('general');
+      if (selectedAgentId() !== 'system/general' && !defs.some((agent) => agent.id === selectedAgentId())) {
+        setSelectedAgentId('system/general');
       }
     } catch (e) {
       console.error('Failed to load agent personas:', e);
