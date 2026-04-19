@@ -145,6 +145,88 @@ impl PluginRegistry {
             anyhow::bail!("Plugin not found: {}", plugin_id)
         }
     }
+
+    /// Install a plugin from npm.
+    ///
+    /// Runs `npm install <package_name>` in the plugins directory and registers
+    /// the plugin from the resulting node_modules entry.
+    pub fn install_npm(&self, package_name: &str) -> anyhow::Result<String> {
+        use std::process::Command;
+
+        std::fs::create_dir_all(&self.plugins_dir)?;
+
+        // Initialize package.json in plugins dir if it doesn't exist
+        let pkg_json = self.plugins_dir.join("package.json");
+        if !pkg_json.exists() {
+            std::fs::write(&pkg_json, r#"{"private":true,"dependencies":{}}"#)?;
+        }
+
+        // Run npm install
+        info!(package = package_name, "Installing plugin from npm");
+        let output = Command::new("npm")
+            .arg("install")
+            .arg("--save")
+            .arg(package_name)
+            .current_dir(&self.plugins_dir)
+            .output()
+            .map_err(|e| anyhow::anyhow!("Failed to run npm: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("npm install failed: {}", stderr);
+        }
+
+        // Determine the actual package directory name (strip scope if present)
+        let dir_name = if package_name.starts_with('@') {
+            // Scoped package: @scope/name → node_modules/@scope/name
+            package_name
+                .split('/')
+                .last()
+                .unwrap_or(package_name)
+        } else {
+            // Strip version specifiers: name@1.0.0 → name
+            package_name.split('@').next().unwrap_or(package_name)
+        };
+
+        // Look for the package in node_modules
+        let nm = self.plugins_dir.join("node_modules");
+        let install_path = if package_name.starts_with('@') {
+            // Scoped: @scope/name
+            let scope_and_name: Vec<&str> = package_name.splitn(2, '/').collect();
+            if scope_and_name.len() == 2 {
+                let name_part = scope_and_name[1].split('@').next().unwrap_or(scope_and_name[1]);
+                nm.join(scope_and_name[0]).join(name_part)
+            } else {
+                nm.join(dir_name)
+            }
+        } else {
+            nm.join(dir_name)
+        };
+
+        let plugin_pkg_json = install_path.join("package.json");
+        if !plugin_pkg_json.exists() {
+            anyhow::bail!(
+                "Installed package not found at {}",
+                plugin_pkg_json.display()
+            );
+        }
+
+        let manifest = PluginManifest::from_package_json(&plugin_pkg_json)?;
+        let plugin_id = manifest.plugin_id();
+
+        let installed = InstalledPlugin {
+            manifest,
+            install_path,
+            enabled: true,
+            config: serde_json::Value::Object(Default::default()),
+        };
+
+        self.plugins.write().insert(plugin_id.clone(), installed);
+        self.save()?;
+
+        info!(plugin_id, package = package_name, "Plugin installed from npm");
+        Ok(plugin_id)
+    }
 }
 
 #[cfg(test)]

@@ -1850,6 +1850,7 @@ pub fn build_router(state: AppState) -> Router {
         // ── Plugins ─────────────────────────────────────────────────
         .route("/api/v1/plugins", get(plugins::api_list_plugins))
         .route("/api/v1/plugins/link", post(plugins::api_link_local))
+        .route("/api/v1/plugins/install", post(plugins::api_install_npm))
         .route("/api/v1/plugins/{plugin_id}/config-schema", get(plugins::api_get_config_schema))
         .route("/api/v1/plugins/{plugin_id}/config", post(plugins::api_save_config))
         .route("/api/v1/plugins/{plugin_id}/enabled", post(plugins::api_set_enabled))

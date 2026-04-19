@@ -5367,6 +5367,21 @@ async fn plugin_link_local(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn plugin_install_npm(package_name: String) -> Result<String, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = serde_json::json!({ "package": package_name });
+        blocking_post_json::<_, serde_json::Value>(
+            &base_url,
+            "/api/v1/plugins/install",
+            &body,
+        ).map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -5620,6 +5635,7 @@ pub fn run() {
             plugin_set_enabled,
             plugin_uninstall,
             plugin_link_local,
+            plugin_install_npm,
         ])
         .build(tauri::generate_context!())
         .expect("error while building hivemind desktop")

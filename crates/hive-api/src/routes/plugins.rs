@@ -138,3 +138,29 @@ pub(crate) async fn api_link_local(
             .into_response(),
     }
 }
+
+/// POST /api/v1/plugins/install — install a plugin from npm.
+pub(crate) async fn api_install_npm(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let package_name = match body.get("package").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "missing `package` in request body" })),
+            )
+                .into_response()
+        }
+    };
+
+    match state.plugin_registry.install_npm(&package_name) {
+        Ok(plugin_id) => Json(json!({ "plugin_id": plugin_id })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lastUpdated": "2025-01-01T00:00:00.000Z",
+  "categories": [
+    { "id": "communication", "label": "Communication", "description": "Chat, email, and messaging integrations" },
+    { "id": "project-management", "label": "Project Management", "description": "Issue tracking and project tools" },
+    { "id": "dev-tools", "label": "Developer Tools", "description": "Code, CI/CD, and development integrations" },
+    { "id": "productivity", "label": "Productivity", "description": "Calendar, notes, and task management" },
+    { "id": "social", "label": "Social", "description": "Social media and community platforms" },
+    { "id": "finance", "label": "Finance", "description": "Banking, crypto, and financial services" },
+    { "id": "crm", "label": "CRM", "description": "Customer relationship management" },
+    { "id": "storage", "label": "Storage", "description": "Cloud storage and file management" },
+    { "id": "monitoring", "label": "Monitoring", "description": "Logging, alerting, and observability" },
+    { "id": "ai-ml", "label": "AI & ML", "description": "AI services and machine learning tools" }
+  ],
+  "plugins": [
+    {
+      "name": "@hivemind/connector-github-issues",
+      "displayName": "GitHub Issues",
+      "description": "Track and manage GitHub issues, get notifications for new issues and mentions",
+      "npmPackage": "@hivemind/connector-github-issues",
+      "categories": ["dev-tools", "project-management"],
+      "verified": true,
+      "featured": true,
+      "icon": "https://cdn.hivemind.dev/icons/github.svg",
+      "author": "hivemind-os",
+      "repository": "https://github.com/hivemind-os/hivemind",
+      "homepage": "https://hivemind.dev/plugins/github-issues",
+      "license": "MIT",
+      "pluginType": "connector",
+      "services": ["issues", "notifications"],
+      "permissions": ["secrets:read", "secrets:write", "loop:background"],
+      "minHostVersion": "0.2.0"
+    }
+  ]
+}

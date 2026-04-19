@@ -1,7 +1,9 @@
-import { createSignal, createResource, For, Show, type Component } from 'solid-js';
+import { createSignal, createResource, For, Show, lazy, Suspense, type Component } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
-import { Plug, Settings, Trash2, Power, PowerOff, FolderOpen, RefreshCw } from 'lucide-solid';
+import { Plug, Settings, Trash2, Power, PowerOff, FolderOpen, RefreshCw, Globe } from 'lucide-solid';
 import PluginConfigForm, { type PluginConfigSchema } from './PluginConfigForm';
+
+const PluginBrowser = lazy(() => import('./PluginBrowser'));
 
 /** Installed plugin info returned from the backend. */
 interface InstalledPlugin {
@@ -26,6 +28,7 @@ const PluginsTab: Component = () => {
   const [linkPath, setLinkPath] = createSignal('');
   const [linking, setLinking] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [viewMode, setViewMode] = createSignal<'installed' | 'browse'>('installed');
 
   async function fetchPlugins(): Promise<InstalledPlugin[]> {
     try {
@@ -128,11 +131,37 @@ const PluginsTab: Component = () => {
         Install and manage TypeScript connector plugins. Plugins provide tools, background sync, and integrations.
       </p>
 
+      {/* View mode toggle */}
+      <div class="flex gap-1 bg-muted rounded-md p-1 mb-4 w-fit">
+        <button
+          onClick={() => setViewMode('installed')}
+          class={`px-3 py-1 rounded text-sm ${viewMode() === 'installed' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          <Plug size={14} class="inline mr-1.5" />Installed
+        </button>
+        <button
+          onClick={() => setViewMode('browse')}
+          class={`px-3 py-1 rounded text-sm ${viewMode() === 'browse' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          <Globe size={14} class="inline mr-1.5" />Browse
+        </button>
+      </div>
+
       <Show when={error()}>
         <div class="bg-destructive/10 border border-destructive/30 rounded-md p-2 mb-3 text-sm text-destructive">
           {error()}
         </div>
       </Show>
+
+      {/* Browse view */}
+      <Show when={viewMode() === 'browse'}>
+        <Suspense fallback={<p class="text-sm text-muted-foreground">Loading...</p>}>
+          <PluginBrowser />
+        </Suspense>
+      </Show>
+
+      {/* Installed view */}
+      <Show when={viewMode() === 'installed'}>
 
       {/* Link local plugin */}
       <div class="flex gap-2 mb-4">
@@ -285,6 +314,8 @@ const PluginsTab: Component = () => {
           </Show>
         </div>
       </div>
+
+      </Show> {/* end installed view */}
     </div>
   );
 };
