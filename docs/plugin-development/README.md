@@ -24,7 +24,8 @@ Build connector plugins for Hivemind in TypeScript. Plugins can provide AI agent
 
 ## Reference
 
-- **[@hivemind/plugin-sdk README](../../packages/plugin-sdk/README.md)** — SDK API overview
+- **[@hivemind-os/plugin-sdk README](../../packages/plugin-sdk/README.md)** — SDK API overview
 - **[Type definitions](../../packages/plugin-sdk/src/types.ts)** — Full TypeScript types
 - **[Sample Plugin](../../packages/sample-plugins/github-issues/)** — Complete GitHub Issues connector
 - **[Test Plugin](../../packages/test-plugin/)** — Plugin exercising every host API
+

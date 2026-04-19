@@ -3,14 +3,14 @@
  *
  * These tests verify that the test plugin correctly exercises every host API.
  * They run in-process (no JSON-RPC, no real host) using the mock context
- * from @hivemind/plugin-sdk/testing.
+ * from @hivemind-os/plugin-sdk/testing.
  *
  * The Rust integration tests (crates/hive-plugins/tests/) will test the
  * same plugin over the real JSON-RPC transport.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestHarness } from "@hivemind/plugin-sdk/testing";
+import { createTestHarness } from "@hivemind-os/plugin-sdk/testing";
 // Import the raw definition (HIVEMIND_PLUGIN_TEST_MODE prevents auto-start)
 process.env.HIVEMIND_PLUGIN_TEST_MODE = "1";
 import pluginDef from "../src/index.js";

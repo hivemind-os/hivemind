@@ -1,4 +1,4 @@
-import { definePlugin, z } from "@hivemind/plugin-sdk";
+import { definePlugin, z } from "@hivemind-os/plugin-sdk";
 import { listItems } from "./tools/list-items.js";
 import { getItem } from "./tools/get-item.js";
 

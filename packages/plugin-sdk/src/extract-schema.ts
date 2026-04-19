@@ -45,7 +45,7 @@ async function main() {
 
     // Import the SDK's serializeConfigSchema
     const { serializeConfigSchema } = await import(
-      "@hivemind/plugin-sdk"
+      "@hivemind-os/plugin-sdk"
     );
     const schema = serializeConfigSchema(definition.configSchema);
     mkdirSync(dirname(outPath), { recursive: true });

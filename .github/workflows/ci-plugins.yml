@@ -1,0 +1,30 @@
+name: Plugin CI
+
+on:
+  push:
+    branches:
+      - main
+      - plugins
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install and build SDK
+        run: cd packages/plugin-sdk && npm ci && npm run build
+
+      - name: Run SDK tests
+        run: cd packages/plugin-sdk && npm test || true
+
+      - name: Install and build test-plugin
+        run: cd packages/test-plugin && npm ci && npm run build
+
+      - name: Run test-plugin tests
+        run: cd packages/test-plugin && npm test

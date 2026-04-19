@@ -13,7 +13,7 @@ Plugins define their configuration using Zod schemas with Hivemind UI extensions
 ## Basic Schema
 
 ```typescript
-import { z } from '@hivemind/plugin-sdk';
+import { z } from '@hivemind-os/plugin-sdk';
 
 configSchema: z.object({
   apiKey: z.string(),
@@ -131,8 +131,9 @@ The host serializes your Zod schema to JSON for rendering:
 You can inspect this programmatically:
 
 ```typescript
-import { serializeConfigSchema } from '@hivemind/plugin-sdk';
+import { serializeConfigSchema } from '@hivemind-os/plugin-sdk';
 
 const schema = serializeConfigSchema(myPlugin.configSchema);
 console.log(JSON.stringify(schema, null, 2));
 ```
+

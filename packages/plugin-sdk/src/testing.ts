@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { createTestHarness } from '@hivemind/plugin-sdk/testing';
+ * import { createTestHarness } from '@hivemind-os/plugin-sdk/testing';
  * import myPlugin from '../src/index';
  *
  * const harness = createTestHarness(myPlugin, {

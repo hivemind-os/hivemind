@@ -1,5 +1,5 @@
 {
-  "name": "@hivemind/plugin-sdk",
+  "name": "@hivemind-os/plugin-sdk",
   "version": "0.1.0",
   "description": "SDK for building Hivemind connector plugins",
   "type": "module",

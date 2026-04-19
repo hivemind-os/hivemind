@@ -2,7 +2,7 @@
  * Tool: search_issues — Search issues across the configured repository using GitHub's search API.
  */
 
-import { z, type ToolDefinition } from "@hivemind/plugin-sdk";
+import { z, type ToolDefinition } from "@hivemind-os/plugin-sdk";
 import { githubFetch, formatIssue } from "../api.js";
 
 export const searchIssues: ToolDefinition = {

@@ -15,10 +15,10 @@
   ],
   "plugins": [
     {
-      "name": "@hivemind/connector-github-issues",
+      "name": "@hivemind-os/connector-github-issues",
       "displayName": "GitHub Issues",
       "description": "Track and manage GitHub issues, get notifications for new issues and mentions",
-      "npmPackage": "@hivemind/connector-github-issues",
+      "npmPackage": "@hivemind-os/connector-github-issues",
       "categories": ["dev-tools", "project-management"],
       "verified": true,
       "featured": true,

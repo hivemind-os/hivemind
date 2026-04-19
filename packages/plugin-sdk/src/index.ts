@@ -1,5 +1,5 @@
 /**
- * @hivemind/plugin-sdk — Public API
+ * @hivemind-os/plugin-sdk — Public API
  *
  * The main entry point for building Hivemind connector plugins.
  */

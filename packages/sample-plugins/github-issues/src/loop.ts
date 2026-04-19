@@ -5,7 +5,7 @@
  * into the Hivemind connector pipeline.
  */
 
-import type { PluginContext } from "@hivemind/plugin-sdk";
+import type { PluginContext } from "@hivemind-os/plugin-sdk";
 import { githubFetch, formatIssue } from "./api.js";
 
 export async function pollForUpdates(ctx: PluginContext): Promise<void> {

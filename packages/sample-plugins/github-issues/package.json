@@ -1,5 +1,5 @@
 {
-  "name": "@hivemind/connector-github-issues",
+  "name": "@hivemind-os/connector-github-issues",
   "version": "0.1.0",
   "description": "Hivemind connector plugin for GitHub Issues — reference implementation for plugin developers",
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hivemind/plugin-sdk": "file:../../plugin-sdk"
+    "@hivemind-os/plugin-sdk": "file:../../plugin-sdk"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

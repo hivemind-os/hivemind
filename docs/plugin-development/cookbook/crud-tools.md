@@ -5,7 +5,7 @@ A pattern for wrapping a standard REST API as plugin tools.
 ## Pattern
 
 ```typescript
-import { definePlugin, z, type ToolDefinition } from '@hivemind/plugin-sdk';
+import { definePlugin, z, type ToolDefinition } from '@hivemind-os/plugin-sdk';
 
 // Reusable API helper
 async function api(ctx: any, path: string, opts?: { method?: string; body?: unknown }) {
@@ -109,3 +109,4 @@ export default definePlugin({
 - **Destructive tools** use `approval: 'always'`
 - **Emit events** after mutations for workflow triggers
 - **Reusable API helper** reduces boilerplate
+

@@ -1,4 +1,4 @@
-import { z, type ToolDefinition } from "@hivemind/plugin-sdk";
+import { z, type ToolDefinition } from "@hivemind-os/plugin-sdk";
 
 export const getItem: ToolDefinition = {
   name: "get_item",

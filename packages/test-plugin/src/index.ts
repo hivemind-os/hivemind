@@ -1,5 +1,5 @@
 /**
- * @hivemind/test-plugin — E2E test plugin
+ * @hivemind-os/test-plugin — E2E test plugin
  *
  * This plugin exercises every host API. It is used by the Rust integration
  * tests in crates/hive-plugins/tests/ to validate the full plugin protocol.
@@ -26,7 +26,7 @@
  *   onDeactivate — logs and updates status
  */
 
-import { definePlugin, z } from "@hivemind/plugin-sdk";
+import { definePlugin, z } from "@hivemind-os/plugin-sdk";
 
 export default definePlugin({
   configSchema: z.object({

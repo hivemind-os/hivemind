@@ -53,7 +53,7 @@ const PluginsTab: Component = () => {
       } else {
         // Fall back to querying daemon (requires running plugin process)
         try {
-          const schema = await invoke<PluginConfigSchema>('plugin_get_config_schema', { pluginId: id });
+          const schema = await invoke<PluginConfigSchema>('plugin_get_config_schema', { plugin_id: id });
           setConfigSchema(schema);
         } catch (e) {
           setConfigSchema(null);
@@ -70,7 +70,7 @@ const PluginsTab: Component = () => {
     setSaving(true);
     setError(null);
     try {
-      await invoke('plugin_save_config', { pluginId: id, config: editConfig() });
+      await invoke('plugin_save_config', { plugin_id: id, config: editConfig() });
       await refetch();
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -82,7 +82,7 @@ const PluginsTab: Component = () => {
   async function toggleEnabled(id: string, enabled: boolean) {
     setError(null);
     try {
-      await invoke('plugin_set_enabled', { pluginId: id, enabled });
+      await invoke('plugin_set_enabled', { plugin_id: id, enabled });
       await refetch();
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -93,7 +93,7 @@ const PluginsTab: Component = () => {
     if (!confirm(`Uninstall plugin "${id}"?`)) return;
     setError(null);
     try {
-      await invoke('plugin_uninstall', { pluginId: id });
+      await invoke('plugin_uninstall', { plugin_id: id });
       if (selectedId() === id) {
         setSelectedId(null);
         setSelectedPlugin(null);

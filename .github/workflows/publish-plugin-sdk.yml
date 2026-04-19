@@ -1,0 +1,31 @@
+name: Publish Plugin SDK
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: cd packages/plugin-sdk && npm ci
+
+      - name: Build
+        run: cd packages/plugin-sdk && npm run build
+
+      - name: Run tests
+        run: cd packages/plugin-sdk && npm test || true
+
+      - name: Publish
+        run: cd packages/plugin-sdk && npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

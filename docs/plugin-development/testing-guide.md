@@ -12,7 +12,7 @@ npm install -D vitest
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestHarness } from '@hivemind/plugin-sdk/testing';
+import { createTestHarness } from '@hivemind-os/plugin-sdk/testing';
 
 // Prevent auto-start of the JSON-RPC runtime
 process.env.HIVEMIND_PLUGIN_TEST_MODE = '1';
@@ -164,3 +164,4 @@ GitHub Actions example:
   run: npm test
   working-directory: packages/my-plugin
 ```
+

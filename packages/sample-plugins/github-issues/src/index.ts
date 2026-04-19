@@ -1,5 +1,5 @@
 /**
- * @hivemind/connector-github-issues — Reference connector plugin
+ * @hivemind-os/connector-github-issues — Reference connector plugin
  *
  * This is a complete, working example of a Hivemind connector plugin.
  * It connects to a GitHub repository and provides:
@@ -22,7 +22,7 @@
  *   - Poll interval and label filters
  */
 
-import { definePlugin, z } from "@hivemind/plugin-sdk";
+import { definePlugin, z } from "@hivemind-os/plugin-sdk";
 import { listIssues } from "./tools/list-issues.js";
 import { createIssue } from "./tools/create-issue.js";
 import { addComment } from "./tools/add-comment.js";

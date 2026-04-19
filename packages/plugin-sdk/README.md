@@ -1,4 +1,4 @@
-# @hivemind/plugin-sdk
+# @hivemind-os/plugin-sdk
 
 TypeScript SDK for building Hivemind connector plugins. Create plugins that provide AI agent tools, configuration UIs, and background sync loops — all in TypeScript.
 
@@ -6,17 +6,17 @@ TypeScript SDK for building Hivemind connector plugins. Create plugins that prov
 
 ```bash
 # Create a new plugin project
-npm create @hivemind/plugin my-connector
+npm create @hivemind-os/plugin my-connector
 
 # Or start from scratch
 mkdir my-connector && cd my-connector
 npm init -y
-npm install @hivemind/plugin-sdk
+npm install @hivemind-os/plugin-sdk
 ```
 
 ```typescript
 // src/index.ts
-import { definePlugin, z } from '@hivemind/plugin-sdk';
+import { definePlugin, z } from '@hivemind-os/plugin-sdk';
 
 export default definePlugin({
   configSchema: z.object({
@@ -150,7 +150,7 @@ Every tool and lifecycle hook receives a `PluginContext` with host APIs:
 Use the built-in test harness:
 
 ```typescript
-import { createTestHarness } from '@hivemind/plugin-sdk/testing';
+import { createTestHarness } from '@hivemind-os/plugin-sdk/testing';
 import myPlugin from '../src/index';
 
 const harness = createTestHarness(myPlugin, {

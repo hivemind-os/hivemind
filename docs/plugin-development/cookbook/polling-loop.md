@@ -5,7 +5,7 @@ A pattern for reliable background polling with deduplication, cursor persistence
 ## Pattern
 
 ```typescript
-import type { PluginContext } from '@hivemind/plugin-sdk';
+import type { PluginContext } from '@hivemind-os/plugin-sdk';
 
 export async function pollLoop(ctx: PluginContext): Promise<void> {
   const pollIntervalMs = (ctx.config.pollInterval as number) * 1000;
@@ -106,3 +106,4 @@ export async function pollLoop(ctx: PluginContext): Promise<void> {
 - **Status updates** — user sees real-time sync status in Settings
 - **User notification** — alert after repeated failures
 - **Event emission** — enables workflow automations
+

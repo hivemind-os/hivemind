@@ -1,5 +1,5 @@
 {
-  "name": "@hivemind/test-plugin",
+  "name": "@hivemind-os/test-plugin",
   "version": "0.1.0",
   "description": "E2E test plugin for the Hivemind plugin system — exercises every host API",
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hivemind/plugin-sdk": "file:../plugin-sdk"
+    "@hivemind-os/plugin-sdk": "file:../plugin-sdk"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

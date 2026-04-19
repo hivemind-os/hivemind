@@ -1,4 +1,4 @@
-import { definePlugin, z } from "@hivemind/plugin-sdk";
+import { definePlugin, z } from "@hivemind-os/plugin-sdk";
 
 export default definePlugin({
   configSchema: z.object({

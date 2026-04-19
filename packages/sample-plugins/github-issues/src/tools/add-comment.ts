@@ -2,7 +2,7 @@
  * Tool: add_comment — Add a comment to an existing GitHub issue.
  */
 
-import { z, type ToolDefinition } from "@hivemind/plugin-sdk";
+import { z, type ToolDefinition } from "@hivemind-os/plugin-sdk";
 import { githubFetch } from "../api.js";
 
 export const addComment: ToolDefinition = {

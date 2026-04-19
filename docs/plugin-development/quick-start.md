@@ -13,7 +13,7 @@ Build a working Hivemind connector plugin in 5 minutes.
 mkdir my-first-plugin
 cd my-first-plugin
 npm init -y
-npm install @hivemind/plugin-sdk
+npm install @hivemind-os/plugin-sdk
 npm install -D typescript @types/node
 ```
 
@@ -41,7 +41,7 @@ Create `tsconfig.json`:
 Create `src/index.ts`:
 
 ```typescript
-import { definePlugin, z } from '@hivemind/plugin-sdk';
+import { definePlugin, z } from '@hivemind-os/plugin-sdk';
 
 export default definePlugin({
   // Config — rendered as a form in the Hivemind Settings UI
@@ -90,7 +90,7 @@ Update your `package.json`:
 npx tsc && hivemind-extract-schema
 ```
 
-The `hivemind-extract-schema` command (included with `@hivemind/plugin-sdk`) reads your
+The `hivemind-extract-schema` command (included with `@hivemind-os/plugin-sdk`) reads your
 compiled plugin and writes `dist/config-schema.json`. This static schema file is what
 Hivemind reads to render your config form in the UI — no running plugin process needed.
 
@@ -116,7 +116,7 @@ Create `test/plugin.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { createTestHarness } from '@hivemind/plugin-sdk/testing';
+import { createTestHarness } from '@hivemind-os/plugin-sdk/testing';
 
 process.env.HIVEMIND_PLUGIN_TEST_MODE = '1';
 import myPlugin from '../src/index';
@@ -158,3 +158,4 @@ Your plugin now appears in Hivemind's Settings → Plugins.
 - **[Background Loops](./background-loops.md)** — Add a polling loop for real-time updates
 - **[Config Schemas](./config-schemas.md)** — Rich configuration forms
 - **[Sample Plugin](../../packages/sample-plugins/github-issues/)** — Study a complete real-world example
+

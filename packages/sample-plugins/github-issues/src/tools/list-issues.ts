@@ -2,7 +2,7 @@
  * Tool: list_issues — List issues from the configured GitHub repository.
  */
 
-import { z, type ToolDefinition } from "@hivemind/plugin-sdk";
+import { z, type ToolDefinition } from "@hivemind-os/plugin-sdk";
 import { githubFetch, formatIssue } from "../api.js";
 
 export const listIssues: ToolDefinition = {

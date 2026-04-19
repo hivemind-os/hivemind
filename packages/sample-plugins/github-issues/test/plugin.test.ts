@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestHarness } from "@hivemind/plugin-sdk/testing";
+import { createTestHarness } from "@hivemind-os/plugin-sdk/testing";
 
 process.env.HIVEMIND_PLUGIN_TEST_MODE = "1";
 import pluginDef from "../src/index.js";

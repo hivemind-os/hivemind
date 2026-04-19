@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hivemind/plugin-sdk": "^0.1.0"
+    "@hivemind-os/plugin-sdk": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
