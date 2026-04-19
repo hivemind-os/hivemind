@@ -5254,6 +5254,7 @@ struct PluginInfo {
     plugin_type: String,
     enabled: bool,
     config: serde_json::Value,
+    config_schema: Option<serde_json::Value>,
     status: Option<PluginStatusInfo>,
     permissions: Vec<String>,
 }
@@ -5281,6 +5282,7 @@ async fn plugin_list() -> Result<Vec<PluginInfo>, String> {
                         plugin_type: v.get("plugin_type").and_then(|x| x.as_str()).unwrap_or("connector").to_string(),
                         enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
                         config: v.get("config").cloned().unwrap_or(serde_json::Value::Object(Default::default())),
+                        config_schema: v.get("config_schema").cloned().filter(|v| !v.is_null()),
                         status: v.get("status").and_then(|s| {
                             Some(PluginStatusInfo {
                                 state: s.get("state")?.as_str()?.to_string(),

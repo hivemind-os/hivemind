@@ -1,6 +1,14 @@
 # Config Schemas
 
-Plugins define their configuration using Zod schemas with Hivemind UI extensions. The host serializes these schemas and renders them as forms in the Settings UI.
+Plugins define their configuration using Zod schemas with Hivemind UI extensions. The SDK extracts these schemas at build time into a static `dist/config-schema.json` file, which the host reads to render config forms — no running plugin process needed.
+
+## How It Works
+
+1. You define a `configSchema` using Zod in your plugin's `definePlugin()` call
+2. When you run `npm run build`, `tsc` compiles your code, then `hivemind-extract-schema` imports the built plugin and serializes the Zod schema to `dist/config-schema.json`
+3. When the plugin is installed/registered, Hivemind reads `dist/config-schema.json` and renders the config form in Settings → Plugins
+
+> **Important:** Always run the full build (`tsc && hivemind-extract-schema`) after changing your config schema. The config form is driven by `dist/config-schema.json`, not the live plugin process.
 
 ## Basic Schema
 

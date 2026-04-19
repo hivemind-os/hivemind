@@ -19,6 +19,9 @@
     "dist",
     "README.md"
   ],
+  "bin": {
+    "hivemind-extract-schema": "./dist/extract-schema.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

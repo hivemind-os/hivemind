@@ -87,7 +87,21 @@ Update your `package.json`:
 ## 4. Build
 
 ```bash
-npx tsc
+npx tsc && hivemind-extract-schema
+```
+
+The `hivemind-extract-schema` command (included with `@hivemind/plugin-sdk`) reads your
+compiled plugin and writes `dist/config-schema.json`. This static schema file is what
+Hivemind reads to render your config form in the UI — no running plugin process needed.
+
+Add it to your `package.json` build script:
+
+```json
+{
+  "scripts": {
+    "build": "tsc && hivemind-extract-schema"
+  }
+}
 ```
 
 ## 5. Test

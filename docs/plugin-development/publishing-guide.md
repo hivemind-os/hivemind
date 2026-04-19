@@ -33,8 +33,10 @@ Ensure you have:
 ### 2. Build
 
 ```bash
-npm run build
+npm run build  # runs: tsc && hivemind-extract-schema
 ```
+
+This compiles your TypeScript and extracts `dist/config-schema.json`, which Hivemind uses to render your config form. Make sure `dist/config-schema.json` is included in your `"files"` array (it's inside `dist/` so it's covered by default).
 
 ### 3. Test
 

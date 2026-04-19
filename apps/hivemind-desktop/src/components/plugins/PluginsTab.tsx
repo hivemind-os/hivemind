@@ -15,6 +15,7 @@ interface InstalledPlugin {
   plugin_type: string;
   enabled: boolean;
   config: Record<string, any>;
+  config_schema?: PluginConfigSchema | null;
   status?: { state: string; message?: string };
   permissions: string[];
 }
@@ -46,11 +47,19 @@ const PluginsTab: Component = () => {
     setError(null);
     if (plugin) {
       setEditConfig({ ...plugin.config });
-    }
-    try {
-      const schema = await invoke<PluginConfigSchema>('plugin_get_config_schema', { pluginId: id });
-      setConfigSchema(schema);
-    } catch (e) {
+      // Use inline schema from plugin list (extracted at build time)
+      if (plugin.config_schema) {
+        setConfigSchema(plugin.config_schema);
+      } else {
+        // Fall back to querying daemon (requires running plugin process)
+        try {
+          const schema = await invoke<PluginConfigSchema>('plugin_get_config_schema', { pluginId: id });
+          setConfigSchema(schema);
+        } catch (e) {
+          setConfigSchema(null);
+        }
+      }
+    } else {
       setConfigSchema(null);
     }
   }

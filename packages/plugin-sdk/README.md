@@ -42,6 +42,14 @@ export default definePlugin({
 });
 ```
 
+## Building
+
+```bash
+tsc && hivemind-extract-schema
+```
+
+The SDK includes `hivemind-extract-schema`, a CLI that extracts your Zod config schema to `dist/config-schema.json` at build time. This static file is what Hivemind reads to render your config form — no running plugin process needed. Add both commands to your `"build"` script in `package.json`.
+
 ## Features
 
 ### Config Schemas (Zod-based)

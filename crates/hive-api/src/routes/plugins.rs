@@ -29,6 +29,7 @@ pub(crate) async fn api_list_plugins(State(state): State<AppState>) -> Json<serd
                 "plugin_type": p.manifest.hivemind.plugin_type,
                 "enabled": p.enabled,
                 "config": p.config,
+                "config_schema": p.config_schema,
                 "status": status,
                 "permissions": p.manifest.hivemind.permissions,
             })
@@ -38,16 +39,27 @@ pub(crate) async fn api_list_plugins(State(state): State<AppState>) -> Json<serd
 }
 
 /// GET /api/v1/plugins/:id/config-schema — get plugin config schema.
+///
+/// Returns the static config schema extracted at build time (from dist/config-schema.json).
+/// Falls back to querying the running plugin process if no static schema is stored.
 pub(crate) async fn api_get_config_schema(
     State(state): State<AppState>,
     Path(plugin_id): Path<String>,
 ) -> impl IntoResponse {
+    // Try static schema first (from registration)
+    if let Some(plugin) = state.plugin_registry.get(&plugin_id) {
+        if let Some(schema) = plugin.config_schema {
+            return Json(schema).into_response();
+        }
+    }
+
+    // Fall back to querying running plugin process
     let host = state.plugin_host.clone();
     match tokio::spawn(async move { host.get_config_schema(&plugin_id).await }).await {
         Ok(Ok(schema)) => Json(schema).into_response(),
         Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("No config schema available: {}", e) })),
         )
             .into_response(),
         Err(e) => (

@@ -15,6 +15,9 @@ pub struct InstalledPlugin {
     /// Plugin config (non-secret values).
     #[serde(default)]
     pub config: serde_json::Value,
+    /// Cached config schema (extracted at registration time).
+    #[serde(default)]
+    pub config_schema: Option<serde_json::Value>,
 }
 
 /// Manages installed plugins.
@@ -38,8 +41,21 @@ impl PluginRegistry {
     pub fn load(&self) -> anyhow::Result<()> {
         if self.state_file.exists() {
             let content = std::fs::read_to_string(&self.state_file)?;
-            let plugins: HashMap<String, InstalledPlugin> = serde_json::from_str(&content)?;
+            let mut plugins: HashMap<String, InstalledPlugin> = serde_json::from_str(&content)?;
+            // Refresh schemas for plugins that were registered before schema extraction existed
+            let mut updated = false;
+            for plugin in plugins.values_mut() {
+                if plugin.config_schema.is_none() {
+                    plugin.config_schema = Self::read_config_schema(&plugin.install_path);
+                    if plugin.config_schema.is_some() {
+                        updated = true;
+                    }
+                }
+            }
             *self.plugins.write() = plugins;
+            if updated {
+                let _ = self.save();
+            }
             info!(count = self.plugins.read().len(), "Loaded plugin registry");
         }
         Ok(())
@@ -87,12 +103,14 @@ impl PluginRegistry {
         let pkg_json = package_dir.join("package.json");
         let manifest = PluginManifest::from_package_json(&pkg_json)?;
         let plugin_id = manifest.plugin_id();
+        let config_schema = Self::read_config_schema(package_dir);
 
         let installed = InstalledPlugin {
             manifest,
             install_path: package_dir.to_path_buf(),
             enabled: true,
             config: serde_json::Value::Object(Default::default()),
+            config_schema,
         };
 
         self.plugins.write().insert(plugin_id.clone(), installed);
@@ -213,12 +231,14 @@ impl PluginRegistry {
 
         let manifest = PluginManifest::from_package_json(&plugin_pkg_json)?;
         let plugin_id = manifest.plugin_id();
+        let config_schema = Self::read_config_schema(&install_path);
 
         let installed = InstalledPlugin {
             manifest,
             install_path,
             enabled: true,
             config: serde_json::Value::Object(Default::default()),
+            config_schema,
         };
 
         self.plugins.write().insert(plugin_id.clone(), installed);
@@ -226,6 +246,27 @@ impl PluginRegistry {
 
         info!(plugin_id, package = package_name, "Plugin installed from npm");
         Ok(plugin_id)
+    }
+
+    /// Read config-schema.json from a plugin's dist directory.
+    fn read_config_schema(package_dir: &Path) -> Option<serde_json::Value> {
+        let schema_path = package_dir.join("dist").join("config-schema.json");
+        match std::fs::read_to_string(&schema_path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(val) => {
+                    info!(path = %schema_path.display(), "Loaded plugin config schema");
+                    Some(val)
+                }
+                Err(e) => {
+                    warn!(path = %schema_path.display(), error = %e, "Failed to parse config schema");
+                    None
+                }
+            },
+            Err(_) => {
+                info!(path = %schema_path.display(), "No config-schema.json found");
+                None
+            }
+        }
     }
 }
 
