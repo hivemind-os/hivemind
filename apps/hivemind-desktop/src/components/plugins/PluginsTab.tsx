@@ -22,6 +22,7 @@ interface InstalledPlugin {
 const PluginsTab: Component = () => {
   const [plugins, { refetch }] = createResource(fetchPlugins);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  const [selectedPlugin, setSelectedPlugin] = createSignal<InstalledPlugin | null>(null);
   const [configSchema, setConfigSchema] = createSignal<PluginConfigSchema | null>(null);
   const [editConfig, setEditConfig] = createSignal<Record<string, any>>({});
   const [saving, setSaving] = createSignal(false);
@@ -38,12 +39,11 @@ const PluginsTab: Component = () => {
     }
   }
 
-  const selectedPlugin = () => plugins()?.find(p => p.plugin_id === selectedId());
-
   async function selectPlugin(id: string) {
+    const plugin = plugins()?.find(p => p.plugin_id === id) ?? null;
     setSelectedId(id);
+    setSelectedPlugin(plugin);
     setError(null);
-    const plugin = plugins()?.find(p => p.plugin_id === id);
     if (plugin) {
       setEditConfig({ ...plugin.config });
     }
@@ -85,7 +85,10 @@ const PluginsTab: Component = () => {
     setError(null);
     try {
       await invoke('plugin_uninstall', { pluginId: id });
-      if (selectedId() === id) setSelectedId(null);
+      if (selectedId() === id) {
+        setSelectedId(null);
+        setSelectedPlugin(null);
+      }
       await refetch();
     } catch (e: any) {
       setError(e?.message ?? String(e));
