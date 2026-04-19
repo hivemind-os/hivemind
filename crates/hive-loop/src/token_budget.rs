@@ -252,6 +252,7 @@ mod tests {
             },
             tool_limits: hive_contracts::ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         }
     }
 

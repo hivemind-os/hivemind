@@ -14,6 +14,7 @@ use hive_tools::ToolRegistry;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn, Instrument};
 
 use crate::error::AgentError;
@@ -388,10 +389,23 @@ impl AgentSupervisor {
         // Create channel upfront so we can atomically insert a placeholder.
         let (inbox_tx, inbox_rx) = mpsc::channel::<AgentMessage>(AGENT_INBOX_CAPACITY);
         let interaction_gate = Arc::new(UserInteractionGate::new());
+        let cancellation_token = CancellationToken::new();
 
         // Atomically claim the slot. If already taken, return error.
         // Using entry() prevents the TOCTOU race between contains_key and insert.
         {
+            // Reject if parent is terminating (being killed). This prevents
+            // orphaned children from being spawned during a kill cascade.
+            if let Some(ref pid) = parent_id {
+                if let Some(handle) = self.agents.get(pid) {
+                    if handle.status == AgentStatus::Terminating {
+                        return Err(AgentError::TopologyError(format!(
+                            "parent agent '{pid}' is terminating"
+                        )));
+                    }
+                }
+            }
+
             use dashmap::mapref::entry::Entry;
             match self.agents.entry(id.clone()) {
                 Entry::Occupied(_) => return Err(AgentError::AlreadyExists(id)),
@@ -418,6 +432,7 @@ impl AgentSupervisor {
                         conversation_journal: None,
                         permissions: None,
                         final_result: None,
+                        cancellation_token: cancellation_token.clone(),
                     });
                 }
             }
@@ -474,6 +489,7 @@ impl AgentSupervisor {
 
             let conversation_journal = Arc::new(Mutex::new(ConversationJournal::default()));
             runner.conversation_journal = Some(Arc::clone(&conversation_journal));
+            runner.set_cancellation_token(cancellation_token.clone());
 
             if let Some(execution) = &self.execution {
                 runner.knowledge_query_handler = execution.knowledge_query_handler.clone();
@@ -671,8 +687,22 @@ impl AgentSupervisor {
     }
 
     /// Kill an agent, its descendants, and remove them from the map.
+    ///
+    /// Marks the target and all descendants as `Terminating` before starting
+    /// the recursive kill cascade. This prevents `spawn_agent` from inserting
+    /// new children under any agent in the subtree while the kill is in
+    /// progress.
     pub async fn kill_agent(&self, agent_id: &str) -> Result<(), AgentError> {
-        // Collect child agents (those with parent_id == agent_id) for recursive kill
+        // Mark the entire subtree as Terminating so concurrent spawn_agent
+        // calls will reject children under any of these agents.
+        let descendant_ids = self.get_descendant_ids(agent_id);
+        for id in &descendant_ids {
+            if let Some(mut handle) = self.agents.get_mut(id) {
+                handle.status = AgentStatus::Terminating;
+            }
+        }
+
+        // Collect child agents (those with parent_id == agent_id) for recursive kill.
         let children: Vec<String> = self
             .agents
             .iter()
@@ -687,17 +717,23 @@ impl AgentSupervisor {
             }
         }
 
-        // Close the interaction gate first to unblock any pending waits
+        // Close the interaction gate and cancel the token to interrupt
+        // in-flight model/tool calls before sending the Kill signal.
         if let Some(handle) = self.agents.get(agent_id) {
+            handle.cancellation_token.cancel();
             handle.interaction_gate.close();
         }
 
         // Remove from map — dropping inbox_tx ensures the runner exits
         if let Some((_, mut handle)) = self.agents.remove(agent_id) {
-            let _ = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await;
+            if let Err(e) = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await {
+                debug!(agent = %agent_id, error = %e, "failed to send kill signal to agent inbox");
+            }
             if let Some(task) = handle.task.take() {
+                let abort_handle = task.abort_handle();
                 if tokio::time::timeout(std::time::Duration::from_secs(5), task).await.is_err() {
-                    warn!(agent = %agent_id, "agent task did not shut down in time");
+                    warn!(agent = %agent_id, "agent task did not shut down in time, aborting");
+                    abort_handle.abort();
                 }
             }
         } else {
@@ -767,9 +803,10 @@ impl AgentSupervisor {
 
     /// Kill all agents.
     pub async fn kill_all(&self) -> Result<(), AgentError> {
-        // Close all interaction gates FIRST so agents blocked in ask_user
-        // or tool-approval waits are unblocked and can process the Kill.
+        // Cancel all tokens and close interaction gates FIRST so agents
+        // blocked in model/tool calls or approval waits are interrupted.
         for entry in self.agents.iter() {
+            entry.value().cancellation_token.cancel();
             entry.value().interaction_gate.close();
         }
 
@@ -1486,5 +1523,144 @@ mod tests {
         assert_eq!(sup.agent_count(), 3);
         sup.kill_agent(&root).await.unwrap();
         assert_eq!(sup.agent_count(), 0, "kill_agent should remove target + descendants");
+    }
+
+    #[tokio::test]
+    async fn kill_agent_cancels_token() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Grab the token before killing
+        let token = {
+            let handle = sup.agents.get(&id).unwrap();
+            handle.cancellation_token.clone()
+        };
+        assert!(!token.is_cancelled(), "token should not be cancelled before kill");
+
+        sup.kill_agent(&id).await.unwrap();
+        assert!(token.is_cancelled(), "token should be cancelled after kill");
+    }
+
+    #[tokio::test]
+    async fn kill_agent_nonexistent_returns_error() {
+        let sup = test_supervisor();
+        let result = sup.kill_agent("no-such-agent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::AgentNotFound(id) => assert_eq!(id, "no-such-agent"),
+            other => panic!("expected AgentNotFound, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_all_cancels_all_tokens() {
+        let sup = test_supervisor();
+        let a1 = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+        let a2 = sup.spawn_agent(test_spec("a2"), None, None, None, None).await.unwrap();
+
+        let token1 = sup.agents.get(&a1).unwrap().cancellation_token.clone();
+        let token2 = sup.agents.get(&a2).unwrap().cancellation_token.clone();
+
+        let _ = sup.kill_all().await;
+
+        assert!(token1.is_cancelled(), "all tokens should be cancelled");
+        assert!(token2.is_cancelled(), "all tokens should be cancelled");
+        assert_eq!(sup.agent_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn kill_agent_cleans_up_event_history() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Verify the agent exists
+        assert!(sup.agents.contains_key(&id));
+
+        sup.kill_agent(&id).await.unwrap();
+
+        // Event history should be cleaned up
+        assert!(sup.event_history.get(&id).is_none());
+        assert!(!sup.agents.contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn get_descendant_ids_returns_self_for_nonexistent() {
+        let sup = test_supervisor();
+        // Current behavior: pushes the initial ID unconditionally (no existence check)
+        let ids = sup.get_descendant_ids("nonexistent");
+        assert_eq!(ids, vec!["nonexistent".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn kill_agent_closes_interaction_gate() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Create a pending interaction request on the gate
+        let rx = {
+            let handle = sup.agents.get(&id).unwrap();
+            handle.interaction_gate.create_request(
+                "q-1".to_string(),
+                hive_contracts::InteractionKind::Question {
+                    text: "waiting?".into(),
+                    choices: vec![],
+                    allow_freeform: true,
+                    multi_select: false,
+                    message: None,
+                },
+            )
+        };
+
+        sup.kill_agent(&id).await.unwrap();
+
+        // The receiver should resolve immediately (gate closed → sender dropped)
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), rx).await;
+        assert!(result.is_ok(), "receiver should not timeout — gate was closed");
+        assert!(result.unwrap().is_err(), "should get RecvError when gate is closed");
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_terminating_parent() {
+        let sup = test_supervisor();
+        let parent = sup.spawn_agent(test_spec("parent"), None, None, None, None).await.unwrap();
+
+        // Manually set parent to Terminating (simulates kill in progress)
+        sup.agents.get_mut(&parent).unwrap().status = AgentStatus::Terminating;
+
+        let result = sup
+            .spawn_agent(test_spec("child"), Some(parent.clone()), None, None, None)
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::TopologyError(msg) => {
+                assert!(msg.contains("terminating"), "error should mention terminating: {msg}");
+            }
+            other => panic!("expected TopologyError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_agent_marks_descendants_terminating() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let child = sup
+            .spawn_agent(test_spec("child"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let gc = sup
+            .spawn_agent(test_spec("gc"), Some(child.clone()), None, None, None)
+            .await
+            .unwrap();
+
+        // Verify all start as Spawning
+        assert_eq!(sup.agents.get(&root).unwrap().status, AgentStatus::Spawning);
+        assert_eq!(sup.agents.get(&child).unwrap().status, AgentStatus::Spawning);
+        assert_eq!(sup.agents.get(&gc).unwrap().status, AgentStatus::Spawning);
+
+        // After killing root, all should be removed (can't check Terminating
+        // mid-kill since it's recursive and synchronous, but we can verify
+        // the full tree was cleaned up)
+        sup.kill_agent(&root).await.unwrap();
+        assert_eq!(sup.agent_count(), 0);
     }
 }

@@ -202,6 +202,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         }
     }
 

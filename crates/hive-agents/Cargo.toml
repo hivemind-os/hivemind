@@ -13,6 +13,7 @@ hive-skills = { path = "../hive-skills" }
 hive-tools = { path = "../hive-tools" }
 parking_lot.workspace = true
 tokio = { workspace = true }
+tokio-util.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 dashmap = "6"

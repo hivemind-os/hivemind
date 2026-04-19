@@ -2040,7 +2040,9 @@ impl ChatService {
         );
 
         if let Some(supervisor) = evicted_supervisor {
-            let _ = supervisor.kill_all().await;
+            if let Err(e) = supervisor.kill_all().await {
+                tracing::warn!(error = %e, "failed to kill agents during session eviction");
+            }
         }
 
         // Clean up background tasks for the evicted session (if any).
@@ -2763,6 +2765,7 @@ impl ChatService {
             },
             tool_limits: (*self.tool_limits).clone(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         match self.loop_executor.call_tool(&context, tool_id, input).await {
@@ -3383,7 +3386,13 @@ impl ChatService {
         // Stop all agents (gate.close() inside kill_all unblocks any
         // agents waiting on ask_user/tool-approval first).
         if let Some(ref sup) = supervisor {
-            let _ = sup.kill_all().await;
+            if let Err(e) = sup.kill_all().await {
+                tracing::warn!(
+                    session_id,
+                    error = %e,
+                    "failed to kill all agents during session delete — orphaned agents may remain"
+                );
+            }
         }
 
         // Stop and delete all workflow instances belonging to this session.
@@ -3880,6 +3889,7 @@ impl ChatService {
                                     AgentStatus::Waiting => "waiting",
                                     AgentStatus::Paused => "paused",
                                     AgentStatus::Blocked => "blocked",
+                                    AgentStatus::Terminating => "terminating",
                                     AgentStatus::Done => "done",
                                     AgentStatus::Error => "error",
                                 };
@@ -6227,6 +6237,7 @@ impl ChatService {
                 },
                 tool_limits: (*self.tool_limits).clone(),
                 preempt_signal: None, // Set below after reading session state.
+                cancellation_token: None,
             };
 
             let (
@@ -7659,8 +7670,16 @@ impl ChatService {
         let mut agents = Vec::new();
         for node in agent_nodes {
             if let Some(content) = &node.content {
-                if let Ok(state) = serde_json::from_str::<PersistedAgentState>(content) {
-                    agents.push(state);
+                match serde_json::from_str::<PersistedAgentState>(content) {
+                    Ok(state) => agents.push(state),
+                    Err(e) => {
+                        tracing::warn!(
+                            session_node_id,
+                            node_id = node.id,
+                            error = %e,
+                            "skipping corrupt persisted agent state during restore"
+                        );
+                    }
                 }
             }
         }
@@ -11368,5 +11387,84 @@ mod tests {
 
         // Removing again should be a no-op (no matching node), not an error.
         svc.bot_service.remove_persisted_bot("bot-remove-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_from_active_map() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path);
+
+        let session = service
+            .create_session(SessionModality::Linear, Some("Deletable".to_string()), None)
+            .await
+            .expect("create session");
+
+        // Session should be listed
+        let sessions = service.list_sessions().await;
+        assert!(sessions.iter().any(|s| s.id == session.id));
+
+        // Delete
+        service.delete_session(&session.id, false).await.expect("delete session");
+
+        // Session should no longer be listed
+        let sessions_after = service.list_sessions().await;
+        assert!(!sessions_after.iter().any(|s| s.id == session.id));
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_session_returns_error() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path);
+
+        let result = service.delete_session("no-such-session", false).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn restore_sessions_skips_corrupt_agent_data() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+
+        // Seed the KG with a session node and a corrupt agent node
+        {
+            let graph = KnowledgeGraph::open(&graph_path).expect("open KG");
+            let session_id = graph
+                .insert_node(&hive_knowledge::NewNode {
+                    node_type: "chat_session".to_string(),
+                    name: "session-corrupt-test".to_string(),
+                    data_class: DataClass::Internal,
+                    content: Some(
+                        serde_json::json!({
+                            "session_id": "session-corrupt-test",
+                            "title": "Test Corrupt",
+                            "modality": "Linear",
+                            "persona_id": "system/general",
+                        })
+                        .to_string(),
+                    ),
+                })
+                .expect("insert session node");
+
+            // Insert a corrupt agent node (invalid JSON)
+            let agent_node_id = graph
+                .insert_node(&hive_knowledge::NewNode {
+                    node_type: "session_agent".to_string(),
+                    name: "agent-corrupt-1".to_string(),
+                    data_class: DataClass::Internal,
+                    content: Some("THIS IS NOT VALID JSON{{{{".to_string()),
+                })
+                .expect("insert corrupt agent node");
+
+            graph
+                .insert_edge(session_id, agent_node_id, "session_agent", 1.0)
+                .expect("insert edge");
+        }
+
+        // Restore should succeed — corrupt agent is skipped, not fatal
+        let service = test_chat_service(graph_path);
+        let result = service.restore_sessions().await;
+        assert!(result.is_ok(), "restore should not fail on corrupt agent data");
     }
 }
