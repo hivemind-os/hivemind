@@ -34,6 +34,7 @@ hive-process = { path = "../hive-process" }
 hive-loop = { path = "../hive-loop" }
 hive-model = { path = "../hive-model" }
 hive-node-env = { path = "../hive-node-env" }
+hive-plugins = { path = "../hive-plugins" }
 hive-python-env = { path = "../hive-python-env" }
 hive-risk = { path = "../hive-risk" }
 hive-scheduler = { path = "../hive-scheduler" }

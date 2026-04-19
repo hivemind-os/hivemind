@@ -414,7 +414,8 @@ impl PluginHost {
 
     /// Stop a plugin process.
     pub async fn stop(&self, plugin_id: &str) -> Result<()> {
-        if let Some(process) = self.processes.write().remove(plugin_id) {
+        let process = self.processes.write().remove(plugin_id);
+        if let Some(process) = process {
             // Try graceful deactivate first
             let _ = process
                 .request(protocol::methods::DEACTIVATE, None)

@@ -289,6 +289,10 @@ pub struct AppState {
     pub service_log_collector: hive_core::ServiceLogCollector,
     /// Central registry of daemon background services.
     pub service_registry: Arc<services::ServiceRegistry>,
+    /// Plugin registry for managing installed plugins.
+    pub plugin_registry: Arc<hive_plugins::PluginRegistry>,
+    /// Plugin host for running plugin processes.
+    pub plugin_host: Arc<hive_plugins::PluginHost>,
     /// Concrete scheduler tool executor for post-init refresh (MCP tools).
     pub(crate) scheduler_tool_executor: Arc<scheduler_deps::SchedulerToolExecutorImpl>,
     /// Managed Python environment for agent shell commands.
@@ -896,6 +900,17 @@ impl AppState {
             forwarded_interactions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             service_log_collector: hive_core::ServiceLogCollector::new(),
             service_registry: Arc::new(services::ServiceRegistry::new()),
+            plugin_registry: {
+                let plugins_dir = paths.hivemind_home.join("plugins");
+                let registry = Arc::new(hive_plugins::PluginRegistry::new(plugins_dir));
+                let _ = registry.load();
+                registry
+            },
+            plugin_host: {
+                let plugins_dir = paths.hivemind_home.join("plugins");
+                let data_dir = paths.hivemind_home.join("plugin-data");
+                Arc::new(hive_plugins::PluginHost::new(plugins_dir, data_dir))
+            },
             scheduler_tool_executor,
             python_env,
             node_env,
@@ -1363,6 +1378,11 @@ impl AppState {
             forwarded_interactions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             service_log_collector: hive_core::ServiceLogCollector::new(),
             service_registry: Arc::new(services::ServiceRegistry::new()),
+            plugin_registry: Arc::new(hive_plugins::PluginRegistry::new(std::env::temp_dir().join("hive-test-plugins"))),
+            plugin_host: Arc::new(hive_plugins::PluginHost::new(
+                std::env::temp_dir().join("hive-test-plugins"),
+                std::env::temp_dir().join("hive-test-plugin-data"),
+            )),
             scheduler_tool_executor,
             python_env: Arc::new(hive_python_env::PythonEnvManager::new(
                 PathBuf::from("."),
@@ -1827,6 +1847,13 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/tools", get(tools::list_tools))
         .route("/api/v1/tools/{tool_id}/invoke", post(tools::invoke_tool))
+        // ── Plugins ─────────────────────────────────────────────────
+        .route("/api/v1/plugins", get(plugins::api_list_plugins))
+        .route("/api/v1/plugins/link", post(plugins::api_link_local))
+        .route("/api/v1/plugins/{plugin_id}/config-schema", get(plugins::api_get_config_schema))
+        .route("/api/v1/plugins/{plugin_id}/config", post(plugins::api_save_config))
+        .route("/api/v1/plugins/{plugin_id}/enabled", post(plugins::api_set_enabled))
+        .route("/api/v1/plugins/{plugin_id}", delete(plugins::api_uninstall))
         .route("/api/v1/local-models", get(local_models::api_list_local_models))
         .route("/api/v1/local-models/install", post(local_models::api_install_local_model))
         .route("/api/v1/local-models/downloads", get(local_models::api_list_downloads))

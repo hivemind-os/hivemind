@@ -12,6 +12,7 @@ pub(crate) mod knowledge;
 pub(crate) mod local_models;
 pub(crate) mod mcp;
 pub(crate) mod node;
+pub(crate) mod plugins;
 pub(crate) mod processes;
 pub(crate) mod python;
 pub(crate) mod scheduler;
