@@ -688,10 +688,18 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
 
     async fn kill_agent(&self, session_id: &str, agent_id: &str) -> Result<(), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
-        let supervisor = chat
-            .get_or_create_supervisor(session_id)
-            .await
-            .map_err(|e| format!("failed to get supervisor: {e}"))?;
+        // Trigger-launched workflows use a sentinel parent_session_id (e.g.
+        // "trigger-manager") that is not a real chat session. Their agents
+        // live on the bot supervisor instead.
+        let supervisor = if session_id.starts_with("trigger-") || session_id == "manual" {
+            chat.get_or_create_bot_supervisor()
+                .await
+                .map_err(|e| format!("failed to get bot supervisor: {e}"))?
+        } else {
+            chat.get_or_create_supervisor(session_id)
+                .await
+                .map_err(|e| format!("failed to get supervisor: {e}"))?
+        };
         supervisor.kill_agent(agent_id).await.map_err(|e| format!("failed to kill agent: {e}"))
     }
 
