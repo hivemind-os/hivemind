@@ -2040,7 +2040,9 @@ impl ChatService {
         );
 
         if let Some(supervisor) = evicted_supervisor {
-            let _ = supervisor.kill_all().await;
+            if let Err(e) = supervisor.kill_all().await {
+                tracing::warn!(error = %e, "failed to kill agents during session eviction");
+            }
         }
 
         // Clean up background tasks for the evicted session (if any).
@@ -3384,7 +3386,13 @@ impl ChatService {
         // Stop all agents (gate.close() inside kill_all unblocks any
         // agents waiting on ask_user/tool-approval first).
         if let Some(ref sup) = supervisor {
-            let _ = sup.kill_all().await;
+            if let Err(e) = sup.kill_all().await {
+                tracing::warn!(
+                    session_id,
+                    error = %e,
+                    "failed to kill all agents during session delete — orphaned agents may remain"
+                );
+            }
         }
 
         // Stop and delete all workflow instances belonging to this session.
@@ -7661,8 +7669,16 @@ impl ChatService {
         let mut agents = Vec::new();
         for node in agent_nodes {
             if let Some(content) = &node.content {
-                if let Ok(state) = serde_json::from_str::<PersistedAgentState>(content) {
-                    agents.push(state);
+                match serde_json::from_str::<PersistedAgentState>(content) {
+                    Ok(state) => agents.push(state),
+                    Err(e) => {
+                        tracing::warn!(
+                            session_node_id,
+                            node_id = node.id,
+                            error = %e,
+                            "skipping corrupt persisted agent state during restore"
+                        );
+                    }
                 }
             }
         }

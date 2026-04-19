@@ -700,7 +700,9 @@ impl AgentSupervisor {
 
         // Remove from map — dropping inbox_tx ensures the runner exits
         if let Some((_, mut handle)) = self.agents.remove(agent_id) {
-            let _ = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await;
+            if let Err(e) = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await {
+                debug!(agent = %agent_id, error = %e, "failed to send kill signal to agent inbox");
+            }
             if let Some(task) = handle.task.take() {
                 let abort_handle = task.abort_handle();
                 if tokio::time::timeout(std::time::Duration::from_secs(5), task).await.is_err() {
