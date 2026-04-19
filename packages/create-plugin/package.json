@@ -1,0 +1,27 @@
+{
+  "name": "create-hivemind-plugin",
+  "version": "0.1.0",
+  "description": "Scaffold a new Hivemind connector plugin",
+  "type": "module",
+  "bin": {
+    "create-hivemind-plugin": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/prompts": "^2.4.9",
+    "typescript": "^5.5.0"
+  },
+  "keywords": ["hivemind", "plugin", "scaffold", "create"],
+  "license": "MIT"
+}

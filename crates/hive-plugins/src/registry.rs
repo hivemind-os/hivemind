@@ -1,0 +1,204 @@
+//! Plugin registry — discovers, installs, and manages plugins.
+
+use crate::manifest::PluginManifest;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tracing::{info, warn};
+
+/// Metadata about an installed plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledPlugin {
+    pub manifest: PluginManifest,
+    pub install_path: PathBuf,
+    pub enabled: bool,
+    /// Plugin config (non-secret values).
+    #[serde(default)]
+    pub config: serde_json::Value,
+}
+
+/// Manages installed plugins.
+pub struct PluginRegistry {
+    plugins_dir: PathBuf,
+    state_file: PathBuf,
+    plugins: parking_lot::RwLock<HashMap<String, InstalledPlugin>>,
+}
+
+impl PluginRegistry {
+    pub fn new(plugins_dir: PathBuf) -> Self {
+        let state_file = plugins_dir.join("plugins.json");
+        Self {
+            plugins_dir,
+            state_file,
+            plugins: parking_lot::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Load registry state from disk.
+    pub fn load(&self) -> anyhow::Result<()> {
+        if self.state_file.exists() {
+            let content = std::fs::read_to_string(&self.state_file)?;
+            let plugins: HashMap<String, InstalledPlugin> = serde_json::from_str(&content)?;
+            *self.plugins.write() = plugins;
+            info!(count = self.plugins.read().len(), "Loaded plugin registry");
+        }
+        Ok(())
+    }
+
+    /// Save registry state to disk.
+    pub fn save(&self) -> anyhow::Result<()> {
+        std::fs::create_dir_all(&self.plugins_dir)?;
+        let content = serde_json::to_string_pretty(&*self.plugins.read())?;
+        std::fs::write(&self.state_file, content)?;
+        Ok(())
+    }
+
+    /// Discover plugins in the plugins directory.
+    pub fn discover(&self) -> anyhow::Result<Vec<PluginManifest>> {
+        let mut discovered = Vec::new();
+
+        if !self.plugins_dir.exists() {
+            return Ok(discovered);
+        }
+
+        for entry in std::fs::read_dir(&self.plugins_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let pkg_json = path.join("package.json");
+                if pkg_json.exists() {
+                    match PluginManifest::from_package_json(&pkg_json) {
+                        Ok(manifest) => {
+                            discovered.push(manifest);
+                        }
+                        Err(e) => {
+                            warn!(path = %pkg_json.display(), error = %e, "Failed to parse plugin manifest");
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(discovered)
+    }
+
+    /// Register a plugin from a local directory path.
+    pub fn register_local(&self, package_dir: &Path) -> anyhow::Result<String> {
+        let pkg_json = package_dir.join("package.json");
+        let manifest = PluginManifest::from_package_json(&pkg_json)?;
+        let plugin_id = manifest.plugin_id();
+
+        let installed = InstalledPlugin {
+            manifest,
+            install_path: package_dir.to_path_buf(),
+            enabled: true,
+            config: serde_json::Value::Object(Default::default()),
+        };
+
+        self.plugins.write().insert(plugin_id.clone(), installed);
+        self.save()?;
+
+        info!(plugin_id, path = %package_dir.display(), "Plugin registered (local)");
+        Ok(plugin_id)
+    }
+
+    /// Uninstall a plugin.
+    pub fn uninstall(&self, plugin_id: &str) -> anyhow::Result<()> {
+        self.plugins.write().remove(plugin_id);
+        self.save()?;
+        info!(plugin_id, "Plugin uninstalled");
+        Ok(())
+    }
+
+    /// Get an installed plugin.
+    pub fn get(&self, plugin_id: &str) -> Option<InstalledPlugin> {
+        self.plugins.read().get(plugin_id).cloned()
+    }
+
+    /// List all installed plugins.
+    pub fn list(&self) -> Vec<InstalledPlugin> {
+        self.plugins.read().values().cloned().collect()
+    }
+
+    /// Update plugin config.
+    pub fn update_config(&self, plugin_id: &str, config: serde_json::Value) -> anyhow::Result<()> {
+        let mut plugins = self.plugins.write();
+        if let Some(plugin) = plugins.get_mut(plugin_id) {
+            plugin.config = config;
+            drop(plugins);
+            self.save()?;
+            Ok(())
+        } else {
+            anyhow::bail!("Plugin not found: {}", plugin_id)
+        }
+    }
+
+    /// Enable/disable a plugin.
+    pub fn set_enabled(&self, plugin_id: &str, enabled: bool) -> anyhow::Result<()> {
+        let mut plugins = self.plugins.write();
+        if let Some(plugin) = plugins.get_mut(plugin_id) {
+            plugin.enabled = enabled;
+            drop(plugins);
+            self.save()?;
+            Ok(())
+        } else {
+            anyhow::bail!("Plugin not found: {}", plugin_id)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = PluginRegistry::new(dir.path().to_path_buf());
+
+        // Create a fake plugin
+        let plugin_dir = dir.path().join("test-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("package.json"),
+            r#"{
+                "name": "test-plugin",
+                "version": "1.0.0",
+                "main": "dist/index.js",
+                "hivemind": {
+                    "type": "connector",
+                    "displayName": "Test",
+                    "description": "Test plugin"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        // Register
+        let id = registry.register_local(&plugin_dir).unwrap();
+        assert_eq!(id, "test-plugin");
+
+        // Get
+        let plugin = registry.get("test-plugin").unwrap();
+        assert!(plugin.enabled);
+
+        // List
+        assert_eq!(registry.list().len(), 1);
+
+        // Update config
+        registry
+            .update_config("test-plugin", serde_json::json!({"key": "val"}))
+            .unwrap();
+        let plugin = registry.get("test-plugin").unwrap();
+        assert_eq!(plugin.config["key"], "val");
+
+        // Disable
+        registry.set_enabled("test-plugin", false).unwrap();
+        let plugin = registry.get("test-plugin").unwrap();
+        assert!(!plugin.enabled);
+
+        // Uninstall
+        registry.uninstall("test-plugin").unwrap();
+        assert!(registry.get("test-plugin").is_none());
+    }
+}
