@@ -5242,6 +5242,131 @@ async fn local_model_unload(model_id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+// ── Plugin management commands ─────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct PluginInfo {
+    plugin_id: String,
+    name: String,
+    version: String,
+    display_name: String,
+    description: String,
+    plugin_type: String,
+    enabled: bool,
+    config: serde_json::Value,
+    status: Option<PluginStatusInfo>,
+    permissions: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PluginStatusInfo {
+    state: String,
+    message: Option<String>,
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_list() -> Result<Vec<PluginInfo>, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        match blocking_get_json::<Vec<serde_json::Value>>(&base_url, "/api/v1/plugins") {
+            Ok(items) => Ok(items
+                .into_iter()
+                .filter_map(|v| {
+                    Some(PluginInfo {
+                        plugin_id: v.get("plugin_id")?.as_str()?.to_string(),
+                        name: v.get("name")?.as_str()?.to_string(),
+                        version: v.get("version").and_then(|x| x.as_str()).unwrap_or("0.0.0").to_string(),
+                        display_name: v.get("display_name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        description: v.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        plugin_type: v.get("plugin_type").and_then(|x| x.as_str()).unwrap_or("connector").to_string(),
+                        enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
+                        config: v.get("config").cloned().unwrap_or(serde_json::Value::Object(Default::default())),
+                        status: v.get("status").and_then(|s| {
+                            Some(PluginStatusInfo {
+                                state: s.get("state")?.as_str()?.to_string(),
+                                message: s.get("message").and_then(|x| x.as_str()).map(|x| x.to_string()),
+                            })
+                        }),
+                        permissions: v.get("permissions")
+                            .and_then(|x| x.as_array())
+                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()),
+            Err(_) => Ok(Vec::new()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_get_config_schema(plugin_id: String) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        blocking_get_json::<serde_json::Value>(
+            &base_url,
+            &format!("/api/v1/plugins/{}/config-schema", encode_query(&plugin_id)),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_save_config(plugin_id: String, config: serde_json::Value) -> Result<(), String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        blocking_post_json_no_content(
+            &base_url,
+            &format!("/api/v1/plugins/{}/config", encode_query(&plugin_id)),
+            &config,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_set_enabled(plugin_id: String, enabled: bool) -> Result<(), String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        blocking_post_json_no_content(
+            &base_url,
+            &format!("/api/v1/plugins/{}/enabled", encode_query(&plugin_id)),
+            &serde_json::json!({ "enabled": enabled }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_uninstall(plugin_id: String) -> Result<(), String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        blocking_delete_no_content(&base_url, &format!("/api/v1/plugins/{}", encode_query(&plugin_id)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn plugin_link_local(path: String) -> Result<String, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = serde_json::json!({ "path": path });
+        blocking_post_json::<_, serde_json::Value>(
+            &base_url,
+            "/api/v1/plugins/link",
+            &body,
+        ).map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -5489,6 +5614,12 @@ pub fn run() {
             services_subscribe_events,
             mcp_subscribe_events,
             scheduler_subscribe_events,
+            plugin_list,
+            plugin_get_config_schema,
+            plugin_save_config,
+            plugin_set_enabled,
+            plugin_uninstall,
+            plugin_link_local,
         ])
         .build(tauri::generate_context!())
         .expect("error while building hivemind desktop")

@@ -15,6 +15,7 @@ import RuntimeTab from './settings/RuntimeTab';
 import GeneralTab from './settings/GeneralTab';
 const ConnectorsTab = lazy(() => import('./ConnectorsTab'));
 const AuditViewer = lazy(() => import('./AuditViewer'));
+const PluginsTab = lazy(() => import('./plugins/PluginsTab'));
 import type {
   AppContext,
   CapabilityOption,
@@ -39,7 +40,7 @@ import { extractFileQuantization } from '../types';
 import { parseModelMeta, displayModelName, isEmbeddingOnly, modelCapsToProviderCaps } from '../types';
 import { formatBytes, formatPayload, formatTime, mcpStatusClass } from '../utils';
 
-type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search';
+type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search' | 'plugins';
 type LocalModelView = 'library' | 'search' | 'hardware';
 
 interface SettingsCategory {
@@ -66,6 +67,7 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     { id: 'compaction', label: 'Compaction' },
   ]},
   { id: 'extensions', label: 'Extensions', tabs: [
+    { id: 'plugins', label: 'Plugins' },
     { id: 'tools', label: 'Tools' },
     { id: 'web-search', label: 'Web Search' },
     { id: 'python', label: 'Python' },
@@ -1490,6 +1492,13 @@ const SettingsModal = (props: SettingsModalProps) => {
                       </For>
                     </Show>
                   </div>
+                </Show>
+
+                {/* ── Plugins ─────────────────────────────────── */}
+                <Show when={localTab() === 'plugins'}>
+                  <Suspense fallback={<p class="muted">Loading…</p>}>
+                    <PluginsTab />
+                  </Suspense>
                 </Show>
 
                 {/* ── Tools──────────────────────────────────────── */}
