@@ -5,7 +5,7 @@ export { default as TopicSelector, payloadKeysForTopic } from './TopicSelector';
 export type { TopicSelectorProps, TopicInfo } from './TopicSelector';
 
 export { default as PersonaSelector } from './PersonaSelector';
-export type { PersonaSelectorProps, PersonaInfo } from './PersonaSelector';
+export type { PersonaSelectorProps, PersonaSelectorSingleProps, PersonaSelectorMultiProps, PersonaInfo } from './PersonaSelector';
 
 export { default as ToolCallBuilder, getSchemaProperties } from './ToolCallBuilder';
 export type { ToolCallBuilderProps, ToolDefinitionInfo, ChannelInfo, SchemaField } from './ToolCallBuilder';

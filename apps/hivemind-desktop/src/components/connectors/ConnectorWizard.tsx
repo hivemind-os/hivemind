@@ -2,6 +2,7 @@ import { For, Show, createSignal, onMount } from 'solid-js';
 import { Link, Search, TriangleAlert, LoaderCircle } from 'lucide-solid';
 import { invoke } from '@tauri-apps/api/core';
 import { openExternal } from '../../utils';
+import { PersonaSelector, type PersonaInfo } from '../shared';
 import {
   type AuthConfig,
   type CalendarConfig,
@@ -825,34 +826,12 @@ export function ConnectorWizard(props: ConnectorWizardProps) {
           <p style={{ 'font-size': '0.85rem', color: 'hsl(var(--muted-foreground))', 'margin-bottom': '0.5rem' }}>
             Select which personas can access this connector. Leave empty to allow all.
           </p>
-          <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '0.5rem', 'margin-bottom': '0.5rem' }}>
-            <For each={selectedPersonas()}>
-              {(pid) => {
-                const persona = () => availablePersonas().find((p) => p.id === pid);
-                return (
-                  <span style={{ display: 'inline-flex', 'align-items': 'center', gap: '4px', background: 'hsl(var(--primary) / 0.12)', 'border-radius': '4px', padding: '2px 8px', 'font-size': '0.82rem' }}>
-                    {persona()?.name || pid}
-                    <button onClick={() => setSelectedPersonas((prev) => prev.filter((p) => p !== pid))} style="background:none;border:none;cursor:pointer;color:hsl(var(--muted-foreground));font-size:10px;padding:0;">✕</button>
-                  </span>
-                );
-              }}
-            </For>
-          </div>
-          <select
-            onChange={(e) => {
-              const val = e.currentTarget.value;
-              if (val && !selectedPersonas().includes(val)) {
-                setSelectedPersonas((prev) => [...prev, val]);
-              }
-              e.currentTarget.value = '';
-            }}
-            style={{ 'font-size': '0.85rem' }}
-          >
-            <option value="">Add persona…</option>
-            <For each={availablePersonas().filter((p) => !selectedPersonas().includes(p.id))}>
-              {(p) => <option value={p.id}>{p.name} ({p.id})</option>}
-            </For>
-          </select>
+          <PersonaSelector
+            multiple
+            values={selectedPersonas()}
+            onChange={setSelectedPersonas}
+            personas={availablePersonas()}
+          />
         </div>
         <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem', 'margin-top': '0.75rem' }}>
             <button onClick={() => props.onTest(draft().id, draft())} disabled={props.testing()}>

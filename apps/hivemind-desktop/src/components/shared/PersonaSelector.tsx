@@ -10,18 +10,34 @@ export interface PersonaInfo {
   archived?: boolean;
 }
 
-export interface PersonaSelectorProps {
+/** Single-select mode (default) */
+export interface PersonaSelectorSingleProps {
+  multiple?: false;
   value: string;
   onChange: (persona_id: string) => void;
   personas: PersonaInfo[];
   disabled?: boolean;
 }
 
+/** Multi-select mode */
+export interface PersonaSelectorMultiProps {
+  multiple: true;
+  values: string[];
+  onChange: (persona_ids: string[]) => void;
+  personas: PersonaInfo[];
+  disabled?: boolean;
+}
+
+export type PersonaSelectorProps = PersonaSelectorSingleProps | PersonaSelectorMultiProps;
+
 export default function PersonaSelector(props: PersonaSelectorProps) {
   const [open, setOpen] = createSignal(false);
   const [search, setSearch] = createSignal('');
 
-  const selected = () => props.personas.find(p => p.id === props.value);
+  const isMulti = () => !!(props as PersonaSelectorMultiProps).multiple;
+  const multiValues = () => isMulti() ? (props as PersonaSelectorMultiProps).values : [];
+  const singleValue = () => !isMulti() ? (props as PersonaSelectorSingleProps).value : '';
+  const selected = () => props.personas.find(p => p.id === singleValue());
 
   const filtered = createMemo(() => {
     const q = search().toLowerCase();
@@ -48,9 +64,31 @@ export default function PersonaSelector(props: PersonaSelectorProps) {
   }
 
   function select(id: string) {
-    props.onChange(id);
-    setOpen(false);
-    setSearch('');
+    if (isMulti()) {
+      const mp = props as PersonaSelectorMultiProps;
+      const current = mp.values;
+      if (current.includes(id)) {
+        mp.onChange(current.filter(v => v !== id));
+      } else {
+        mp.onChange([...current, id]);
+      }
+      // Keep popover open in multi-select mode
+    } else {
+      (props as PersonaSelectorSingleProps).onChange(id);
+      setOpen(false);
+      setSearch('');
+    }
+  }
+
+  function removeChip(id: string) {
+    if (isMulti()) {
+      const mp = props as PersonaSelectorMultiProps;
+      mp.onChange(mp.values.filter(v => v !== id));
+    }
+  }
+
+  function isSelected(id: string): boolean {
+    return isMulti() ? multiValues().includes(id) : singleValue() === id;
   }
 
   function countItems(node: NamespaceNode<PersonaInfo>): number {
@@ -93,12 +131,22 @@ export default function PersonaSelector(props: PersonaSelectorProps) {
                   cursor: 'pointer',
                   'font-size': '0.82em',
                   color: 'hsl(var(--foreground))',
-                  background: p.id === props.value ? 'hsl(var(--primary) / 0.12)' : 'none',
+                  background: isSelected(p.id) ? 'hsl(var(--primary) / 0.12)' : 'none',
+                  display: 'flex',
+                  'align-items': 'center',
+                  gap: '6px',
                 }}
                 class="tool-dropdown-item"
               >
-                <div style="font-weight:500;">{p.name}</div>
-                <div style="font-size:0.85em;color:hsl(var(--muted-foreground));">{p.id}</div>
+                <Show when={isMulti()}>
+                  <span style={{ 'font-size': '0.9em', 'flex-shrink': '0', width: '16px', 'text-align': 'center' }}>
+                    {isSelected(p.id) ? '✓' : ''}
+                  </span>
+                </Show>
+                <div>
+                  <div style="font-weight:500;">{p.name}</div>
+                  <div style="font-size:0.85em;color:hsl(var(--muted-foreground));">{p.id}</div>
+                </div>
               </div>
             )}
           </For>
@@ -119,6 +167,40 @@ export default function PersonaSelector(props: PersonaSelectorProps) {
     'box-shadow': '0 6px 16px hsl(var(--foreground) / 0.2)',
   };
 
+  const triggerStyle = "padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;cursor:pointer;display:flex;align-items:center;justify-content:space-between;";
+
+  function renderTrigger() {
+    if (isMulti()) {
+      const vals = multiValues();
+      if (vals.length === 0) {
+        return <span style="color:hsl(var(--muted-foreground));">Select personas…</span>;
+      }
+      return (
+        <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0;">
+          <For each={vals}>
+            {(id) => {
+              const p = () => props.personas.find(x => x.id === id);
+              return (
+                <span style="display:inline-flex;align-items:center;gap:3px;background:hsl(var(--primary) / 0.12);border-radius:4px;padding:1px 6px;font-size:0.82em;max-width:100%;">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{p()?.name || id}</span>
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeChip(id); }}
+                    style="background:none;border:none;cursor:pointer;color:hsl(var(--muted-foreground));font-size:10px;padding:0;line-height:1;"
+                  >✕</button>
+                </span>
+              );
+            }}
+          </For>
+        </div>
+      );
+    }
+    return (
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {selected() ? `${selected()!.name} (${selected()!.id})` : 'Select persona…'}
+      </span>
+    );
+  }
+
   return (
     <Popover
       open={open()}
@@ -127,11 +209,9 @@ export default function PersonaSelector(props: PersonaSelectorProps) {
       gutter={2}
       sameWidth
     >
-      <PopoverTrigger as="div"
-        style="padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;cursor:pointer;display:flex;align-items:center;justify-content:space-between;"
-      >
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{selected() ? `${selected()!.name} (${selected()!.id})` : 'Select persona…'}</span>
-          <span style="color:hsl(var(--muted-foreground));margin-left:8px;display:flex;align-items:center;">{open() ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
+      <PopoverTrigger as="div" style={triggerStyle}>
+        {renderTrigger()}
+        <span style="color:hsl(var(--muted-foreground));margin-left:8px;display:flex;align-items:center;flex-shrink:0;">{open() ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
       </PopoverTrigger>
       <PopoverContent class="w-auto p-0" style={{ 'z-index': '10000', ...dropdownStyle }}>
       <div style="padding:4px;border-bottom:1px solid hsl(var(--border));">

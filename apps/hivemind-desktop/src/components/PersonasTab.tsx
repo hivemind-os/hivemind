@@ -141,6 +141,7 @@ const PersonasTab = (props: PersonasTabProps) => {
   const [showPromptEditor, setShowPromptEditor] = createSignal(false);
   const [confirmResetId, setConfirmResetId] = createSignal<string | null>(null);
   const [showCreateWizard, setShowCreateWizard] = createSignal(false);
+  const [connectorConfigs, setConnectorConfigs] = createSignal<any[]>([]);
   let paramHelperCounter = 0;
 
   const resetEditor = () => {
@@ -157,6 +158,28 @@ const PersonasTab = (props: PersonasTabProps) => {
 
   const activePersonas = createMemo(() => personas().filter((p) => !p.archived));
   const archivedPersonas = createMemo(() => personas().filter((p) => p.archived));
+
+  const connectorCountForPersona = (personaId: string) =>
+    connectorConfigs().filter((c: any) =>
+      c.allowed_personas?.includes(personaId) || c.allowed_personas?.includes('*')
+    ).length;
+
+  const toggleConnectorForPersona = async (connectorId: string, personaId: string, grant: boolean) => {
+    const updated = connectorConfigs().map((c: any) => {
+      if (c.id !== connectorId) return c;
+      const current: string[] = c.allowed_personas ?? [];
+      const next = grant
+        ? [...current, personaId]
+        : current.filter((p: string) => p !== personaId);
+      return { ...c, allowed_personas: next };
+    });
+    try {
+      await invoke('save_connectors', { configs: updated });
+      setConnectorConfigs(updated);
+    } catch (e: any) {
+      setError(e?.toString() ?? 'Failed to update connector access.');
+    }
+  };
 
   // Namespace grouping (hierarchical tree, sorted alphabetically at every level)
   const personaTree = createMemo(() => buildNamespaceTree(activePersonas(), (p) => p.id, (p) => p.name));
@@ -219,6 +242,7 @@ const PersonasTab = (props: PersonasTabProps) => {
 
   onMount(() => {
     void loadDefinitions();
+    invoke<any[]>('list_connectors').then(setConnectorConfigs).catch(() => {});
   });
 
   const startAdd = () => {
@@ -698,6 +722,12 @@ const PersonasTab = (props: PersonasTabProps) => {
                     </Show>
                     <span class="pill neutral">{isWildcard(persona.allowed_tools) ? 'All tools' : `${persona.allowed_tools.length} tool${persona.allowed_tools.length === 1 ? '' : 's'}`}</span>
                     <span class="pill neutral">{persona.mcp_servers?.length ? `${persona.mcp_servers.length} MCP server${persona.mcp_servers.length === 1 ? '' : 's'}` : 'No MCP servers'}</span>
+                    {(() => {
+                      const count = connectorCountForPersona(persona.id);
+                      return count > 0
+                        ? <span class="pill neutral">{count} connector{count === 1 ? '' : 's'}</span>
+                        : <span class="pill neutral">No connectors</span>;
+                    })()}
                   </div>
                 </article>
               );
@@ -1252,6 +1282,46 @@ const PersonasTab = (props: PersonasTabProps) => {
                       </For>
                     </div>
                   </Show>
+                </div>
+              </div>
+            </Show>
+
+            {/* ── Connectors ─────────────────────────────────────── */}
+            <Show when={connectorConfigs().length > 0}>
+              <div class="agents-form-field">
+                <span>Connectors</span>
+                <div class="agents-form-control">
+                  <p style="font-size: 0.8rem; color: hsl(var(--muted-foreground)); margin: 0 0 0.5rem;">
+                    Grant this persona access to connectors (Slack, Discord, etc.)
+                  </p>
+                  <For each={connectorConfigs()}>
+                    {(connector: any) => {
+                      const personaId = () => editingId() ?? '';
+                      const isGranted = () =>
+                        (connector.allowed_personas ?? []).includes(personaId()) ||
+                        (connector.allowed_personas ?? []).includes('*');
+                      const isWild = () => (connector.allowed_personas ?? []).includes('*');
+                      return (
+                        <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.375rem 0; font-size: 0.9rem; cursor: pointer;">
+                          <input
+                            type="checkbox"
+                            checked={isGranted()}
+                            disabled={isWild()}
+                            onChange={(e) => {
+                              void toggleConnectorForPersona(connector.id, personaId(), e.currentTarget.checked);
+                            }}
+                          />
+                          <span>{connector.name || connector.id}</span>
+                          <Show when={!connector.enabled}>
+                            <span class="pill" style="font-size: 0.7rem; opacity: 0.6;">disabled</span>
+                          </Show>
+                          <Show when={isWild()}>
+                            <span class="pill neutral" style="font-size: 0.7rem;">wildcard</span>
+                          </Show>
+                        </label>
+                      );
+                    }}
+                  </For>
                 </div>
               </div>
             </Show>
