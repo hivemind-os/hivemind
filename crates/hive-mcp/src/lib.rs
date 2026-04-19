@@ -646,9 +646,16 @@ impl McpService {
                             CONNECT_TIMEOUT.as_secs()
                         ),
                     })?
-                    .map_err(|error| McpServiceError::ConnectionFailed {
-                        server_id: sid.clone(),
-                        detail: format!("protocol handshake with `{command}` failed: {error}"),
+                    .map_err(|error| {
+                        // The handshake failed — collect any stderr output the
+                        // server may have written so the caller sees the *real*
+                        // reason (e.g. a Python traceback) instead of a generic
+                        // protocol error.
+                        let base = format!("protocol handshake with `{command}` failed: {error}");
+                        McpServiceError::ConnectionFailed {
+                            server_id: sid.clone(),
+                            detail: base,
+                        }
                     })?;
 
                     Ok((service, Some(child)))
@@ -715,20 +722,49 @@ impl McpService {
         let (service, child) = match service_result {
             Ok(pair) => pair,
             Err(error) => {
+                // Give the stderr reader task a moment to collect output from
+                // the (likely crashed) child process before we read the logs.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
                 let mut servers = self.servers.write().await;
-                if let Some(state) = servers.get_mut(server_id) {
+                let enriched_error = if let Some(state) = servers.get_mut(server_id) {
                     state.push_log(format!("error: {error}"));
                     state.status = McpConnectionStatus::Error;
-                    state.last_error = Some(error.to_string());
-                }
+
+                    // Collect stderr lines from the log buffer to enrich the error.
+                    let stderr_lines: Vec<&str> = state
+                        .logs
+                        .iter()
+                        .filter_map(|log| log.message.strip_prefix("[stderr] "))
+                        .collect();
+                    let enriched = if stderr_lines.is_empty() {
+                        error.to_string()
+                    } else {
+                        // Take up to the last 20 stderr lines to keep it readable.
+                        let tail: Vec<&str> = if stderr_lines.len() > 20 {
+                            stderr_lines[stderr_lines.len() - 20..].to_vec()
+                        } else {
+                            stderr_lines
+                        };
+                        format!("{error}\n\nServer stderr:\n{}", tail.join("\n"))
+                    };
+                    state.last_error = Some(enriched.clone());
+                    enriched
+                } else {
+                    error.to_string()
+                };
+
                 if let Err(e) = self.event_bus.publish(
                     "mcp.server.error",
                     "hive-mcp",
-                    json!({ "serverId": server_id, "error": error.to_string() }),
+                    json!({ "serverId": server_id, "error": &enriched_error }),
                 ) {
                     tracing::warn!(error = %e, "failed to publish mcp.server.error event");
                 }
-                return Err(error);
+                return Err(McpServiceError::ConnectionFailed {
+                    server_id: server_id.to_string(),
+                    detail: enriched_error.replace(&format!("mcp server `{server_id}` failed to connect: "), ""),
+                });
             }
         };
 
