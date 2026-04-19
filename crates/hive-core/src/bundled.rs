@@ -52,6 +52,7 @@ static BUNDLED_PERSONA_YAMLS: &[(&str, &str)] = &[
         "system/finance/tax-advisor",
         include_str!("../bundled-personas/finance-tax-advisor.yaml"),
     ),
+    ("system/research", include_str!("../bundled-personas/research.yaml")),
 ];
 
 // ---------------------------------------------------------------------------
