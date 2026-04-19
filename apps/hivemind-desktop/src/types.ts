@@ -927,7 +927,7 @@ export type TaskAction =
   | { type: 'send_message'; session_id?: string; content?: string }
   | { type: 'http_webhook'; url?: string; method?: string; body?: string; headers?: Record<string, string> }
   | { type: 'emit_event'; topic?: string; payload?: unknown }
-  | { type: 'invoke_agent'; persona_id: string; task: string; friendly_name?: string; timeout_secs?: number; permissions?: PermissionRule[] }
+  | { type: 'invoke_agent'; persona_id: string; task: string; friendly_name?: string; async_exec?: boolean; timeout_secs?: number; permissions?: PermissionRule[] }
   | { type: 'call_tool'; tool_id: string; arguments: any }
   | { type: 'composite_action'; actions: TaskAction[]; stop_on_failure?: boolean }
   | { type: 'launch_workflow'; definition: string; version?: string; inputs?: any; trigger_step_id?: string };

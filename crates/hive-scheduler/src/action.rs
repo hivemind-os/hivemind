@@ -192,7 +192,7 @@ pub(crate) struct InvokeAgentExecutor {
 #[async_trait]
 impl ActionExecutor for InvokeAgentExecutor {
     async fn execute(&self, action: &TaskAction) -> Result<Option<Value>, String> {
-        let TaskAction::InvokeAgent { persona_id, task, friendly_name, timeout_secs, permissions } =
+        let TaskAction::InvokeAgent { persona_id, task, friendly_name, async_exec, timeout_secs, permissions } =
             action
         else {
             return Err("InvokeAgentExecutor received non-InvokeAgent action".to_string());
@@ -202,7 +202,7 @@ impl ActionExecutor for InvokeAgentExecutor {
         })?;
         let timeout = timeout_secs.unwrap_or(300);
         let result = runner
-            .run_agent(persona_id, task, friendly_name.clone(), timeout, permissions.clone())
+            .run_agent(persona_id, task, friendly_name.clone(), *async_exec, timeout, permissions.clone())
             .await?;
         Ok(result.map(Value::String))
     }

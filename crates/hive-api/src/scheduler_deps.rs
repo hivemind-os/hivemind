@@ -250,6 +250,7 @@ impl SchedulerAgentRunner for SchedulerAgentRunnerImpl {
         persona_id: &str,
         task: &str,
         friendly_name: Option<String>,
+        async_exec: bool,
         timeout_secs: u64,
         _permissions: Option<Vec<PermissionRule>>,
     ) -> Result<Option<String>, String> {
@@ -312,6 +313,11 @@ impl SchedulerAgentRunner for SchedulerAgentRunnerImpl {
             )
             .await
             .map_err(|e| format!("send task: {e}"))?;
+
+        // Async mode: fire-and-forget — return immediately without waiting.
+        if async_exec {
+            return Ok(Some(format!("agent spawned asynchronously: {agent_id}")));
+        }
 
         // Wait for completion or timeout.
         let mut rx = supervisor.subscribe();

@@ -110,6 +110,7 @@ pub trait SchedulerAgentRunner: Send + Sync {
         persona_id: &str,
         task: &str,
         friendly_name: Option<String>,
+        async_exec: bool,
         timeout_secs: u64,
         permissions: Option<Vec<PermissionRule>>,
     ) -> Result<Option<String>, String>;
@@ -618,6 +619,12 @@ impl SchedulerService {
         if !self.store.mark_task_running(task_id, started_at) {
             return;
         }
+
+        let _ = self.event_bus.publish(
+            "scheduler.task.running",
+            "scheduler",
+            serde_json::json!({ "task_id": task_id, "run_id": &run_id }),
+        );
 
         let task = match self.get_task(task_id) {
             Ok(t) => t,

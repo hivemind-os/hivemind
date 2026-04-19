@@ -8,6 +8,7 @@ import { EmptyState } from '~/ui/empty-state';
 import { CronBuilder, TopicSelector, PersonaSelector, ToolCallBuilder, WorkflowLauncher, payloadKeysForTopic } from './shared';
 import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Button } from '~/ui/button';
+import { PermissionRulesEditor, type PermissionRule as PermRuleUI } from './PermissionRulesEditor';
 import type { WorkflowLaunchValue, WorkflowDefSummary } from './shared';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -92,6 +93,8 @@ const SchedulerPage = (props: SchedulerPageProps) => {
   const [newAgentTask, setNewAgentTask] = createSignal('');
   const [newFriendlyName, setNewFriendlyName] = createSignal('');
   const [newTimeoutSecs, setNewTimeoutSecs] = createSignal(300);
+  const [newAsyncExec, setNewAsyncExec] = createSignal(false);
+  const [newPermissions, setNewPermissions] = createSignal<PermRuleUI[]>([]);
   const [newToolId, setNewToolId] = createSignal('');
   const [newToolArgs, setNewToolArgs] = createSignal<Record<string, any>>({});
   const [newWorkflowLaunch, setNewWorkflowLaunch] = createSignal<WorkflowLaunchValue | null>(null);
@@ -178,7 +181,7 @@ const SchedulerPage = (props: SchedulerPageProps) => {
       case 'send_message': return { type: 'send_message', session_id: f.session_id ?? '', content: f.content ?? '' };
       case 'http_webhook': return { type: 'http_webhook', url: f.url ?? '', method: f.method ?? 'POST', body: f.body || undefined };
       case 'emit_event': return { type: 'emit_event', topic: f.topic ?? '', payload: {} };
-      case 'invoke_agent': return { type: 'invoke_agent', persona_id: f.persona_id ?? '', task: f.task ?? '', friendly_name: f.friendly_name || undefined, timeout_secs: parseInt(f.timeout_secs) || undefined };
+      case 'invoke_agent': return { type: 'invoke_agent', persona_id: f.persona_id ?? '', task: f.task ?? '', friendly_name: f.friendly_name || undefined, async_exec: f.async_exec === 'true' || undefined, timeout_secs: f.async_exec === 'true' ? undefined : (parseInt(f.timeout_secs) || undefined) };
       case 'call_tool': {
         let args: any = {};
         try { args = JSON.parse(f.arguments ?? '{}'); } catch { /* use empty */ }
@@ -251,7 +254,9 @@ const SchedulerPage = (props: SchedulerPageProps) => {
           persona_id: newPersonaId(),
           task: newAgentTask(),
           friendly_name: newFriendlyName() || undefined,
-          timeout_secs: newTimeoutSecs() || undefined,
+          async_exec: newAsyncExec() || undefined,
+          timeout_secs: newAsyncExec() ? undefined : (newTimeoutSecs() || undefined),
+          permissions: newPermissions().length > 0 ? newPermissions() : undefined,
         };
         break;
       case 'call_tool':
@@ -319,6 +324,8 @@ const SchedulerPage = (props: SchedulerPageProps) => {
     setNewAgentTask('');
     setNewFriendlyName('');
     setNewTimeoutSecs(300);
+    setNewAsyncExec(false);
+    setNewPermissions([]);
     setNewToolId('');
     setNewToolArgs({});
     setNewWorkflowLaunch(null);
@@ -331,7 +338,13 @@ const SchedulerPage = (props: SchedulerPageProps) => {
   let disposed = false;
   const debouncedRefresh = () => {
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => { if (!disposed) void loadTasks(); }, 500);
+    debounceTimer = setTimeout(() => {
+      if (!disposed) {
+        void loadTasks();
+        const expanded = expandedTaskId();
+        if (expanded) void loadRuns(expanded);
+      }
+    }, 200);
   };
 
   invoke('scheduler_subscribe_events').catch(() => {});
@@ -544,9 +557,28 @@ const SchedulerPage = (props: SchedulerPageProps) => {
                 />
                 <input type="text" value={newFriendlyName()} onInput={(e) => setNewFriendlyName(e.currentTarget.value)} placeholder="Friendly name (optional)" style="padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;" />
                 <textarea value={newAgentTask()} onInput={(e) => setNewAgentTask(e.currentTarget.value)} placeholder="Task description for the agent" rows={3} style="padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;resize:vertical;font-family:inherit;" />
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <label style="font-size:0.8em;color:hsl(var(--muted-foreground));">Timeout (seconds):</label>
-                  <input type="number" value={newTimeoutSecs()} onInput={(e) => setNewTimeoutSecs(parseInt(e.currentTarget.value) || 300)} style="width:100px;padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;" />
+                <Switch
+                  checked={newAsyncExec()}
+                  onChange={(checked: boolean) => setNewAsyncExec(checked)}
+                  class="flex items-center gap-2"
+                >
+                  <SwitchControl><SwitchThumb /></SwitchControl>
+                  <SwitchLabel style="font-size:0.85em;color:hsl(var(--foreground));">Async Execution</SwitchLabel>
+                </Switch>
+                <Show when={!newAsyncExec()}>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label style="font-size:0.8em;color:hsl(var(--muted-foreground));">Timeout (seconds):</label>
+                    <input type="number" value={newTimeoutSecs()} onInput={(e) => setNewTimeoutSecs(parseInt(e.currentTarget.value) || 300)} style="width:100px;padding:6px 10px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--background));color:hsl(var(--foreground));font-size:0.85em;" />
+                  </div>
+                </Show>
+                <div style="margin-top:6px;">
+                  <label style="display:block;font-size:0.78em;color:hsl(var(--muted-foreground));margin-bottom:3px;">Permission Rules</label>
+                  <div style="font-size:0.78em;color:hsl(var(--muted-foreground));margin-bottom:4px;">Tool approval policies for this agent. Leave empty to use defaults.</div>
+                  <PermissionRulesEditor
+                    rules={() => newPermissions()}
+                    setRules={setNewPermissions}
+                    toolDefinitions={props.tools as any}
+                  />
                 </div>
               </Show>
 
@@ -626,10 +658,22 @@ const SchedulerPage = (props: SchedulerPageProps) => {
                             <input type="text" value={sa.fields.friendly_name ?? ''} onInput={(e) => updateSubAction(sa.id, 'friendly_name', e.currentTarget.value)} placeholder="Friendly name (optional)" style="padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));font-size:0.8em;" />
                           </div>
                           <textarea value={sa.fields.task ?? ''} onInput={(e) => updateSubAction(sa.id, 'task', e.currentTarget.value)} placeholder="Agent task" rows={2} style="padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));font-size:0.8em;resize:vertical;font-family:inherit;" />
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <label style="font-size:0.75em;color:hsl(var(--muted-foreground));">Timeout (s):</label>
-                            <input type="number" value={sa.fields.timeout_secs ?? '300'} onInput={(e) => updateSubAction(sa.id, 'timeout_secs', e.currentTarget.value)} style="width:80px;padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));font-size:0.8em;" />
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <Switch
+                              checked={sa.fields.async_exec === 'true'}
+                              onChange={(checked: boolean) => updateSubAction(sa.id, 'async_exec', String(checked))}
+                              class="flex items-center gap-2"
+                            >
+                              <SwitchControl><SwitchThumb /></SwitchControl>
+                              <SwitchLabel style="font-size:0.8em;color:hsl(var(--foreground));">Async</SwitchLabel>
+                            </Switch>
                           </div>
+                          <Show when={sa.fields.async_exec !== 'true'}>
+                            <div style="display:flex;align-items:center;gap:6px;">
+                              <label style="font-size:0.75em;color:hsl(var(--muted-foreground));">Timeout (s):</label>
+                              <input type="number" value={sa.fields.timeout_secs ?? '300'} onInput={(e) => updateSubAction(sa.id, 'timeout_secs', e.currentTarget.value)} style="width:80px;padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));font-size:0.8em;" />
+                            </div>
+                          </Show>
                         </Show>
                         <Show when={sa.actionType === 'call_tool'}>
                           <input type="text" value={sa.fields.tool_id ?? ''} onInput={(e) => updateSubAction(sa.id, 'tool_id', e.currentTarget.value)} placeholder="Tool ID" style="padding:4px 8px;border-radius:4px;border:1px solid hsl(var(--border));background:hsl(var(--card));color:hsl(var(--foreground));font-size:0.8em;" />
@@ -763,7 +807,15 @@ const SchedulerPage = (props: SchedulerPageProps) => {
                             <Show when={(task.action as any).friendly_name}>
                               <div style="margin-bottom:4px;"><strong>Friendly Name:</strong> {(task.action as any).friendly_name}</div>
                             </Show>
-                            <div><strong>Timeout:</strong> {(task.action as any).timeout_secs ?? 300}s</div>
+                            <Show when={(task.action as any).async_exec}>
+                              <div style="margin-bottom:4px;"><strong>Async:</strong> Yes</div>
+                            </Show>
+                            <Show when={!(task.action as any).async_exec}>
+                              <div style="margin-bottom:4px;"><strong>Timeout:</strong> {(task.action as any).timeout_secs ?? 300}s</div>
+                            </Show>
+                            <Show when={(task.action as any).permissions?.length}>
+                              <div style="margin-bottom:4px;"><strong>Permissions:</strong> {(task.action as any).permissions.length} rule(s)</div>
+                            </Show>
                           </div>
                         </Show>
                         <Show when={task.action.type === 'call_tool'}>

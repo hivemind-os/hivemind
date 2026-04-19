@@ -155,6 +155,8 @@ pub enum TaskAction {
         #[serde(default)]
         friendly_name: Option<String>,
         #[serde(default)]
+        async_exec: bool,
+        #[serde(default)]
         timeout_secs: Option<u64>,
         #[serde(default)]
         permissions: Option<Vec<PermissionRule>>,
