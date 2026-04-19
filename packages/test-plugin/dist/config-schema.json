@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "apiKey": {
+      "type": "string",
+      "description": "API Key",
+      "hivemind": {
+        "secret": true,
+        "label": "API Key",
+        "helpText": "Test API key (any value accepted)",
+        "section": "Authentication"
+      }
+    },
+    "endpoint": {
+      "type": "string",
+      "description": "API Endpoint",
+      "default": "https://httpbin.org",
+      "hivemind": {
+        "label": "API Endpoint",
+        "section": "Connection"
+      }
+    },
+    "pollInterval": {
+      "type": "number",
+      "description": "Poll Interval (seconds)",
+      "default": 5,
+      "hivemind": {
+        "label": "Poll Interval (seconds)",
+        "section": "Sync"
+      }
+    },
+    "failOnActivate": {
+      "type": "boolean",
+      "description": "Simulate activation failure",
+      "default": false,
+      "hivemind": {
+        "label": "Simulate activation failure",
+        "helpText": "When true, onActivate will throw an error",
+        "section": "Testing"
+      }
+    }
+  },
+  "required": [
+    "apiKey"
+  ]
+}

@@ -4,10 +4,13 @@
 //! Each plugin runs as a Node.js child process communicating via
 //! JSON-RPC 2.0 over stdin/stdout with Content-Length framing.
 
+use crate::health::{HealthConfig, HealthMonitor, PluginHealth};
+use crate::manifest::HivemindMeta;
 use crate::protocol::{
     self, HostInfo, InitializeParams, IncomingMessage, JsonRpcRequest, JsonRpcResponse,
     PluginStatus, PluginToolDef,
 };
+use crate::sandbox::PluginSandbox;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -27,6 +30,7 @@ pub struct PluginProcess {
     status: Arc<parking_lot::RwLock<PluginStatus>>,
     message_tx: mpsc::Sender<IncomingMessage>,
     event_tx: mpsc::Sender<(String, Value)>,
+    sandbox: Option<Arc<PluginSandbox>>,
 }
 
 /// Host API callback for handling plugin→host requests.
@@ -89,6 +93,7 @@ pub struct PluginHost {
     processes: parking_lot::RwLock<HashMap<String, Arc<PluginProcess>>>,
     host_info: HostInfo,
     host_handler: Option<HostHandler>,
+    health: Arc<HealthMonitor>,
 }
 
 impl PluginHost {
@@ -111,6 +116,7 @@ impl PluginHost {
                 ],
             },
             host_handler: None,
+            health: Arc::new(HealthMonitor::new(HealthConfig::default())),
         }
     }
 
@@ -133,6 +139,7 @@ impl PluginHost {
         package_dir: &Path,
         entry_point: &str,
         config: Value,
+        manifest_meta: Option<&HivemindMeta>,
     ) -> Result<Arc<PluginProcess>> {
         let entry_path = package_dir.join(entry_point);
         if !entry_path.exists() {
@@ -187,6 +194,9 @@ impl PluginHost {
             progress: None,
         }));
 
+        // Create sandbox from manifest permissions
+        let sandbox = manifest_meta.map(|meta| Arc::new(PluginSandbox::new(plugin_id.into(), meta)));
+
         let process = Arc::new(PluginProcess {
             plugin_id: plugin_id.into(),
             child: Mutex::new(Some(child)),
@@ -195,6 +205,7 @@ impl PluginHost {
             status: status.clone(),
             message_tx: message_tx.clone(),
             event_tx: event_tx.clone(),
+            sandbox: sandbox.clone(),
         });
 
         // Stdin writer task
@@ -225,6 +236,7 @@ impl PluginHost {
         let evt_tx = event_tx;
         let host_handler = self.host_handler.clone();
         let process_for_reader = process.clone();
+        let reader_sandbox = sandbox;
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -268,6 +280,14 @@ impl PluginHost {
                     return;
                 }
 
+                // Payload size check
+                if let Some(ref sandbox) = reader_sandbox {
+                    if let Err(reason) = sandbox.check_payload_size(body.len()) {
+                        warn!("{}", reason);
+                        continue;
+                    }
+                }
+
                 let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
                     continue;
                 };
@@ -290,9 +310,45 @@ impl PluginHost {
                     let params = msg.get("params").cloned().unwrap_or(Value::Null);
                     let has_id = msg.get("id").is_some();
 
+                    // Permission check: verify the host call is allowed
+                    if let Some(ref sandbox) = reader_sandbox {
+                        let check = sandbox.check_host_call(method, &params);
+                        if !check.allowed {
+                            warn!("Sandbox denied host call '{}': {}", method, check.reason.as_deref().unwrap_or("denied"));
+                            if has_id {
+                                let resp = JsonRpcResponse::error(
+                                    msg["id"].clone(),
+                                    -32003,
+                                    check.reason.unwrap_or_default(),
+                                );
+                                let json = serde_json::to_string(&resp).unwrap();
+                                let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                            }
+                            continue;
+                        }
+                    }
+
                     // Handle host API calls from the plugin
                     match method {
                         protocol::host_methods::EMIT_MESSAGE => {
+                            // Rate limit check for messages
+                            if let Some(ref sandbox) = reader_sandbox {
+                                if let Err(reason) = sandbox.check_message_rate() {
+                                    warn!("{}", reason);
+                                    if has_id {
+                                        let resp = JsonRpcResponse::error(
+                                            msg["id"].clone(),
+                                            -32003,
+                                            reason,
+                                        );
+                                        let json = serde_json::to_string(&resp).unwrap();
+                                        let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                        let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                    }
+                                    continue;
+                                }
+                            }
                             if let Ok(im) = serde_json::from_value::<IncomingMessage>(
                                 params.get("message").cloned().unwrap_or(params.clone()),
                             ) {
@@ -306,6 +362,23 @@ impl PluginHost {
                             }
                         }
                         protocol::host_methods::EMIT_EVENT => {
+                            // Rate limit check for events
+                            if let Some(ref sandbox) = reader_sandbox {
+                                if let Err(reason) = sandbox.check_event_rate() {
+                                    warn!("{}", reason);
+                                    if has_id {
+                                        let resp = JsonRpcResponse::error(
+                                            msg["id"].clone(),
+                                            -32003,
+                                            reason,
+                                        );
+                                        let json = serde_json::to_string(&resp).unwrap();
+                                        let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                        let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                    }
+                                    continue;
+                                }
+                            }
                             let event_type = params["eventType"].as_str().unwrap_or("").to_string();
                             let payload = params.get("payload").cloned().unwrap_or(Value::Null);
                             let _ = evt_tx.send((event_type, payload)).await;
@@ -398,6 +471,35 @@ impl PluginHost {
             progress: None,
         };
 
+        // Register with health monitor and report healthy
+        self.health.register(plugin_id);
+        self.health.report_healthy(plugin_id);
+
+        // Spawn a background task to detect process exit (crash detection)
+        let health_clone = self.health.clone();
+        let pid = plugin_id.to_string();
+        let process_for_monitor = process.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let mut guard = process_for_monitor.child.lock().await;
+                if let Some(ref mut child) = *guard {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            let code = status.code();
+                            drop(guard);
+                            health_clone.report_crash(&pid, code);
+                            break;
+                        }
+                        Ok(None) => {} // still running
+                        Err(_) => break,
+                    }
+                } else {
+                    break; // child was taken (graceful shutdown)
+                }
+            }
+        });
+
         self.processes.write().insert(plugin_id.into(), process.clone());
         Ok(process)
     }
@@ -414,6 +516,7 @@ impl PluginHost {
 
     /// Stop a plugin process.
     pub async fn stop(&self, plugin_id: &str) -> Result<()> {
+        self.health.unregister(plugin_id);
         let process = self.processes.write().remove(plugin_id);
         if let Some(process) = process {
             // Try graceful deactivate first
@@ -429,9 +532,22 @@ impl PluginHost {
     /// Stop all plugin processes.
     pub async fn stop_all(&self) {
         let ids: Vec<String> = self.processes.read().keys().cloned().collect();
+        for id in &ids {
+            self.health.unregister(id);
+        }
         for id in ids {
             let _ = self.stop(&id).await;
         }
+    }
+
+    /// Get health info for a specific plugin.
+    pub fn get_health(&self, plugin_id: &str) -> Option<PluginHealth> {
+        self.health.get_health(plugin_id)
+    }
+
+    /// Get health info for all monitored plugins.
+    pub fn all_health(&self) -> Vec<PluginHealth> {
+        self.health.all_health()
     }
 
     /// List tools from a running plugin.
