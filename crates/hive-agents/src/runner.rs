@@ -16,6 +16,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -30,11 +31,20 @@ struct TaskError {
     http_status: Option<u16>,
     provider_id: Option<String>,
     model: Option<String>,
+    cancelled: bool,
 }
 
 impl From<LoopError> for TaskError {
     fn from(err: LoopError) -> Self {
         match err {
+            LoopError::Cancelled => Self {
+                message: "cancelled".to_string(),
+                error_code: None,
+                http_status: None,
+                provider_id: None,
+                model: None,
+                cancelled: true,
+            },
             LoopError::ModelExecution { message, error_code, http_status, provider_id, model } => {
                 Self {
                     message: format!("model execution failed: {message}"),
@@ -42,6 +52,7 @@ impl From<LoopError> for TaskError {
                     http_status,
                     provider_id,
                     model,
+                    cancelled: false,
                 }
             }
             other => Self {
@@ -50,6 +61,7 @@ impl From<LoopError> for TaskError {
                 http_status: None,
                 provider_id: None,
                 model: None,
+                cancelled: false,
             },
         }
     }
@@ -101,6 +113,9 @@ pub struct AgentHandle {
     pub permissions: Option<Arc<Mutex<SessionPermissions>>>,
     /// The final result produced by the agent when its task completed.
     pub final_result: Option<String>,
+    /// Token cancelled when the agent is killed, enabling cooperative
+    /// cancellation of in-flight model and tool calls.
+    pub cancellation_token: CancellationToken,
 }
 
 /// Runs a single agent as a Tokio task, processing messages from its inbox.
@@ -127,6 +142,8 @@ pub struct AgentRunner {
     pub knowledge_query_handler: Option<Arc<dyn KnowledgeQueryHandler>>,
     /// Accumulated multi-turn conversation history for keep_alive agents.
     conversation_history: Vec<CompletionMessage>,
+    /// Token cancelled externally to interrupt in-flight work.
+    cancellation_token: CancellationToken,
 }
 
 impl AgentRunner {
@@ -152,6 +169,7 @@ impl AgentRunner {
             conversation_journal: None,
             knowledge_query_handler: None,
             conversation_history: Vec::new(),
+            cancellation_token: CancellationToken::new(),
         }
     }
 
@@ -216,7 +234,14 @@ impl AgentRunner {
             conversation_journal: None,
             knowledge_query_handler: None,
             conversation_history: Vec::new(),
+            cancellation_token: CancellationToken::new(),
         }
+    }
+
+    /// Set the cancellation token for this runner. Called by the supervisor
+    /// after construction so the token is shared with the `AgentHandle`.
+    pub fn set_cancellation_token(&mut self, token: CancellationToken) {
+        self.cancellation_token = token;
     }
 
     pub async fn run(mut self) {
@@ -329,6 +354,23 @@ impl AgentRunner {
                                 });
                                 return;
                             }
+                        }
+                        Err(error) if error.cancelled => {
+                            messages_processed += 1;
+                            debug!(agent = %agent_id, "task cancelled");
+                            // Don't emit Failed — the Kill handler above (or
+                            // the next inbox read) will emit Done/Completed.
+                            // Just break out so the runner can process the Kill
+                            // signal from the inbox.
+                            self.emit(SupervisorEvent::AgentStatusChanged {
+                                agent_id: agent_id.clone(),
+                                status: AgentStatus::Done,
+                            });
+                            self.emit(SupervisorEvent::AgentCompleted {
+                                agent_id: agent_id.clone(),
+                                result: "Killed".to_string(),
+                            });
+                            return;
                         }
                         Err(error) => {
                             messages_processed += 1;
@@ -495,6 +537,7 @@ impl AgentRunner {
                 http_status: None,
                 provider_id: None,
                 model: None,
+                cancelled: false,
             })?;
         }
 
@@ -516,16 +559,28 @@ impl AgentRunner {
             }
         });
 
-        let result = executor
-            .run_with_events(
+        let cancellation_token = self.cancellation_token.clone();
+        let result = tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => {
+                Err(TaskError {
+                    message: "cancelled".to_string(),
+                    error_code: None,
+                    http_status: None,
+                    provider_id: None,
+                    model: None,
+                    cancelled: true,
+                })
+            }
+            result = executor.run_with_events(
                 loop_context,
                 model_router,
                 loop_event_tx,
                 Some(Arc::clone(&self.interaction_gate)),
-            )
-            .await
-            .map(|result| result.content)
-            .map_err(TaskError::from);
+            ) => {
+                result.map(|r| r.content).map_err(TaskError::from)
+            }
+        };
 
         let _ = forward_handle.await;
 
@@ -679,6 +734,7 @@ impl AgentRunner {
             },
             tool_limits: self.spec.tool_limits.clone().unwrap_or_default(),
             preempt_signal: None,
+            cancellation_token: Some(self.cancellation_token.clone()),
         }
     }
 

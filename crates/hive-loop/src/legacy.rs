@@ -23,6 +23,8 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
+use tokio_util::sync::CancellationToken;
+
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Metadata for a pending user interaction.
@@ -384,6 +386,10 @@ pub struct LoopContext {
     /// If `true`, the loop yields early so the next queued message
     /// can be processed at the current checkpoint.
     pub preempt_signal: Option<Arc<AtomicBool>>,
+    /// When set, the loop can be cooperatively cancelled (e.g. on agent kill).
+    /// Checked before model calls, between streaming chunks, and around tool
+    /// execution so that in-flight operations are interrupted promptly.
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 impl LoopContext {
@@ -787,6 +793,8 @@ pub enum LoopError {
     StallDetected { tool_name: String, count: usize },
     #[error("hard tool call ceiling reached ({ceiling})")]
     HardCeilingReached { ceiling: usize },
+    #[error("operation cancelled")]
+    Cancelled,
 }
 
 /// Tools that are exempt from the adaptive tool-call budget.
@@ -1012,9 +1020,22 @@ impl LoopStrategy for ReActStrategy {
                     let mut token_filter = StreamingToolCallFilter::new();
 
                     tokio::pin!(stream);
-                    while let Some(chunk_result) = stream.next().await {
+                    let stream_cancelled;
+                    loop {
+                        let chunk_result = if let Some(ref token) = context.cancellation_token {
+                            tokio::select! {
+                                biased;
+                                _ = token.cancelled() => {
+                                    stream_cancelled = true;
+                                    break;
+                                }
+                                chunk = stream.next() => chunk,
+                            }
+                        } else {
+                            stream.next().await
+                        };
                         match chunk_result {
-                            Ok(chunk) => {
+                            Some(Ok(chunk)) => {
                                 if !chunk.delta.is_empty() {
                                     // Always accumulate full content for parsing.
                                     content.push_str(&chunk.delta);
@@ -1029,8 +1050,15 @@ impl LoopStrategy for ReActStrategy {
                                     streamed_tool_calls.extend(chunk.tool_calls);
                                 }
                             }
-                            Err(e) => return Err(simple_model_error(format!("{:#}", e))),
+                            Some(Err(e)) => return Err(simple_model_error(format!("{:#}", e))),
+                            None => {
+                                stream_cancelled = false;
+                                break;
+                            }
                         }
+                    }
+                    if stream_cancelled {
+                        return Err(LoopError::Cancelled);
                     }
                     // Flush any remaining buffered text that wasn't part of a tag
                     let remaining = token_filter.flush();
@@ -1054,12 +1082,27 @@ impl LoopStrategy for ReActStrategy {
                     let router = Arc::clone(&model_router);
                     let decision_clone = decision.clone();
                     let request_clone = request.clone();
-                    tokio::task::spawn_blocking(move || {
+                    let blocking_future = tokio::task::spawn_blocking(move || {
                         router.complete_with_decision(&request_clone, &decision_clone)
-                    })
-                    .await
-                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-                    .map_err(model_router_error_to_loop_error)?
+                    });
+                    if let Some(ref token) = context.cancellation_token {
+                        tokio::select! {
+                            biased;
+                            _ = token.cancelled() => {
+                                return Err(LoopError::Cancelled);
+                            }
+                            result = blocking_future => {
+                                result
+                                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                                    .map_err(model_router_error_to_loop_error)?
+                            }
+                        }
+                    } else {
+                        blocking_future
+                            .await
+                            .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                            .map_err(model_router_error_to_loop_error)?
+                    }
                 };
 
                 let mut response = response;
@@ -1225,12 +1268,27 @@ impl LoopStrategy for SequentialStrategy {
             let router = Arc::clone(&model_router);
             let decision_clone = decision.clone();
             let request_clone = request.clone();
-            let response = tokio::task::spawn_blocking(move || {
+            let blocking_future = tokio::task::spawn_blocking(move || {
                 router.complete_with_decision(&request_clone, &decision_clone)
-            })
-            .await
-            .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-            .map_err(model_router_error_to_loop_error)?;
+            });
+            let response = if let Some(ref token) = context.cancellation_token {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        return Err(LoopError::Cancelled);
+                    }
+                    result = blocking_future => {
+                        result
+                            .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                            .map_err(model_router_error_to_loop_error)?
+                    }
+                }
+            } else {
+                blocking_future
+                    .await
+                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                    .map_err(model_router_error_to_loop_error)?
+            };
 
             let mut response = response;
             for hook in middleware {
@@ -1355,12 +1413,27 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                 let router = Arc::clone(&model_router);
                 let decision_clone = decision.clone();
                 let request_clone = plan_request.clone();
-                let plan_response = tokio::task::spawn_blocking(move || {
+                let blocking_future = tokio::task::spawn_blocking(move || {
                     router.complete_with_decision(&request_clone, &decision_clone)
-                })
-                .await
-                .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-                .map_err(model_router_error_to_loop_error)?;
+                });
+                let plan_response = if let Some(ref token) = context.cancellation_token {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            return Err(LoopError::Cancelled);
+                        }
+                        result = blocking_future => {
+                            result
+                                .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                                .map_err(model_router_error_to_loop_error)?
+                        }
+                    }
+                } else {
+                    blocking_future
+                        .await
+                        .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                        .map_err(model_router_error_to_loop_error)?
+                };
 
                 let mut plan_response = plan_response;
                 for hook in middleware {
@@ -1440,12 +1513,27 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                     let router = Arc::clone(&model_router);
                     let decision_clone = decision.clone();
                     let request_clone = request.clone();
-                    let response = tokio::task::spawn_blocking(move || {
+                    let blocking_future = tokio::task::spawn_blocking(move || {
                         router.complete_with_decision(&request_clone, &decision_clone)
-                    })
-                    .await
-                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-                    .map_err(model_router_error_to_loop_error)?;
+                    });
+                    let response = if let Some(ref token) = context.cancellation_token {
+                        tokio::select! {
+                            biased;
+                            _ = token.cancelled() => {
+                                return Err(LoopError::Cancelled);
+                            }
+                            result = blocking_future => {
+                                result
+                                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                                    .map_err(model_router_error_to_loop_error)?
+                            }
+                        }
+                    } else {
+                        blocking_future
+                            .await
+                            .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                            .map_err(model_router_error_to_loop_error)?
+                    };
 
                     let mut response = response;
                     for hook in middleware {
@@ -2226,9 +2314,23 @@ async fn execute_tool_call(
     // the true high-water mark of data the session has touched.
     tool.set_session_data_class(context.effective_data_class());
 
-    let result = tool.execute(call.input).await.map_err(|error| {
-        LoopError::ToolExecutionFailed { tool_id: call.tool_id.clone(), detail: error.to_string() }
-    })?;
+    let result = if let Some(ref token) = context.cancellation_token {
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => {
+                return Err(LoopError::Cancelled);
+            }
+            result = tool.execute(call.input) => {
+                result.map_err(|error| {
+                    LoopError::ToolExecutionFailed { tool_id: call.tool_id.clone(), detail: error.to_string() }
+                })?
+            }
+        }
+    } else {
+        tool.execute(call.input).await.map_err(|error| {
+            LoopError::ToolExecutionFailed { tool_id: call.tool_id.clone(), detail: error.to_string() }
+        })?
+    };
 
     // after_tool_result hooks handle classification resolution and
     // effective_data_class escalation (via DataClassificationMiddleware).
@@ -3257,6 +3359,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let spawn_result = execute_tool_call(
@@ -3366,6 +3469,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3430,6 +3534,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3494,6 +3599,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3553,6 +3659,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3624,6 +3731,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3688,6 +3796,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -3750,6 +3859,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         // The DataClassificationMiddleware resolves workspace classification
@@ -3846,6 +3956,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         // Classification middleware is needed for after_tool_result resolution.
@@ -4037,6 +4148,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let classification_mw: Arc<dyn LoopMiddleware> =
@@ -4265,6 +4377,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let classification_mw: Arc<dyn LoopMiddleware> =
@@ -4503,6 +4616,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         }
     }
 
@@ -4684,6 +4798,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let classification_mw: Arc<dyn LoopMiddleware> =
@@ -4847,6 +4962,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let classification_mw: Arc<dyn LoopMiddleware> =
@@ -5055,6 +5171,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: Some(signal),
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -5128,6 +5245,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -5192,6 +5310,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: Some(signal),
+            cancellation_token: None,
         };
 
         let result = executor.run(context, router).await.expect("loop result");
@@ -5450,6 +5569,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             preempt_signal: None,
+            cancellation_token: None,
         }
     }
 

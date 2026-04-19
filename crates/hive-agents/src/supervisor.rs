@@ -14,6 +14,7 @@ use hive_tools::ToolRegistry;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn, Instrument};
 
 use crate::error::AgentError;
@@ -388,6 +389,7 @@ impl AgentSupervisor {
         // Create channel upfront so we can atomically insert a placeholder.
         let (inbox_tx, inbox_rx) = mpsc::channel::<AgentMessage>(AGENT_INBOX_CAPACITY);
         let interaction_gate = Arc::new(UserInteractionGate::new());
+        let cancellation_token = CancellationToken::new();
 
         // Atomically claim the slot. If already taken, return error.
         // Using entry() prevents the TOCTOU race between contains_key and insert.
@@ -418,6 +420,7 @@ impl AgentSupervisor {
                         conversation_journal: None,
                         permissions: None,
                         final_result: None,
+                        cancellation_token: cancellation_token.clone(),
                     });
                 }
             }
@@ -474,6 +477,7 @@ impl AgentSupervisor {
 
             let conversation_journal = Arc::new(Mutex::new(ConversationJournal::default()));
             runner.conversation_journal = Some(Arc::clone(&conversation_journal));
+            runner.set_cancellation_token(cancellation_token.clone());
 
             if let Some(execution) = &self.execution {
                 runner.knowledge_query_handler = execution.knowledge_query_handler.clone();
@@ -687,8 +691,10 @@ impl AgentSupervisor {
             }
         }
 
-        // Close the interaction gate first to unblock any pending waits
+        // Close the interaction gate and cancel the token to interrupt
+        // in-flight model/tool calls before sending the Kill signal.
         if let Some(handle) = self.agents.get(agent_id) {
+            handle.cancellation_token.cancel();
             handle.interaction_gate.close();
         }
 
@@ -696,8 +702,10 @@ impl AgentSupervisor {
         if let Some((_, mut handle)) = self.agents.remove(agent_id) {
             let _ = handle.inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await;
             if let Some(task) = handle.task.take() {
+                let abort_handle = task.abort_handle();
                 if tokio::time::timeout(std::time::Duration::from_secs(5), task).await.is_err() {
-                    warn!(agent = %agent_id, "agent task did not shut down in time");
+                    warn!(agent = %agent_id, "agent task did not shut down in time, aborting");
+                    abort_handle.abort();
                 }
             }
         } else {
@@ -767,9 +775,10 @@ impl AgentSupervisor {
 
     /// Kill all agents.
     pub async fn kill_all(&self) -> Result<(), AgentError> {
-        // Close all interaction gates FIRST so agents blocked in ask_user
-        // or tool-approval waits are unblocked and can process the Kill.
+        // Cancel all tokens and close interaction gates FIRST so agents
+        // blocked in model/tool calls or approval waits are interrupted.
         for entry in self.agents.iter() {
+            entry.value().cancellation_token.cancel();
             entry.value().interaction_gate.close();
         }
 

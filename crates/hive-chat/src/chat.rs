@@ -2763,6 +2763,7 @@ impl ChatService {
             },
             tool_limits: (*self.tool_limits).clone(),
             preempt_signal: None,
+            cancellation_token: None,
         };
 
         match self.loop_executor.call_tool(&context, tool_id, input).await {
@@ -6227,6 +6228,7 @@ impl ChatService {
                 },
                 tool_limits: (*self.tool_limits).clone(),
                 preempt_signal: None, // Set below after reading session state.
+                cancellation_token: None,
             };
 
             let (
