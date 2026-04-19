@@ -675,8 +675,17 @@ impl AgentSupervisor {
     }
 
     /// Kill an agent, its descendants, and remove them from the map.
+    ///
+    /// **Race condition note:** The child snapshot (lines below) is racy with
+    /// concurrent `spawn_agent` calls.  A new child may be spawned between the
+    /// snapshot and the parent's removal from the DashMap.  This is mitigated at
+    /// the chat-service layer by [`ChatService::kill_session_agent`], which
+    /// snapshots descendants via [`get_descendant_ids`] *before* calling this
+    /// method and performs explicit KnowledgeGraph cleanup for all descendants
+    /// regardless of whether they were still in the map at kill time.
     pub async fn kill_agent(&self, agent_id: &str) -> Result<(), AgentError> {
-        // Collect child agents (those with parent_id == agent_id) for recursive kill
+        // Collect child agents (those with parent_id == agent_id) for recursive kill.
+        // NOTE: This snapshot is inherently racy — see doc comment above.
         let children: Vec<String> = self
             .agents
             .iter()
@@ -1497,5 +1506,99 @@ mod tests {
         assert_eq!(sup.agent_count(), 3);
         sup.kill_agent(&root).await.unwrap();
         assert_eq!(sup.agent_count(), 0, "kill_agent should remove target + descendants");
+    }
+
+    #[tokio::test]
+    async fn kill_agent_cancels_token() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Grab the token before killing
+        let token = {
+            let handle = sup.agents.get(&id).unwrap();
+            handle.cancellation_token.clone()
+        };
+        assert!(!token.is_cancelled(), "token should not be cancelled before kill");
+
+        sup.kill_agent(&id).await.unwrap();
+        assert!(token.is_cancelled(), "token should be cancelled after kill");
+    }
+
+    #[tokio::test]
+    async fn kill_agent_nonexistent_returns_error() {
+        let sup = test_supervisor();
+        let result = sup.kill_agent("no-such-agent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::AgentNotFound(id) => assert_eq!(id, "no-such-agent"),
+            other => panic!("expected AgentNotFound, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_all_cancels_all_tokens() {
+        let sup = test_supervisor();
+        let a1 = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+        let a2 = sup.spawn_agent(test_spec("a2"), None, None, None, None).await.unwrap();
+
+        let token1 = sup.agents.get(&a1).unwrap().cancellation_token.clone();
+        let token2 = sup.agents.get(&a2).unwrap().cancellation_token.clone();
+
+        let _ = sup.kill_all().await;
+
+        assert!(token1.is_cancelled(), "all tokens should be cancelled");
+        assert!(token2.is_cancelled(), "all tokens should be cancelled");
+        assert_eq!(sup.agent_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn kill_agent_cleans_up_event_history() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Verify the agent exists
+        assert!(sup.agents.contains_key(&id));
+
+        sup.kill_agent(&id).await.unwrap();
+
+        // Event history should be cleaned up
+        assert!(sup.event_history.get(&id).is_none());
+        assert!(!sup.agents.contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn get_descendant_ids_returns_self_for_nonexistent() {
+        let sup = test_supervisor();
+        // Current behavior: pushes the initial ID unconditionally (no existence check)
+        let ids = sup.get_descendant_ids("nonexistent");
+        assert_eq!(ids, vec!["nonexistent".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn kill_agent_closes_interaction_gate() {
+        let sup = test_supervisor();
+        let id = sup.spawn_agent(test_spec("a1"), None, None, None, None).await.unwrap();
+
+        // Create a pending interaction request on the gate
+        let rx = {
+            let handle = sup.agents.get(&id).unwrap();
+            handle.interaction_gate.create_request(
+                "q-1".to_string(),
+                hive_contracts::InteractionKind::Question {
+                    text: "waiting?".into(),
+                    choices: vec![],
+                    allow_freeform: true,
+                    multi_select: false,
+                    message: None,
+                },
+            )
+        };
+
+        sup.kill_agent(&id).await.unwrap();
+
+        // The receiver should resolve immediately (gate closed → sender dropped)
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), rx).await;
+        assert!(result.is_ok(), "receiver should not timeout — gate was closed");
+        assert!(result.unwrap().is_err(), "should get RecvError when gate is closed");
     }
 }

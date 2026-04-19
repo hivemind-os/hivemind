@@ -5970,4 +5970,192 @@ Let me know if you need anything else."#;
         assert!(gate.list_pending().is_empty());
         handle.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn execute_tool_call_cancelled_by_token() {
+        // A tool that sleeps forever — cancellation should interrupt it
+        struct SlowTool {
+            def: ToolDefinition,
+        }
+        impl Tool for SlowTool {
+            fn definition(&self) -> &ToolDefinition {
+                &self.def
+            }
+            fn execute(
+                &self,
+                _input: serde_json::Value,
+            ) -> hive_tools::BoxFuture<'_, Result<hive_tools::ToolResult, hive_tools::ToolError>>
+            {
+                Box::pin(async {
+                    // Sleep indefinitely — only cancellation can stop us
+                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                    Ok(hive_tools::ToolResult {
+                        output: json!({"done": true}),
+                        data_class: DataClass::Internal,
+                    })
+                })
+            }
+        }
+
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Arc::new(SlowTool {
+                def: ToolDefinition {
+                    id: "test.slow".to_string(),
+                    name: "slow_tool".to_string(),
+                    description: "a slow tool".to_string(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: None,
+                    channel_class: ChannelClass::Internal,
+                    side_effects: false,
+                    approval: ToolApproval::Auto,
+                    annotations: ToolAnnotations {
+                        title: "slow".to_string(),
+                        read_only_hint: Some(true),
+                        destructive_hint: Some(false),
+                        idempotent_hint: Some(true),
+                        open_world_hint: Some(false),
+                    },
+                },
+            }))
+            .unwrap();
+
+        let token = tokio_util::sync::CancellationToken::new();
+        let context = LoopContext {
+            conversation: ConversationContext {
+                session_id: "cancel-test".to_string(),
+                message_id: "msg-cancel".to_string(),
+                prompt: "test".to_string(),
+                prompt_content_parts: vec![],
+                history: vec![],
+                conversation_journal: None,
+                initial_tool_iterations: 0,
+            },
+            routing: RoutingConfig {
+                required_capabilities: BTreeSet::new(),
+                preferred_models: None,
+                loop_strategy: None,
+                routing_decision: None,
+            },
+            security: SecurityContext {
+                data_class: DataClass::Internal,
+                permissions: Arc::new(parking_lot::Mutex::new(SessionPermissions::new())),
+                workspace_classification: None,
+                effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
+                connector_service: None,
+            },
+            tools_ctx: ToolsContext {
+                tools: Arc::new(registry),
+                skill_catalog: None,
+                knowledge_query_handler: None,
+                tool_execution_mode: ToolExecutionMode::default(),
+            },
+            agent: AgentContext {
+                persona: None,
+                agent_orchestrator: None,
+                personas: vec![],
+                current_agent_id: None,
+                parent_agent_id: None,
+                workspace_path: None,
+                keep_alive: false,
+                session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+            tool_limits: ToolLimitsConfig::default(),
+            preempt_signal: None,
+            cancellation_token: Some(token.clone()),
+        };
+
+        // Cancel after a short delay
+        let token_clone = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            token_clone.cancel();
+        });
+
+        let result = execute_tool_call(
+            &context,
+            ToolCall {
+                tool_id: "test.slow".to_string(),
+                input: json!({}),
+            },
+            &[],
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            LoopError::Cancelled => {} // expected
+            other => panic!("expected LoopError::Cancelled, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_without_token_runs_normally() {
+        // Verify tool execution works normally when no cancellation token is set
+        let context = LoopContext {
+            conversation: ConversationContext {
+                session_id: "no-cancel-test".to_string(),
+                message_id: "msg-no-cancel".to_string(),
+                prompt: "test".to_string(),
+                prompt_content_parts: vec![],
+                history: vec![],
+                conversation_journal: None,
+                initial_tool_iterations: 0,
+            },
+            routing: RoutingConfig {
+                required_capabilities: BTreeSet::new(),
+                preferred_models: None,
+                loop_strategy: None,
+                routing_decision: None,
+            },
+            security: SecurityContext {
+                data_class: DataClass::Internal,
+                permissions: Arc::new(parking_lot::Mutex::new(SessionPermissions::new())),
+                workspace_classification: None,
+                effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
+                connector_service: None,
+            },
+            tools_ctx: ToolsContext {
+                tools: Arc::new({
+                    let mut r = ToolRegistry::new();
+                    r.register(Arc::new(CalculatorTool::default())).unwrap();
+                    r
+                }),
+                skill_catalog: None,
+                knowledge_query_handler: None,
+                tool_execution_mode: ToolExecutionMode::default(),
+            },
+            agent: AgentContext {
+                persona: None,
+                agent_orchestrator: None,
+                personas: vec![],
+                current_agent_id: None,
+                parent_agent_id: None,
+                workspace_path: None,
+                keep_alive: false,
+                session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+            tool_limits: ToolLimitsConfig::default(),
+            preempt_signal: None,
+            cancellation_token: None,
+        };
+
+        let result = execute_tool_call(
+            &context,
+            ToolCall {
+                tool_id: "math.calculate".to_string(),
+                input: json!({"expression": "2 + 2"}),
+            },
+            &[],
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "tool should execute normally without cancellation token");
+    }
 }

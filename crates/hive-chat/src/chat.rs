@@ -11387,4 +11387,83 @@ mod tests {
         // Removing again should be a no-op (no matching node), not an error.
         svc.bot_service.remove_persisted_bot("bot-remove-1").await.unwrap();
     }
+
+    #[tokio::test]
+    async fn delete_session_removes_from_active_map() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path);
+
+        let session = service
+            .create_session(SessionModality::Linear, Some("Deletable".to_string()), None)
+            .await
+            .expect("create session");
+
+        // Session should be listed
+        let sessions = service.list_sessions().await;
+        assert!(sessions.iter().any(|s| s.id == session.id));
+
+        // Delete
+        service.delete_session(&session.id, false).await.expect("delete session");
+
+        // Session should no longer be listed
+        let sessions_after = service.list_sessions().await;
+        assert!(!sessions_after.iter().any(|s| s.id == session.id));
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_session_returns_error() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path);
+
+        let result = service.delete_session("no-such-session", false).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn restore_sessions_skips_corrupt_agent_data() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+
+        // Seed the KG with a session node and a corrupt agent node
+        {
+            let graph = KnowledgeGraph::open(&graph_path).expect("open KG");
+            let session_id = graph
+                .insert_node(&hive_knowledge::NewNode {
+                    node_type: "chat_session".to_string(),
+                    name: "session-corrupt-test".to_string(),
+                    data_class: DataClass::Internal,
+                    content: Some(
+                        serde_json::json!({
+                            "session_id": "session-corrupt-test",
+                            "title": "Test Corrupt",
+                            "modality": "Linear",
+                            "persona_id": "system/general",
+                        })
+                        .to_string(),
+                    ),
+                })
+                .expect("insert session node");
+
+            // Insert a corrupt agent node (invalid JSON)
+            let agent_node_id = graph
+                .insert_node(&hive_knowledge::NewNode {
+                    node_type: "session_agent".to_string(),
+                    name: "agent-corrupt-1".to_string(),
+                    data_class: DataClass::Internal,
+                    content: Some("THIS IS NOT VALID JSON{{{{".to_string()),
+                })
+                .expect("insert corrupt agent node");
+
+            graph
+                .insert_edge(session_id, agent_node_id, "session_agent", 1.0)
+                .expect("insert edge");
+        }
+
+        // Restore should succeed — corrupt agent is skipped, not fatal
+        let service = test_chat_service(graph_path);
+        let result = service.restore_sessions().await;
+        assert!(result.is_ok(), "restore should not fail on corrupt agent data");
+    }
 }
