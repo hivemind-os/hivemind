@@ -3291,7 +3291,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hive-agent-kit"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3328,13 +3328,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "hive-api"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3389,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "hive-canvas"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "hive-contracts",
  "parking_lot",
@@ -3405,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "hive-chat"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3454,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "hive-classification"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "regex",
  "serde",
@@ -3462,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "hive-cli"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "clap",
@@ -3474,7 +3475,7 @@ dependencies = [
 
 [[package]]
 name = "hive-connectors"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3544,7 +3545,7 @@ dependencies = [
 
 [[package]]
 name = "hive-contracts"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3557,7 +3558,7 @@ dependencies = [
 
 [[package]]
 name = "hive-core"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3583,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "hive-daemon"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "axum",
@@ -3602,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "hive-inference"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -3630,7 +3631,7 @@ dependencies = [
 
 [[package]]
 name = "hive-iwork"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "snap",
@@ -3641,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "hive-knowledge"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "hive-classification",
@@ -3654,7 +3655,7 @@ dependencies = [
 
 [[package]]
 name = "hive-local-models"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3673,7 +3674,7 @@ dependencies = [
 
 [[package]]
 name = "hive-loop"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3699,13 +3700,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "hive-mcp"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "futures",
@@ -3732,7 +3734,7 @@ dependencies = [
 
 [[package]]
 name = "hive-model"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3754,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "hive-node-env"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "flate2",
  "lzma-sys",
@@ -3771,7 +3773,7 @@ dependencies = [
 
 [[package]]
 name = "hive-process"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "dashmap",
  "hive-sandbox",
@@ -3787,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "hive-python-env"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "flate2",
  "reqwest 0.12.28",
@@ -3803,7 +3805,7 @@ dependencies = [
 
 [[package]]
 name = "hive-risk"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "arc-swap",
  "futures-util",
@@ -3823,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "hive-runtime-worker"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "clap",
  "hive-core",
@@ -3835,7 +3837,7 @@ dependencies = [
 
 [[package]]
 name = "hive-sandbox"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "serde",
  "tempfile",
@@ -3845,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "hive-scheduler"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3867,7 +3869,7 @@ dependencies = [
 
 [[package]]
 name = "hive-skills"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3889,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "hive-skills-service"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "arc-swap",
  "hive-contracts",
@@ -3905,7 +3907,7 @@ dependencies = [
 
 [[package]]
 name = "hive-test-utils"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3930,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "hive-tools"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3962,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "hive-web-search"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "async-trait",
  "ego-tree",
@@ -3981,7 +3983,7 @@ dependencies = [
 
 [[package]]
 name = "hive-workflow"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4000,7 +4002,7 @@ dependencies = [
 
 [[package]]
 name = "hive-workflow-service"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4030,7 +4032,7 @@ dependencies = [
 
 [[package]]
 name = "hive-workspace-index"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "glob",
@@ -4053,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "hivemind-desktop"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

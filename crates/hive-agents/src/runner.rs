@@ -16,6 +16,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -30,11 +31,20 @@ struct TaskError {
     http_status: Option<u16>,
     provider_id: Option<String>,
     model: Option<String>,
+    cancelled: bool,
 }
 
 impl From<LoopError> for TaskError {
     fn from(err: LoopError) -> Self {
         match err {
+            LoopError::Cancelled => Self {
+                message: "cancelled".to_string(),
+                error_code: None,
+                http_status: None,
+                provider_id: None,
+                model: None,
+                cancelled: true,
+            },
             LoopError::ModelExecution { message, error_code, http_status, provider_id, model } => {
                 Self {
                     message: format!("model execution failed: {message}"),
@@ -42,6 +52,7 @@ impl From<LoopError> for TaskError {
                     http_status,
                     provider_id,
                     model,
+                    cancelled: false,
                 }
             }
             other => Self {
@@ -50,6 +61,7 @@ impl From<LoopError> for TaskError {
                 http_status: None,
                 provider_id: None,
                 model: None,
+                cancelled: false,
             },
         }
     }
@@ -101,6 +113,9 @@ pub struct AgentHandle {
     pub permissions: Option<Arc<Mutex<SessionPermissions>>>,
     /// The final result produced by the agent when its task completed.
     pub final_result: Option<String>,
+    /// Token cancelled when the agent is killed, enabling cooperative
+    /// cancellation of in-flight model and tool calls.
+    pub cancellation_token: CancellationToken,
 }
 
 /// Runs a single agent as a Tokio task, processing messages from its inbox.
@@ -127,6 +142,8 @@ pub struct AgentRunner {
     pub knowledge_query_handler: Option<Arc<dyn KnowledgeQueryHandler>>,
     /// Accumulated multi-turn conversation history for keep_alive agents.
     conversation_history: Vec<CompletionMessage>,
+    /// Token cancelled externally to interrupt in-flight work.
+    cancellation_token: CancellationToken,
 }
 
 impl AgentRunner {
@@ -152,6 +169,7 @@ impl AgentRunner {
             conversation_journal: None,
             knowledge_query_handler: None,
             conversation_history: Vec::new(),
+            cancellation_token: CancellationToken::new(),
         }
     }
 
@@ -216,7 +234,14 @@ impl AgentRunner {
             conversation_journal: None,
             knowledge_query_handler: None,
             conversation_history: Vec::new(),
+            cancellation_token: CancellationToken::new(),
         }
+    }
+
+    /// Set the cancellation token for this runner. Called by the supervisor
+    /// after construction so the token is shared with the `AgentHandle`.
+    pub fn set_cancellation_token(&mut self, token: CancellationToken) {
+        self.cancellation_token = token;
     }
 
     pub async fn run(mut self) {
@@ -329,6 +354,23 @@ impl AgentRunner {
                                 });
                                 return;
                             }
+                        }
+                        Err(error) if error.cancelled => {
+                            messages_processed += 1;
+                            debug!(agent = %agent_id, "task cancelled");
+                            // Don't emit Failed — the Kill handler above (or
+                            // the next inbox read) will emit Done/Completed.
+                            // Just break out so the runner can process the Kill
+                            // signal from the inbox.
+                            self.emit(SupervisorEvent::AgentStatusChanged {
+                                agent_id: agent_id.clone(),
+                                status: AgentStatus::Done,
+                            });
+                            self.emit(SupervisorEvent::AgentCompleted {
+                                agent_id: agent_id.clone(),
+                                result: "Killed".to_string(),
+                            });
+                            return;
                         }
                         Err(error) => {
                             messages_processed += 1;
@@ -495,6 +537,7 @@ impl AgentRunner {
                 http_status: None,
                 provider_id: None,
                 model: None,
+                cancelled: false,
             })?;
         }
 
@@ -516,16 +559,28 @@ impl AgentRunner {
             }
         });
 
-        let result = executor
-            .run_with_events(
+        let cancellation_token = self.cancellation_token.clone();
+        let result = tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => {
+                Err(TaskError {
+                    message: "cancelled".to_string(),
+                    error_code: None,
+                    http_status: None,
+                    provider_id: None,
+                    model: None,
+                    cancelled: true,
+                })
+            }
+            result = executor.run_with_events(
                 loop_context,
                 model_router,
                 loop_event_tx,
                 Some(Arc::clone(&self.interaction_gate)),
-            )
-            .await
-            .map(|result| result.content)
-            .map_err(TaskError::from);
+            ) => {
+                result.map(|r| r.content).map_err(TaskError::from)
+            }
+        };
 
         let _ = forward_handle.await;
 
@@ -679,6 +734,7 @@ impl AgentRunner {
             },
             tool_limits: self.spec.tool_limits.clone().unwrap_or_default(),
             preempt_signal: None,
+            cancellation_token: Some(self.cancellation_token.clone()),
         }
     }
 
@@ -1130,5 +1186,166 @@ mod tests {
             Some(vec!["gpt-5.*".to_string(), "claude-*".to_string(), "local:llama-*".to_string(),])
         );
         assert!(!spec.keep_alive, "OneShot should set keep_alive=false");
+    }
+
+    #[tokio::test]
+    async fn set_cancellation_token_replaces_default() {
+        let (_inbox_tx, inbox_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(8);
+        let mut runner = AgentRunner::new(
+            AgentSpec {
+                id: "agent-1".to_string(),
+                name: "Agent 1".to_string(),
+                friendly_name: "test_agent".to_string(),
+                description: String::new(),
+                role: AgentRole::Researcher,
+                model: None,
+                preferred_models: None,
+                loop_strategy: None,
+                tool_execution_mode: None,
+                system_prompt: String::new(),
+                allowed_tools: vec![],
+                avatar: None,
+                color: None,
+                data_class: hive_classification::DataClass::Public,
+                keep_alive: false,
+                idle_timeout_secs: None,
+                tool_limits: None,
+                persona_id: None,
+                workflow_managed: false,
+            },
+            inbox_rx,
+            event_tx,
+        );
+
+        // Default token should not be cancelled
+        assert!(!runner.cancellation_token.is_cancelled());
+
+        // Replace with a pre-cancelled token
+        let external_token = CancellationToken::new();
+        external_token.cancel();
+        runner.set_cancellation_token(external_token.clone());
+
+        assert!(runner.cancellation_token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn runner_kill_signal_emits_done_status() {
+        let (inbox_tx, inbox_rx) = mpsc::channel(8);
+        let (event_tx, mut event_rx) = broadcast::channel(32);
+        let runner = AgentRunner::new(
+            AgentSpec {
+                id: "test-runner".to_string(),
+                name: "Test Runner".to_string(),
+                friendly_name: "test_runner".to_string(),
+                description: String::new(),
+                role: AgentRole::Researcher,
+                model: None,
+                preferred_models: None,
+                loop_strategy: None,
+                tool_execution_mode: None,
+                system_prompt: String::new(),
+                allowed_tools: vec![],
+                avatar: None,
+                color: None,
+                data_class: hive_classification::DataClass::Public,
+                keep_alive: false,
+                idle_timeout_secs: None,
+                tool_limits: None,
+                persona_id: None,
+                workflow_managed: false,
+            },
+            inbox_rx,
+            event_tx,
+        );
+
+        let handle = tokio::spawn(runner.run());
+
+        // Send Kill signal
+        inbox_tx
+            .send(AgentMessage::Control(ControlSignal::Kill))
+            .await
+            .unwrap();
+
+        // Runner should complete
+        tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("runner should exit promptly on Kill")
+            .unwrap();
+
+        // Should have received Waiting (initial) and Done status events
+        let mut got_done = false;
+        while let Ok(event) = event_rx.try_recv() {
+            if let SupervisorEvent::AgentStatusChanged { status: AgentStatus::Done, .. } = event {
+                got_done = true;
+            }
+        }
+        assert!(got_done, "should emit Done status on Kill");
+    }
+
+    #[tokio::test]
+    async fn runner_pre_cancelled_token_exits_on_next_task() {
+        // Without a real executor, execute_task returns a placeholder result
+        // immediately (token select is never reached). The runner will emit
+        // AgentCompleted with the placeholder and exit (keep_alive=false).
+        // This verifies the runner doesn't hang when the token is pre-cancelled.
+        let (inbox_tx, inbox_rx) = mpsc::channel(8);
+        let (event_tx, mut event_rx) = broadcast::channel(32);
+
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let mut runner = AgentRunner::new(
+            AgentSpec {
+                id: "precancel-agent".to_string(),
+                name: "Pre Cancel".to_string(),
+                friendly_name: "precancel".to_string(),
+                description: String::new(),
+                role: AgentRole::Researcher,
+                model: None,
+                preferred_models: None,
+                loop_strategy: None,
+                tool_execution_mode: None,
+                system_prompt: String::new(),
+                allowed_tools: vec![],
+                avatar: None,
+                color: None,
+                data_class: hive_classification::DataClass::Public,
+                keep_alive: false,
+                idle_timeout_secs: None,
+                tool_limits: None,
+                persona_id: None,
+                workflow_managed: false,
+            },
+            inbox_rx,
+            event_tx,
+        );
+        runner.set_cancellation_token(token);
+
+        let handle = tokio::spawn(runner.run());
+
+        // Send a task — without executor, returns placeholder immediately
+        inbox_tx
+            .send(AgentMessage::Task {
+                content: "do something".to_string(),
+                from: None,
+            })
+            .await
+            .unwrap();
+
+        // Runner should complete quickly (no executor → placeholder → Done)
+        tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("runner should exit promptly")
+            .unwrap();
+
+        // Check for AgentCompleted event (placeholder result, not "Killed" since no executor)
+        let mut got_completed = false;
+        while let Ok(event) = event_rx.try_recv() {
+            if let SupervisorEvent::AgentCompleted { .. } = event {
+                got_completed = true;
+            }
+        }
+        assert!(got_completed, "should produce AgentCompleted event");
     }
 }

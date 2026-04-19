@@ -123,6 +123,7 @@ pub async fn build_workflow_context(
                         AgentStatus::Waiting => "⏳",
                         AgentStatus::Paused => "⏸️",
                         AgentStatus::Blocked => "🚫",
+                        AgentStatus::Terminating => "💀",
                         AgentStatus::Done => "✅",
                         AgentStatus::Error => "❌",
                         AgentStatus::Spawning => "🔄",

@@ -111,6 +111,7 @@ pub enum AgentStatus {
     Waiting,
     Paused,
     Blocked,
+    Terminating,
     Done,
     Error,
 }
