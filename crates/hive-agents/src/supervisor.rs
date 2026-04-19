@@ -394,6 +394,18 @@ impl AgentSupervisor {
         // Atomically claim the slot. If already taken, return error.
         // Using entry() prevents the TOCTOU race between contains_key and insert.
         {
+            // Reject if parent is terminating (being killed). This prevents
+            // orphaned children from being spawned during a kill cascade.
+            if let Some(ref pid) = parent_id {
+                if let Some(handle) = self.agents.get(pid) {
+                    if handle.status == AgentStatus::Terminating {
+                        return Err(AgentError::TopologyError(format!(
+                            "parent agent '{pid}' is terminating"
+                        )));
+                    }
+                }
+            }
+
             use dashmap::mapref::entry::Entry;
             match self.agents.entry(id.clone()) {
                 Entry::Occupied(_) => return Err(AgentError::AlreadyExists(id)),
@@ -676,16 +688,21 @@ impl AgentSupervisor {
 
     /// Kill an agent, its descendants, and remove them from the map.
     ///
-    /// **Race condition note:** The child snapshot (lines below) is racy with
-    /// concurrent `spawn_agent` calls.  A new child may be spawned between the
-    /// snapshot and the parent's removal from the DashMap.  This is mitigated at
-    /// the chat-service layer by [`ChatService::kill_session_agent`], which
-    /// snapshots descendants via [`get_descendant_ids`] *before* calling this
-    /// method and performs explicit KnowledgeGraph cleanup for all descendants
-    /// regardless of whether they were still in the map at kill time.
+    /// Marks the target and all descendants as `Terminating` before starting
+    /// the recursive kill cascade. This prevents `spawn_agent` from inserting
+    /// new children under any agent in the subtree while the kill is in
+    /// progress.
     pub async fn kill_agent(&self, agent_id: &str) -> Result<(), AgentError> {
+        // Mark the entire subtree as Terminating so concurrent spawn_agent
+        // calls will reject children under any of these agents.
+        let descendant_ids = self.get_descendant_ids(agent_id);
+        for id in &descendant_ids {
+            if let Some(mut handle) = self.agents.get_mut(id) {
+                handle.status = AgentStatus::Terminating;
+            }
+        }
+
         // Collect child agents (those with parent_id == agent_id) for recursive kill.
-        // NOTE: This snapshot is inherently racy — see doc comment above.
         let children: Vec<String> = self
             .agents
             .iter()
@@ -1600,5 +1617,50 @@ mod tests {
         let result = tokio::time::timeout(std::time::Duration::from_millis(100), rx).await;
         assert!(result.is_ok(), "receiver should not timeout — gate was closed");
         assert!(result.unwrap().is_err(), "should get RecvError when gate is closed");
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_terminating_parent() {
+        let sup = test_supervisor();
+        let parent = sup.spawn_agent(test_spec("parent"), None, None, None, None).await.unwrap();
+
+        // Manually set parent to Terminating (simulates kill in progress)
+        sup.agents.get_mut(&parent).unwrap().status = AgentStatus::Terminating;
+
+        let result = sup
+            .spawn_agent(test_spec("child"), Some(parent.clone()), None, None, None)
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::TopologyError(msg) => {
+                assert!(msg.contains("terminating"), "error should mention terminating: {msg}");
+            }
+            other => panic!("expected TopologyError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_agent_marks_descendants_terminating() {
+        let sup = test_supervisor();
+        let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
+        let child = sup
+            .spawn_agent(test_spec("child"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let gc = sup
+            .spawn_agent(test_spec("gc"), Some(child.clone()), None, None, None)
+            .await
+            .unwrap();
+
+        // Verify all start as Spawning
+        assert_eq!(sup.agents.get(&root).unwrap().status, AgentStatus::Spawning);
+        assert_eq!(sup.agents.get(&child).unwrap().status, AgentStatus::Spawning);
+        assert_eq!(sup.agents.get(&gc).unwrap().status, AgentStatus::Spawning);
+
+        // After killing root, all should be removed (can't check Terminating
+        // mid-kill since it's recursive and synchronous, but we can verify
+        // the full tree was cleaned up)
+        sup.kill_agent(&root).await.unwrap();
+        assert_eq!(sup.agent_count(), 0);
     }
 }

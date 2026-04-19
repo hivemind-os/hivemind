@@ -3889,6 +3889,7 @@ impl ChatService {
                                     AgentStatus::Waiting => "waiting",
                                     AgentStatus::Paused => "paused",
                                     AgentStatus::Blocked => "blocked",
+                                    AgentStatus::Terminating => "terminating",
                                     AgentStatus::Done => "done",
                                     AgentStatus::Error => "error",
                                 };
