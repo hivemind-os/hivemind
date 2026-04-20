@@ -2516,8 +2516,18 @@ const App = () => {
       } catch (error) {
         const msg = String(error);
         if (!isTauriInternalError(error)) {
-          if (msg.includes('401') && msg.toLowerCase().includes('unauthorized')) {
-            setErrorMessage('Unable to authenticate with the daemon. Please restart the application.');
+          if (msg.includes('401')) {
+            // Token mismatch — daemon may have just restarted with a new
+            // token.  The blocking helpers already invalidated the cache,
+            // so wait briefly and retry with a fresh keyring read.
+            await new Promise((r) => setTimeout(r, 1000));
+            try {
+              await refreshAll();
+            } catch (retryErr) {
+              if (!isTauriInternalError(retryErr)) {
+                setErrorMessage(String(retryErr));
+              }
+            }
           } else {
             setErrorMessage(msg);
           }

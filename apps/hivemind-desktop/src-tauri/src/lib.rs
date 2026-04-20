@@ -2882,33 +2882,33 @@ fn client() -> Result<Client, String> {
 // ── Daemon auth token cache ─────────────────────────────────────────
 //
 // The daemon generates a fresh auth token on every start and persists
-// it to both the OS keyring and a fallback file (<run_dir>/daemon.token).
-// We cache it here so that we don't hit the keyring on every HTTP
-// request.  When the daemon restarts (new token), requests return 401;
-// we then invalidate the cache, re-read the keyring/file, and retry.
+// it to the OS keyring.  We cache it here so that we don't hit the
+// keyring on every HTTP request.  When the daemon restarts (new token),
+// requests return 401; we then invalidate the cache, re-read the
+// keyring, and retry once.
 
 static DAEMON_TOKEN: std::sync::LazyLock<Mutex<Option<String>>> =
     std::sync::LazyLock::new(|| Mutex::new(None));
 
-/// Return the cached daemon auth token, reading from the OS keyring
-/// (with file fallback) on first call or after invalidation.
+/// Return the cached daemon auth token, reading from the OS keyring on
+/// first call (or after invalidation).
 fn get_daemon_token() -> Option<String> {
     let mut guard = DAEMON_TOKEN.lock().unwrap();
     if guard.is_none() {
-        // load_direct() tries the OS keyring first, then falls back to
-        // the daemon.token file.  This ensures authentication survives
-        // keyring failures.
+        // Use load_direct() to read only the daemon:auth-token entry
+        // instead of loading all secrets from the keyring.  This avoids
+        // triggering keychain permission prompts for every stored secret.
         *guard = hive_core::daemon_token::load_direct();
         if guard.is_none() {
-            tracing::warn!("unable to load daemon auth token from keyring or file");
+            tracing::warn!("unable to load daemon auth token from OS keyring");
         }
     }
     guard.clone()
 }
 
 /// Clear the cached token so the next `get_daemon_token` call re-reads
-/// from the OS keyring / token file.  Called when we receive a 401 from
-/// the daemon (likely means the daemon restarted with a new token).
+/// from the OS keyring.  Called when we receive a 401 from the daemon
+/// (likely means the daemon restarted with a new token).
 fn invalidate_daemon_token() {
     let mut guard = DAEMON_TOKEN.lock().unwrap();
     *guard = None;
