@@ -2514,8 +2514,13 @@ const App = () => {
         }
         await checkFirstRun();
       } catch (error) {
+        const msg = String(error);
         if (!isTauriInternalError(error)) {
-          setErrorMessage(String(error));
+          if (msg.includes('401') && msg.toLowerCase().includes('unauthorized')) {
+            setErrorMessage('Unable to authenticate with the daemon. Please restart the application.');
+          } else {
+            setErrorMessage(msg);
+          }
         }
       } finally {
         setInitializing(false);
