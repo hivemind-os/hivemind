@@ -2007,10 +2007,17 @@ async fn mcp_registry_search(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn tools_list() -> Result<Vec<ToolDefinition>, String> {
+async fn tools_list(persona_id: Option<String>) -> Result<Vec<ToolDefinition>, String> {
     let base_url = daemon_url(None).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        blocking_get_json::<Vec<ToolDefinition>>(&base_url, "/api/v1/tools")
+        let path = match persona_id {
+            Some(ref pid) => format!(
+                "/api/v1/tools?persona_id={}",
+                urlencoding::encode(pid)
+            ),
+            None => "/api/v1/tools".to_string(),
+        };
+        blocking_get_json::<Vec<ToolDefinition>>(&base_url, &path)
     })
     .await
     .map_err(|error| error.to_string())?

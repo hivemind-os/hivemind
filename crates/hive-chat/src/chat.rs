@@ -1998,7 +1998,7 @@ impl ChatService {
         };
 
         let session_mcp_manager = {
-            let persona_mcp_configs = self.mcp_configs_for_persona(persona_id.as_deref());
+            let persona_mcp_configs = self.mcp_configs_for_persona(persona_id.as_deref().unwrap_or("system/general"));
             if let Some(mgr) =
                 self.build_session_mcp_from_configs(session_id.clone(), &persona_mcp_configs)
             {
@@ -2293,7 +2293,7 @@ impl ChatService {
 
             let restored_session_mcp = {
                 let persona_mcp_configs =
-                    self.mcp_configs_for_persona(restored.last_persona_id.as_deref());
+                    self.mcp_configs_for_persona(restored.last_persona_id.as_deref().unwrap_or("system/general"));
                 if let Some(mgr) = self.build_session_mcp_from_configs(
                     restored.session_id.clone(),
                     &persona_mcp_configs,
@@ -3606,7 +3606,7 @@ impl ChatService {
         for (session_id, record) in sessions.iter() {
             if let Some(ref smcp) = record.session_mcp {
                 let persona_configs =
-                    self.mcp_configs_for_persona(record.active_persona_id.as_deref());
+                    self.mcp_configs_for_persona(record.active_persona_id.as_deref().unwrap_or("system/general"));
                 smcp.update_servers(&persona_configs).await;
                 tracing::debug!(
                     session_id = %session_id,
@@ -3624,11 +3624,10 @@ impl ChatService {
     /// servers plus that persona's MCP servers.  If `None`, falls back to
     /// Returns MCP server configs for the given persona. If no persona is
     /// specified, returns servers from all personas (for legacy sessions).
-    fn mcp_configs_for_persona(&self, persona_id: Option<&str>) -> Vec<hive_core::McpServerConfig> {
-        let id = persona_id.unwrap_or("system/general");
+    pub fn mcp_configs_for_persona(&self, persona_id: &str) -> Vec<hive_core::McpServerConfig> {
         let personas = self.personas.lock();
 
-        let persona = personas.iter().find(|p| p.id == id);
+        let persona = personas.iter().find(|p| p.id == persona_id);
         match persona {
             Some(p) => {
                 let mut seen_keys = std::collections::HashSet::new();
@@ -3649,7 +3648,7 @@ impl ChatService {
         persona_id: &str,
     ) -> Result<ChatSessionSnapshot, ChatServiceError> {
         // Compute per-persona MCP configs before acquiring write lock.
-        let persona_mcp_configs = self.mcp_configs_for_persona(Some(persona_id));
+        let persona_mcp_configs = self.mcp_configs_for_persona(persona_id);
 
         let persona = {
             let personas = self.personas.lock();

@@ -832,6 +832,14 @@ const App = () => {
     }
   });
 
+  // Reload persona-scoped tools and skills when the active persona changes.
+  createEffect(() => {
+    const pid = selectedAgentId();
+    if (!daemonOnline()) return;
+    void loadTools(pid);
+    void loadInstalledSkills();
+  });
+
   const availableModels= createMemo(() => {
     const router = modelRouter();
     if (!router) return [];
@@ -971,12 +979,13 @@ const App = () => {
     setMcpPrompts(promptsResult.status === 'fulfilled' ? promptsResult.value : []);
   };
 
-  const loadTools = async () => {
+  const loadTools = async (personaId?: string) => {
     if (!daemonOnline()) {
       setTools([]);
       return;
     }
-    setTools(await invoke<ToolDefinition[]>('tools_list'));
+    const pid = personaId ?? selectedAgentId();
+    setTools(await invoke<ToolDefinition[]>('tools_list', { persona_id: pid || null }));
   };
 
   const loadChannels = async () => {
