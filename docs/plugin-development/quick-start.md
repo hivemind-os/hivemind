@@ -150,7 +150,7 @@ npx vitest run
 hivemind plugin link .
 ```
 
-Your plugin now appears in Hivemind's Settings → Plugins.
+Your plugin now appears in Hivemind's **Settings → Connectors** alongside built-in connectors.
 
 ## Next Steps
 

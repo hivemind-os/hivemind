@@ -52,7 +52,7 @@ npm publish --access public
 
 ## Submitting to the Hivemind Plugin Registry
 
-The [plugin registry](https://github.com/hivemind-os/plugin-registry) is a curated index that powers the in-app plugin browser.
+The [plugin registry](https://github.com/hivemind-os/plugin-registry) is a curated index that powers the in-app connector browser. Users can install plugins directly from the "Add Connector" wizard.
 
 ### Steps
 
@@ -79,7 +79,7 @@ The [plugin registry](https://github.com/hivemind-os/plugin-registry) is a curat
 
 ### Verified Badge
 
-After your plugin is reviewed by maintainers, it gets a "Verified" badge in the plugin browser. This means:
+After your plugin is reviewed by maintainers, it gets a "Verified" badge in the connector browser. This means:
 - Code has been reviewed for security
 - Plugin follows best practices
 - It's safe to install
@@ -92,7 +92,7 @@ Follow [semver](https://semver.org/):
 - **Minor** (1.x.0): New tools, new config fields (backward compatible)
 - **Major** (x.0.0): Breaking changes (removed tools, changed config schema)
 
-Users see update notifications in the plugin browser.
+Users see update notifications in the connector browser.
 
 ## Best Practices
 

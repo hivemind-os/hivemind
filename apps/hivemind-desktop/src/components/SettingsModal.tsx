@@ -15,7 +15,6 @@ import RuntimeTab from './settings/RuntimeTab';
 import GeneralTab from './settings/GeneralTab';
 const ConnectorsTab = lazy(() => import('./ConnectorsTab'));
 const AuditViewer = lazy(() => import('./AuditViewer'));
-const PluginsTab = lazy(() => import('./plugins/PluginsTab'));
 import type {
   AppContext,
   CapabilityOption,
@@ -67,7 +66,6 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     { id: 'compaction', label: 'Compaction' },
   ]},
   { id: 'extensions', label: 'Extensions', tabs: [
-    { id: 'plugins', label: 'Plugins' },
     { id: 'tools', label: 'Tools' },
     { id: 'web-search', label: 'Web Search' },
     { id: 'python', label: 'Python' },
@@ -1492,13 +1490,6 @@ const SettingsModal = (props: SettingsModalProps) => {
                       </For>
                     </Show>
                   </div>
-                </Show>
-
-                {/* ── Plugins ─────────────────────────────────── */}
-                <Show when={localTab() === 'plugins'}>
-                  <Suspense fallback={<p class="muted">Loading…</p>}>
-                    <PluginsTab />
-                  </Suspense>
                 </Show>
 
                 {/* ── Tools──────────────────────────────────────── */}

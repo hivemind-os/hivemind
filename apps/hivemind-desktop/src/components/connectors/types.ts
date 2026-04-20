@@ -1,5 +1,6 @@
 import { slugifyId } from '../../utils';
 import type { DataClassification, ApprovalKind } from '../../types';
+import type { PluginConfigSchema } from '../plugins/PluginConfigForm';
 
 // Re-export shared types for convenience
 export type { DataClassification, ApprovalKind };
@@ -10,6 +11,69 @@ export type ConnectorProvider = 'microsoft' | 'gmail' | 'imap' | 'discord' | 'sl
 export type ServiceType = 'communication' | 'calendar' | 'drive' | 'contacts' | 'trading';
 export type WizardStep = 'provider' | 'services' | 'connect' | 'configure' | 'review';
 export type OAuthStatus = 'idle' | 'waiting' | 'polling' | 'complete' | 'error';
+
+// ── Plugin types (for unified display) ───────────────────────────
+
+export interface InstalledPlugin {
+  plugin_id: string;
+  name: string;
+  version: string;
+  display_name: string;
+  description: string;
+  plugin_type: string;
+  enabled: boolean;
+  config: Record<string, any>;
+  config_schema?: PluginConfigSchema | null;
+  status?: { state: string; message?: string };
+  permissions: string[];
+}
+
+// ── Unified Integration type ─────────────────────────────────────
+
+export type IntegrationKind = 'builtin' | 'plugin';
+
+export interface Integration {
+  id: string;
+  kind: IntegrationKind;
+  name: string;
+  icon: string;
+  description: string;
+  enabled: boolean;
+  status?: { state: string; message?: string };
+  // Built-in connector data (present when kind === 'builtin')
+  connector?: ConnectorConfig;
+  // Plugin data (present when kind === 'plugin')
+  plugin?: InstalledPlugin;
+}
+
+/** Convert a ConnectorConfig into the unified Integration type. */
+export function connectorToIntegration(conn: ConnectorConfig, status?: ConnectorStatus): Integration {
+  const card = providerCard(conn.provider);
+  return {
+    id: conn.id,
+    kind: 'builtin',
+    name: conn.name || card?.title || conn.provider,
+    icon: card?.icon ?? '🔗',
+    description: card?.desc ?? '',
+    enabled: conn.enabled,
+    status: status ? { state: status.state, message: status.message } : undefined,
+    connector: conn,
+  };
+}
+
+/** Convert an InstalledPlugin into the unified Integration type. */
+export function pluginToIntegration(plugin: InstalledPlugin): Integration {
+  return {
+    id: `plugin:${plugin.plugin_id}`,
+    kind: 'plugin',
+    name: plugin.display_name || plugin.name,
+    icon: '🧩',
+    description: plugin.description || '',
+    enabled: plugin.enabled,
+    status: plugin.status ? { state: plugin.status.state, message: plugin.status.message } : undefined,
+    plugin,
+  };
+}
 
 export interface ResourceRule {
   pattern: string;
