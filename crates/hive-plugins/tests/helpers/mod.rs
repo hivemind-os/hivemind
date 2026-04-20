@@ -198,8 +198,18 @@ impl PluginTestEnv {
 fn resolve_test_plugin_dir() -> Result<PathBuf> {
     // 1. Honour explicit override
     if let Ok(p) = std::env::var("HIVEMIND_TEST_PLUGIN_PATH") {
-        let dir = PathBuf::from(p);
-        anyhow::ensure!(dir.exists(), "HIVEMIND_TEST_PLUGIN_PATH does not exist: {}", dir.display());
+        let dir = PathBuf::from(&p);
+        // Resolve relative paths against the workspace root, since cargo test
+        // sets CWD to the package root (crates/hive-plugins/) not the workspace.
+        let dir = if dir.is_relative() {
+            let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..");
+            workspace_root.join(&dir)
+        } else {
+            dir
+        };
+        anyhow::ensure!(dir.exists(), "HIVEMIND_TEST_PLUGIN_PATH does not exist: {} (resolved from {:?})", dir.display(), p);
         return Ok(dir);
     }
 
