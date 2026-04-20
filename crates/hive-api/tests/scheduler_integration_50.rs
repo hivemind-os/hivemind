@@ -1577,6 +1577,7 @@ async fn t55_invoke_agent_fails_gracefully_without_runner() {
             persona_id: "analyst".into(),
             task: "Do something".into(),
             friendly_name: None,
+            async_exec: false,
             timeout_secs: None,
             permissions: None,
         },
