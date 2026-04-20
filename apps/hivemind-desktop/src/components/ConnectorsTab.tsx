@@ -93,6 +93,20 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
     await Promise.all([loadConnectors(), loadPlugins()]);
   }
 
+  async function linkLocalPlugin() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const folder = await open({ directory: true, multiple: false, title: 'Select plugin folder (must contain package.json)' });
+      if (!folder) return;
+      const path = typeof folder === 'string' ? folder : (folder as any)[0];
+      if (!path) return;
+      await invoke('plugin_link_local', { path });
+      await reloadAll();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
   async function saveConnectorsApi(configs: ConnectorConfig[]) {
     setSaving(true);
     setError(null);
@@ -371,7 +385,10 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
           <div class="mb-3 text-4xl"><Plug size={32} /></div>
           <p class="mb-1 text-base font-medium text-foreground/70">No connectors configured yet</p>
           <p class="mb-5 text-sm">Add a connector to link your email, calendar, or chat accounts.</p>
-          <Button onClick={openWizard}>+ Add Connector</Button>
+          <div class="flex gap-2 justify-center">
+            <Button onClick={openWizard}>+ Add Connector</Button>
+            <Button variant="outline" onClick={linkLocalPlugin}>📂 Link Local Plugin</Button>
+          </div>
         </div>
       }>
         <div class="flex flex-col gap-3">
@@ -424,8 +441,9 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
             )}
           </For>
         </div>
-        <div class="mt-4">
+        <div class="mt-4 flex gap-2">
           <Button onClick={openWizard}>+ Add Connector</Button>
+          <Button variant="outline" onClick={linkLocalPlugin}>📂 Link Local Plugin</Button>
         </div>
       </Show>
 

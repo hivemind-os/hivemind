@@ -115,6 +115,24 @@ function PluginInstallSection(props: { onInstalled: () => void }) {
     }
   }
 
+  async function linkLocal() {
+    setError(null);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const folder = await open({ directory: true, multiple: false, title: 'Select plugin folder (must contain package.json)' });
+      if (!folder) return;
+      const path = typeof folder === 'string' ? folder : (folder as any)[0];
+      if (!path) return;
+      setInstalling('__local__');
+      await invoke('plugin_link_local', { path });
+      props.onInstalled();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setInstalling(null);
+    }
+  }
+
   return (
     <div>
       <Show when={error()}>
@@ -122,6 +140,30 @@ function PluginInstallSection(props: { onInstalled: () => void }) {
           {error()}
         </div>
       </Show>
+
+      {/* Link local plugin — prominent for developers */}
+      <button
+        onClick={linkLocal}
+        disabled={installing() === '__local__'}
+        style={{
+          display: 'flex', 'align-items': 'center', gap: '0.5rem', width: '100%',
+          padding: '0.65rem 0.85rem', 'margin-bottom': '0.75rem',
+          background: 'hsl(var(--card) / 0.5)',
+          border: '1px dashed hsl(var(--primary) / 0.4)', 'border-radius': '0.6rem',
+          cursor: 'pointer', 'font-size': '0.82rem', color: 'hsl(var(--foreground))',
+        }}
+      >
+        <span style={{ 'font-size': '1.1rem' }}>📂</span>
+        <div style={{ flex: '1', 'text-align': 'left' }}>
+          <div style={{ 'font-weight': '600' }}>Link Local Plugin</div>
+          <div style={{ 'font-size': '0.73rem', color: 'hsl(var(--muted-foreground))' }}>
+            Select a folder containing a built plugin (for development &amp; testing)
+          </div>
+        </div>
+        <Show when={installing() === '__local__'}>
+          <LoaderCircle size={14} style={{ animation: 'spin 1s linear infinite' }} />
+        </Show>
+      </button>
 
       <div style={{ position: 'relative', 'margin-bottom': '0.75rem' }}>
         <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-foreground))' }} />
