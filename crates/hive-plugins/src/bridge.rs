@@ -5,8 +5,11 @@
 //! and MCP tools.
 
 use crate::host::PluginHost;
+use crate::registry::PluginRegistry;
+use hive_classification::DataClass;
 use hive_contracts::tools::{ToolAnnotations, ToolApproval, ToolDefinition};
 use hive_contracts::ChannelClass;
+use hive_tools::{BoxFuture, Tool, ToolError, ToolRegistry, ToolResult};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -24,12 +27,20 @@ pub struct PluginBridgeTool {
     pub host: Arc<PluginHost>,
 }
 
-impl PluginBridgeTool {
-    /// Execute this tool by forwarding to the plugin process.
-    pub async fn execute(&self, input: Value) -> anyhow::Result<Value> {
-        self.host
-            .call_tool(&self.plugin_id, &self.tool_name, input)
-            .await
+impl Tool for PluginBridgeTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    fn execute(&self, input: Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let output = self
+                .host
+                .call_tool(&self.plugin_id, &self.tool_name, input)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+            Ok(ToolResult { output, data_class: DataClass::Internal })
+        })
     }
 }
 
@@ -99,4 +110,52 @@ pub async fn create_bridge_tools(
     }
 
     Ok(bridges)
+}
+
+/// Register tools from all enabled (and running) plugins into a `ToolRegistry`.
+///
+/// When `persona_id` is `Some`, only plugins whose `allowed_personas` includes
+/// that persona (or is empty, meaning "all personas") are considered.
+/// When `None`, all enabled plugins are included.
+pub async fn register_plugin_tools(
+    tool_registry: &mut ToolRegistry,
+    host: &Arc<PluginHost>,
+    plugin_registry: &PluginRegistry,
+    persona_id: Option<&str>,
+) {
+    let plugins = match persona_id {
+        Some(pid) => plugin_registry.list_for_persona(pid),
+        None => plugin_registry.list(),
+    };
+
+    for plugin in plugins {
+        if !plugin.enabled {
+            continue;
+        }
+        let plugin_id = plugin.manifest.plugin_id();
+        // Only register tools for plugins that have a running process
+        if host.get(&plugin_id).is_none() {
+            continue;
+        }
+        match create_bridge_tools(host, &plugin_id).await {
+            Ok(bridges) => {
+                for bridge in bridges {
+                    if let Err(e) = tool_registry.register(Arc::new(bridge)) {
+                        tracing::debug!(
+                            %plugin_id,
+                            error = %e,
+                            "skipping duplicate plugin tool"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    %plugin_id,
+                    error = %e,
+                    "failed to create bridge tools for plugin"
+                );
+            }
+        }
+    }
 }

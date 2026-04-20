@@ -42,6 +42,8 @@ pub struct ChatPersonaToolFactory {
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     model_router: Option<Arc<hive_model::ModelRouter>>,
     web_search_config: Arc<hive_contracts::WebSearchConfig>,
+    plugin_host: Option<Arc<hive_plugins::PluginHost>>,
+    plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
 }
 
 impl ChatPersonaToolFactory {
@@ -66,6 +68,8 @@ impl ChatPersonaToolFactory {
         skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
         model_router: Option<Arc<hive_model::ModelRouter>>,
         web_search_config: Arc<hive_contracts::WebSearchConfig>,
+        plugin_host: Option<Arc<hive_plugins::PluginHost>>,
+        plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
     ) -> Self {
         Self {
             personas,
@@ -87,6 +91,8 @@ impl ChatPersonaToolFactory {
             skills_service,
             model_router,
             web_search_config,
+            plugin_host,
+            plugin_registry,
         }
     }
 
@@ -182,6 +188,8 @@ impl PersonaToolFactory for ChatPersonaToolFactory {
             self.model_router.clone(),
             persona_models,
             Some(&*self.web_search_config),
+            self.plugin_host.as_ref(),
+            self.plugin_registry.as_ref().map(|r| r.as_ref()),
         )
         .await;
 

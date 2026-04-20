@@ -29,7 +29,7 @@ pub mod protocol;
 pub mod registry;
 pub mod sandbox;
 
-pub use bridge::PluginBridgeTool;
+pub use bridge::{register_plugin_tools, PluginBridgeTool};
 pub use config_schema::ConfigSchema;
 pub use health::{HealthConfig, HealthMonitor, RestartDecision};
 pub use host::{PluginEvent, PluginHost, PluginProcess, PluginStatusChange};

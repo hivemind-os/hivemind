@@ -52,6 +52,8 @@ async fn boot_kg_server() -> (String, Arc<Notify>, TempDir) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        None, // plugin_host
+        None, // plugin_registry
     ));
 
     let kg_path = tempdir.path().join("kg-test.db");

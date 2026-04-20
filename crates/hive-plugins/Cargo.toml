@@ -19,8 +19,10 @@ tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
+hive-classification = { path = "../hive-classification" }
 hive-contracts = { path = "../hive-contracts" }
 hive-node-env = { path = "../hive-node-env" }
+hive-tools = { path = "../hive-tools" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

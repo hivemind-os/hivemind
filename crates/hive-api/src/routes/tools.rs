@@ -39,6 +39,25 @@ pub(crate) async fn list_tools(State(state): State<AppState>) -> Json<Vec<ToolDe
             },
         });
     }
+
+    // Include tools from enabled plugins.
+    for plugin in state.plugin_registry.list() {
+        if !plugin.enabled {
+            continue;
+        }
+        let plugin_id = plugin.manifest.plugin_id();
+        if state.plugin_host.get(&plugin_id).is_none() {
+            continue;
+        }
+        if let Ok(bridge_tools) =
+            hive_plugins::bridge::create_bridge_tools(&state.plugin_host, &plugin_id).await
+        {
+            for bt in bridge_tools {
+                tools.push(bt.definition);
+            }
+        }
+    }
+
     Json(tools)
 }
 

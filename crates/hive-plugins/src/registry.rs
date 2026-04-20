@@ -142,6 +142,22 @@ impl PluginRegistry {
         self.plugins.read().values().cloned().collect()
     }
 
+    /// List plugins accessible to a specific persona.
+    ///
+    /// A plugin is accessible if its `allowed_personas` is empty (all personas)
+    /// or contains the given persona ID.
+    pub fn list_for_persona(&self, persona_id: &str) -> Vec<InstalledPlugin> {
+        self.plugins
+            .read()
+            .values()
+            .filter(|p| {
+                p.allowed_personas.is_empty()
+                    || p.allowed_personas.iter().any(|a| a == "*" || a == persona_id)
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Update plugin config.
     pub fn update_config(&self, plugin_id: &str, config: serde_json::Value) -> anyhow::Result<()> {
         let mut plugins = self.plugins.write();
