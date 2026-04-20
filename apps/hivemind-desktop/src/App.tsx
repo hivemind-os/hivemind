@@ -1237,12 +1237,16 @@ const App = () => {
       ));
 
     batch(() => {
+      const prevId = selectedSessionId();
       setSelectedSessionId(nextId);
       if (changed) {
         setSession(nextSession);
       }
-      setExcludedTools([]);
-      setExcludedSkills([]);
+      // Only reset tool/skill exclusions when switching to a different session.
+      if (nextId !== prevId) {
+        setExcludedTools([]);
+        setExcludedSkills([]);
+      }
       if (nextSession.state !== 'running') {
         clearStreamingState();
       } else if (!isStreaming()) {
@@ -1547,10 +1551,13 @@ const App = () => {
       return;
     }
     batch(() => {
+      const prevId = selectedSessionId();
       setSelectedSessionId(bot_id);
       setSession(botSession);
-      setExcludedTools([]);
-      setExcludedSkills([]);
+      if (bot_id !== prevId) {
+        setExcludedTools([]);
+        setExcludedSkills([]);
+      }
       if (botSession.state !== 'running') {
         clearStreamingState();
       }
