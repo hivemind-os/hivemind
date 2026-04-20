@@ -57,7 +57,7 @@ describe("Test Plugin", () => {
     it("should have correct defaults", () => {
       const schema = harness.getConfigSchema();
       expect(schema.properties.endpoint.default).toBe("https://httpbin.org");
-      expect(schema.properties.pollInterval.default).toBe(5);
+      expect(schema.properties.pollInterval.default).toBe(30);
       expect(schema.properties.failOnActivate.default).toBe(false);
     });
 
