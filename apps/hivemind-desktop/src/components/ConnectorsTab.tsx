@@ -9,16 +9,21 @@ import {
   type DiscoveredChannel,
   type DiscoveredGuild,
   type DiscoveryState,
+  type InstalledPlugin,
+  type Integration,
   type OAuthState,
   type OAuthStatus,
   type ServiceType,
+  connectorToIntegration,
   enabledServiceList,
+  pluginToIntegration,
   providerCard,
 } from './connectors/types';
 import { ServiceBadges } from './connectors/shared';
 import { ConnectorWizard } from './connectors/ConnectorWizard';
 import { ConnectorEditDialog } from './connectors/ConnectorEditDialog';
 import { TestConnectionModal } from './connectors/TestConnectionModal';
+import { PluginConnectorDialog } from './connectors/PluginConnectorDialog';
 import { Button, Badge } from '~/ui';
 
 // ── Component ────────────────────────────────────────────────────
@@ -26,6 +31,7 @@ import { Button, Badge } from '~/ui';
 export default function ConnectorsTab(_props: { daemon_url?: string; onConnectorsChanged?: () => void }) {
   // Core state
   const [connectors, setConnectors] = createSignal<ConnectorConfig[]>([]);
+  const [plugins, setPlugins] = createSignal<InstalledPlugin[]>([]);
   const [statuses, setStatuses] = createSignal<Record<string, ConnectorStatus>>({});
   const [error, setError] = createSignal<string | null>(null);
   const [saving, setSaving] = createSignal(false);
@@ -35,6 +41,16 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
   // Wizard / edit visibility
   const [showWizard, setShowWizard] = createSignal(false);
   const [editConnector, setEditConnector] = createSignal<ConnectorConfig | null>(null);
+  const [editPlugin, setEditPlugin] = createSignal<InstalledPlugin | null>(null);
+
+  // Unified integration list
+  const integrations = (): Integration[] => {
+    const builtins = connectors().map((c) => connectorToIntegration(c, statuses()[c.id]));
+    const pluginIntegrations = plugins()
+      .filter((p) => p.plugin_type === 'connector')
+      .map(pluginToIntegration);
+    return [...builtins, ...pluginIntegrations];
+  };
 
   // OAuth state (shared singleton — only one flow active at a time)
   const [oauthStatus, setOauthStatus] = createSignal<OAuthStatus>('idle');
@@ -50,7 +66,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
   const [discoveredWorkspace, setDiscoveredWorkspace] = createSignal<string | null>(null);
   const [discoverError, setDiscoverError] = createSignal<string | null>(null);
 
-  onMount(loadConnectors);
+  onMount(() => { loadConnectors(); loadPlugins(); });
   onCleanup(() => { if (oauthPollTimer) clearInterval(oauthPollTimer); });
 
   // ── API ──────────────────────────────────────────────────────
@@ -61,6 +77,33 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
       setConnectors(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('Failed to load connectors:', e);
+    }
+  }
+
+  async function loadPlugins() {
+    try {
+      const data = await invoke<InstalledPlugin[]>('plugin_list');
+      setPlugins(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('Failed to load plugins:', e);
+    }
+  }
+
+  async function reloadAll() {
+    await Promise.all([loadConnectors(), loadPlugins()]);
+  }
+
+  async function linkLocalPlugin() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const folder = await open({ directory: true, multiple: false, title: 'Select plugin folder (must contain package.json)' });
+      if (!folder) return;
+      const path = typeof folder === 'string' ? folder : (folder as any)[0];
+      if (!path) return;
+      await invoke('plugin_link_local', { path });
+      await reloadAll();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
     }
   }
 
@@ -285,6 +328,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
   function closeWizard() {
     setShowWizard(false);
     resetOauthState();
+    reloadAll();
   }
 
   async function finishWizard(config: ConnectorConfig) {
@@ -336,58 +380,71 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
         </div>
       </Show>
 
-      {/* Connector list */}
-      <Show when={connectors().length > 0} fallback={
+      {/* Integration list (built-in connectors + plugin connectors) */}
+      <Show when={integrations().length > 0} fallback={
         <div class="py-12 text-center text-muted-foreground">
           <div class="mb-3 text-4xl"><Plug size={32} /></div>
           <p class="mb-1 text-base font-medium text-foreground/70">No connectors configured yet</p>
           <p class="mb-5 text-sm">Add a connector to link your email, calendar, or chat accounts.</p>
-          <Button onClick={openWizard}>+ Add Connector</Button>
+          <div class="flex gap-2 justify-center">
+            <Button onClick={openWizard}>+ Add Connector</Button>
+            <Button variant="outline" onClick={linkLocalPlugin}>📂 Link Local Plugin</Button>
+          </div>
         </div>
       }>
         <div class="flex flex-col gap-3">
-          <For each={connectors()}>
-            {(conn) => {
-              const card = providerCard(conn.provider);
-              const status = () => statuses()[conn.id];
-              return (
-                <article class="rounded-lg border border-input bg-card p-3">
-                  <header class="flex items-center justify-between">
-                    <div class="flex flex-1 items-center gap-2.5">
-                      <span class="text-xl">{card?.icon ?? <Link size={18} />}</span>
-                      <div>
-                        <div class="text-sm font-semibold text-foreground">
-                          {conn.name || card?.title || conn.provider}
-                        </div>
-                        <div class="text-xs text-muted-foreground">
-                          {card?.title} · {conn.auth.type}
-                        </div>
+          <For each={integrations()}>
+            {(item) => (
+              <article class="rounded-lg border border-input bg-card p-3">
+                <header class="flex items-center justify-between">
+                  <div class="flex flex-1 items-center gap-2.5">
+                    <span class="text-xl">{item.icon}</span>
+                    <div>
+                      <div class="text-sm font-semibold text-foreground">
+                        {item.name}
+                      </div>
+                      <div class="text-xs text-muted-foreground">
+                        {item.kind === 'builtin'
+                          ? `${providerCard(item.connector!.provider)?.title ?? ''} · ${item.connector!.auth.type}`
+                          : `${item.plugin!.name} · v${item.plugin!.version}`
+                        }
                       </div>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <ServiceBadges config={conn} />
-                      <Show when={status()}>
-                        <Badge variant="secondary" class={statusColorClass(status()?.state)}>
-                          {status()?.state}
-                        </Badge>
-                      </Show>
-                      <Show when={!conn.enabled}>
-                        <Badge variant="outline" class="text-[0.72rem]">disabled</Badge>
-                      </Show>
-                    </div>
-                  </header>
-                  <div class="mt-2 flex justify-end gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => openEdit(conn.id)}>Edit</Button>
-                    <Button variant="secondary" size="sm" onClick={() => testConnectorFn(conn.id)}>Test</Button>
-                    <Button variant="destructive" size="sm" onClick={() => deleteConnector(conn.id)}>Delete</Button>
                   </div>
-                </article>
-              );
-            }}
+                  <div class="flex items-center gap-2">
+                    <Show when={item.kind === 'builtin' && item.connector}>
+                      <ServiceBadges config={item.connector!} />
+                    </Show>
+                    <Show when={item.kind === 'plugin'}>
+                      <Badge variant="outline" class="text-[0.65rem]">plugin</Badge>
+                    </Show>
+                    <Show when={item.status}>
+                      <Badge variant="secondary" class={statusColorClass(item.status?.state)}>
+                        {item.status?.state}
+                      </Badge>
+                    </Show>
+                    <Show when={!item.enabled}>
+                      <Badge variant="outline" class="text-[0.72rem]">disabled</Badge>
+                    </Show>
+                  </div>
+                </header>
+                <div class="mt-2 flex justify-end gap-2">
+                  <Show when={item.kind === 'builtin'}>
+                    <Button variant="secondary" size="sm" onClick={() => openEdit(item.connector!.id)}>Edit</Button>
+                    <Button variant="secondary" size="sm" onClick={() => testConnectorFn(item.connector!.id)}>Test</Button>
+                    <Button variant="destructive" size="sm" onClick={() => deleteConnector(item.connector!.id)}>Delete</Button>
+                  </Show>
+                  <Show when={item.kind === 'plugin'}>
+                    <Button variant="secondary" size="sm" onClick={() => setEditPlugin(item.plugin!)}>Configure</Button>
+                  </Show>
+                </div>
+              </article>
+            )}
           </For>
         </div>
-        <div class="mt-4">
+        <div class="mt-4 flex gap-2">
           <Button onClick={openWizard}>+ Add Connector</Button>
+          <Button variant="outline" onClick={linkLocalPlugin}>📂 Link Local Plugin</Button>
         </div>
       </Show>
 
@@ -418,6 +475,17 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
             onTest={(id) => testConnectorFn(id)}
             onSave={saveEdit}
             onClose={closeEdit}
+          />
+        )}
+      </Show>
+
+      {/* Plugin Connector Dialog */}
+      <Show when={editPlugin()}>
+        {(plugin) => (
+          <PluginConnectorDialog
+            plugin={plugin()}
+            onClose={() => setEditPlugin(null)}
+            onSave={() => { setEditPlugin(null); reloadAll(); }}
           />
         )}
       </Show>

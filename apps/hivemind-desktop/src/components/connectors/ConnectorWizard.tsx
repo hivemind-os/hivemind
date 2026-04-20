@@ -1,5 +1,5 @@
-import { For, Show, createSignal, onMount } from 'solid-js';
-import { Link, Search, TriangleAlert, LoaderCircle } from 'lucide-solid';
+import { For, Show, createSignal, createResource, onMount } from 'solid-js';
+import { Link, Search, TriangleAlert, LoaderCircle, Download, CheckCircle } from 'lucide-solid';
 import { invoke } from '@tauri-apps/api/core';
 import { openExternal } from '../../utils';
 import { PersonaSelector, type PersonaInfo } from '../shared';
@@ -48,6 +48,204 @@ interface ConnectorWizardProps {
   onTest: (id: string, inlineConfig: ConnectorConfig) => Promise<void>;
   onFinish: (config: ConnectorConfig) => Promise<void>;
   onClose: () => void;
+}
+
+// ── Plugin Install Section (for ConnectorWizard provider step) ──
+
+const REGISTRY_URL = 'https://raw.githubusercontent.com/hivemind-os/hivemind/main/packages/plugin-registry/registry.json';
+
+interface RegistryPlugin {
+  name: string;
+  displayName: string;
+  description: string;
+  npmPackage: string;
+  categories: string[];
+  verified: boolean;
+  featured: boolean;
+  icon?: string;
+  author: string;
+  pluginType: string;
+}
+
+function PluginInstallSection(props: { onInstalled: () => void }) {
+  const [registry] = createResource(async () => {
+    try {
+      const res = await fetch(REGISTRY_URL);
+      if (!res.ok) return null;
+      return (await res.json()) as { plugins: RegistryPlugin[] };
+    } catch {
+      return null;
+    }
+  });
+  const [search, setSearch] = createSignal('');
+  const [installing, setInstalling] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const [installed, setInstalled] = createSignal<Set<string>>(new Set());
+
+  const filtered = () => {
+    const data = registry();
+    if (!data) return [];
+    const q = search().toLowerCase().trim();
+    let list = data.plugins;
+    if (q) {
+      list = list.filter(
+        (p) =>
+          p.displayName.toLowerCase().includes(q) ||
+          p.description.toLowerCase().includes(q) ||
+          p.name.toLowerCase().includes(q)
+      );
+    }
+    return list.sort((a, b) => {
+      if (a.featured !== b.featured) return a.featured ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+  };
+
+  async function installPlugin(npmPackage: string) {
+    setInstalling(npmPackage);
+    setError(null);
+    try {
+      await invoke('plugin_install_npm', { packageName: npmPackage });
+      setInstalled((prev) => new Set([...prev, npmPackage]));
+      props.onInstalled();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setInstalling(null);
+    }
+  }
+
+  async function linkLocal() {
+    setError(null);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const folder = await open({ directory: true, multiple: false, title: 'Select plugin folder (must contain package.json)' });
+      if (!folder) return;
+      const path = typeof folder === 'string' ? folder : (folder as any)[0];
+      if (!path) return;
+      setInstalling('__local__');
+      await invoke('plugin_link_local', { path });
+      props.onInstalled();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setInstalling(null);
+    }
+  }
+
+  return (
+    <div>
+      <Show when={error()}>
+        <div style={{ background: 'hsl(var(--destructive) / 0.1)', border: '1px solid hsl(var(--destructive) / 0.3)', 'border-radius': '0.5rem', padding: '0.5rem', 'font-size': '0.78rem', color: 'hsl(var(--destructive))', 'margin-bottom': '0.5rem' }}>
+          {error()}
+        </div>
+      </Show>
+
+      {/* Link local plugin — prominent for developers */}
+      <button
+        onClick={linkLocal}
+        disabled={installing() === '__local__'}
+        style={{
+          display: 'flex', 'align-items': 'center', gap: '0.5rem', width: '100%',
+          padding: '0.65rem 0.85rem', 'margin-bottom': '0.75rem',
+          background: 'hsl(var(--card) / 0.5)',
+          border: '1px dashed hsl(var(--primary) / 0.4)', 'border-radius': '0.6rem',
+          cursor: 'pointer', 'font-size': '0.82rem', color: 'hsl(var(--foreground))',
+        }}
+      >
+        <span style={{ 'font-size': '1.1rem' }}>📂</span>
+        <div style={{ flex: '1', 'text-align': 'left' }}>
+          <div style={{ 'font-weight': '600' }}>Link Local Plugin</div>
+          <div style={{ 'font-size': '0.73rem', color: 'hsl(var(--muted-foreground))' }}>
+            Select a folder containing a built plugin (for development &amp; testing)
+          </div>
+        </div>
+        <Show when={installing() === '__local__'}>
+          <LoaderCircle size={14} style={{ animation: 'spin 1s linear infinite' }} />
+        </Show>
+      </button>
+
+      <div style={{ position: 'relative', 'margin-bottom': '0.75rem' }}>
+        <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-foreground))' }} />
+        <input
+          type="text"
+          value={search()}
+          onInput={(e) => setSearch(e.currentTarget.value)}
+          placeholder="Search community plugins..."
+          style={{
+            width: '100%', 'padding-left': '2rem', 'padding-right': '0.75rem',
+            'padding-top': '0.4rem', 'padding-bottom': '0.4rem',
+            'border-radius': '0.5rem', border: '1px solid hsl(var(--border) / 0.3)',
+            background: 'hsl(var(--background))', 'font-size': '0.82rem',
+          }}
+        />
+      </div>
+
+      <Show when={registry.loading}>
+        <div style={{ 'text-align': 'center', padding: '1rem', color: 'hsl(var(--muted-foreground))', 'font-size': '0.82rem' }}>
+          <LoaderCircle size={16} style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }} /> Loading registry...
+        </div>
+      </Show>
+
+      <Show when={!registry.loading && filtered().length === 0}>
+        <div style={{ 'text-align': 'center', padding: '1rem', color: 'hsl(var(--muted-foreground))', 'font-size': '0.82rem' }}>
+          {registry() ? 'No plugins match your search.' : 'Could not load plugin registry.'}
+        </div>
+      </Show>
+
+      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.5rem', 'max-height': '16rem', 'overflow-y': 'auto' }}>
+        <For each={filtered()}>
+          {(plugin) => {
+            const isInstalled = () => installed().has(plugin.npmPackage);
+            const isInstalling = () => installing() === plugin.npmPackage;
+            return (
+              <div style={{
+                display: 'flex', 'align-items': 'center', gap: '0.75rem',
+                padding: '0.65rem 0.85rem', background: 'hsl(var(--card) / 0.5)',
+                border: '1px solid hsl(var(--border) / 0.12)', 'border-radius': '0.6rem',
+              }}>
+                <div style={{ 'font-size': '1.3rem', 'flex-shrink': '0' }}>{plugin.icon || '🧩'}</div>
+                <div style={{ flex: '1', 'min-width': '0' }}>
+                  <div style={{ 'font-size': '0.85rem', 'font-weight': '600', color: 'hsl(var(--foreground))' }}>
+                    {plugin.displayName}
+                    <Show when={plugin.verified}>
+                      <span style={{ color: 'hsl(var(--primary))', 'margin-left': '0.3rem', 'font-size': '0.75rem' }}>✓</span>
+                    </Show>
+                  </div>
+                  <div style={{ 'font-size': '0.73rem', color: 'hsl(var(--muted-foreground))', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
+                    {plugin.description}
+                  </div>
+                </div>
+                <Show when={isInstalled()}>
+                  <CheckCircle size={16} style={{ color: 'hsl(var(--primary))', 'flex-shrink': '0' }} />
+                </Show>
+                <Show when={!isInstalled()}>
+                  <button
+                    onClick={() => installPlugin(plugin.npmPackage)}
+                    disabled={isInstalling()}
+                    style={{
+                      display: 'flex', 'align-items': 'center', gap: '0.3rem',
+                      padding: '0.3rem 0.6rem', 'border-radius': '0.4rem',
+                      background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))',
+                      border: 'none', cursor: 'pointer', 'font-size': '0.75rem', 'font-weight': '600',
+                      opacity: isInstalling() ? '0.7' : '1', 'flex-shrink': '0',
+                    }}
+                  >
+                    {isInstalling() ? (
+                      <LoaderCircle size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <Download size={12} />
+                    )}
+                    {isInstalling() ? 'Installing...' : 'Install'}
+                  </button>
+                </Show>
+              </div>
+            );
+          }}
+        </For>
+      </div>
+    </div>
+  );
 }
 
 // ── Component ────────────────────────────────────────────────────
@@ -254,6 +452,17 @@ export function ConnectorWizard(props: ConnectorWizardProps) {
               </div>
             )}
           </For>
+        </div>
+
+        {/* Community Plugins section */}
+        <div style={{ 'margin-top': '1.5rem', 'border-top': '1px solid hsl(var(--border) / 0.15)', 'padding-top': '1rem' }}>
+          <p style={{ 'font-size': '0.82rem', 'font-weight': '600', color: 'hsl(var(--foreground))', 'margin-bottom': '0.5rem' }}>
+            🧩 Community Plugins
+          </p>
+          <p style={{ 'font-size': '0.78rem', color: 'hsl(var(--muted-foreground))', 'margin-bottom': '0.75rem' }}>
+            Install third-party connector plugins from the registry. Plugins appear alongside built-in connectors after installation.
+          </p>
+          <PluginInstallSection onInstalled={() => props.onClose()} />
         </div>
       </div>
     );

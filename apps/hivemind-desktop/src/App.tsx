@@ -832,6 +832,14 @@ const App = () => {
     }
   });
 
+  // Reload persona-scoped tools and skills when the active persona changes.
+  createEffect(() => {
+    const pid = selectedAgentId();
+    if (!daemonOnline()) return;
+    void loadTools(pid);
+    void loadInstalledSkills();
+  });
+
   const availableModels= createMemo(() => {
     const router = modelRouter();
     if (!router) return [];
@@ -971,12 +979,13 @@ const App = () => {
     setMcpPrompts(promptsResult.status === 'fulfilled' ? promptsResult.value : []);
   };
 
-  const loadTools = async () => {
+  const loadTools = async (personaId?: string) => {
     if (!daemonOnline()) {
       setTools([]);
       return;
     }
-    setTools(await invoke<ToolDefinition[]>('tools_list'));
+    const pid = personaId ?? selectedAgentId();
+    setTools(await invoke<ToolDefinition[]>('tools_list', { persona_id: pid || null }));
   };
 
   const loadChannels = async () => {
@@ -1237,12 +1246,16 @@ const App = () => {
       ));
 
     batch(() => {
+      const prevId = selectedSessionId();
       setSelectedSessionId(nextId);
       if (changed) {
         setSession(nextSession);
       }
-      setExcludedTools([]);
-      setExcludedSkills([]);
+      // Only reset tool/skill exclusions when switching to a different session.
+      if (nextId !== prevId) {
+        setExcludedTools([]);
+        setExcludedSkills([]);
+      }
       if (nextSession.state !== 'running') {
         clearStreamingState();
       } else if (!isStreaming()) {
@@ -1547,10 +1560,13 @@ const App = () => {
       return;
     }
     batch(() => {
+      const prevId = selectedSessionId();
       setSelectedSessionId(bot_id);
       setSession(botSession);
-      setExcludedTools([]);
-      setExcludedSkills([]);
+      if (bot_id !== prevId) {
+        setExcludedTools([]);
+        setExcludedSkills([]);
+      }
       if (botSession.state !== 'running') {
         clearStreamingState();
       }
@@ -2507,8 +2523,23 @@ const App = () => {
         }
         await checkFirstRun();
       } catch (error) {
+        const msg = String(error);
         if (!isTauriInternalError(error)) {
-          setErrorMessage(String(error));
+          if (msg.includes('401')) {
+            // Token mismatch — daemon may have just restarted with a new
+            // token.  The blocking helpers already invalidated the cache,
+            // so wait briefly and retry with a fresh keyring read.
+            await new Promise((r) => setTimeout(r, 1000));
+            try {
+              await refreshAll();
+            } catch (retryErr) {
+              if (!isTauriInternalError(retryErr)) {
+                setErrorMessage(String(retryErr));
+              }
+            }
+          } else {
+            setErrorMessage(msg);
+          }
         }
       } finally {
         setInitializing(false);

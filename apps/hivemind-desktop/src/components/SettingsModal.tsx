@@ -39,7 +39,7 @@ import { extractFileQuantization } from '../types';
 import { parseModelMeta, displayModelName, isEmbeddingOnly, modelCapsToProviderCaps } from '../types';
 import { formatBytes, formatPayload, formatTime, mcpStatusClass } from '../utils';
 
-type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search';
+type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search' | 'plugins';
 type LocalModelView = 'library' | 'search' | 'hardware';
 
 interface SettingsCategory {

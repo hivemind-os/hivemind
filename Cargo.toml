@@ -17,6 +17,7 @@ members = [
     "crates/hive-iwork",
     "crates/hive-knowledge", "crates/hive-local-models", "crates/hive-loop", "crates/hive-mcp",
     "crates/hive-node-env",
+    "crates/hive-plugins",
     "crates/hive-process",
     "crates/hive-python-env",
     "crates/hive-sandbox",

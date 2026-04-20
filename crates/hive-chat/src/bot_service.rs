@@ -54,6 +54,8 @@ pub(crate) struct BotService {
     pub(crate) sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>>,
     pub(crate) event_bus: hive_core::EventBus,
     pub(crate) web_search_config: Arc<ArcSwap<hive_contracts::WebSearchConfig>>,
+    pub(crate) plugin_host: Option<Arc<hive_plugins::PluginHost>>,
+    pub(crate) plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
 }
 
 impl BotService {
@@ -127,6 +129,8 @@ impl BotService {
             Some(Arc::clone(&self.model_router.load())),
             None, // Bot supervisor — no persona-specific models
             Some(&*self.web_search_config.load()),
+            self.plugin_host.as_ref(),
+            self.plugin_registry.as_ref().map(|r| r.as_ref()),
         )
         .await;
 
@@ -181,6 +185,8 @@ impl BotService {
                 Arc::clone(&self.skills_service),
                 Some(Arc::clone(&self.model_router.load())),
                 Arc::clone(&self.web_search_config.load()),
+                self.plugin_host.clone(),
+                self.plugin_registry.clone(),
             ));
 
         let supervisor = Arc::new(AgentSupervisor::with_executor_and_persona_factory(

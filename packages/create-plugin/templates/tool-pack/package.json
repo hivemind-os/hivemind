@@ -1,0 +1,31 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "description": "{{description}}",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && hivemind-extract-schema",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hivemind-os/plugin-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "hivemind": {
+    "type": "tool-pack",
+    "displayName": "{{name}}",
+    "description": "{{description}}",
+    "categories": [],
+    "permissions": [
+      "secrets:read"
+    ]
+  },
+  "author": "{{author}}",
+  "license": "MIT"
+}

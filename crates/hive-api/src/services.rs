@@ -95,6 +95,10 @@ impl ServiceRegistry {
         self.services.write().push(service);
     }
 
+    pub fn deregister(&self, service_id: &str) {
+        self.services.write().retain(|s| s.service_id() != service_id);
+    }
+
     pub fn list(&self) -> Vec<ServiceSnapshot> {
         self.services.read().iter().map(|s| s.snapshot()).collect()
     }
@@ -138,6 +142,11 @@ impl ServiceRegistry {
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServiceStatusEvent> {
         self.status_tx.subscribe()
+    }
+
+    /// Get a clone of the status broadcast sender for external producers.
+    pub fn status_sender(&self) -> broadcast::Sender<ServiceStatusEvent> {
+        self.status_tx.clone()
     }
 
     fn emit(&self, service_id: &str, status: ServiceStatus, error: Option<String>) {
@@ -928,6 +937,79 @@ impl DaemonService for NodeEnvDaemonService {
 
     fn last_error(&self) -> Option<String> {
         self.last_error.lock().clone()
+    }
+}
+
+// ── Plugin Daemon Service ────────────────────────────────────────────
+
+/// A daemon service adapter for TypeScript connector plugins.
+///
+/// Each installed plugin is registered as a service so it appears in
+/// FlightDeck with status, start/stop controls, etc.
+pub struct PluginDaemonService {
+    /// Service ID formatted as `plugin:<plugin_id>`.
+    service_id: String,
+    /// Raw plugin ID used for lookups in `PluginHost`.
+    raw_plugin_id: String,
+    display_name: String,
+    plugin_host: Arc<hive_plugins::PluginHost>,
+}
+
+impl PluginDaemonService {
+    pub fn new(
+        raw_plugin_id: String,
+        display_name: String,
+        plugin_host: Arc<hive_plugins::PluginHost>,
+    ) -> Self {
+        let service_id = format!("plugin:{raw_plugin_id}");
+        Self { service_id, raw_plugin_id, display_name, plugin_host }
+    }
+}
+
+#[async_trait]
+impl DaemonService for PluginDaemonService {
+    fn service_id(&self) -> &str {
+        &self.service_id
+    }
+
+    fn display_name(&self) -> String {
+        self.display_name.clone()
+    }
+
+    fn category(&self) -> ServiceCategory {
+        ServiceCategory::Connector
+    }
+
+    fn status(&self) -> ServiceStatus {
+        match self.plugin_host.get(&self.raw_plugin_id) {
+            Some(proc) => {
+                let s = proc.status();
+                match s.state.as_str() {
+                    "connected" | "syncing" => ServiceStatus::Running,
+                    "connecting" => ServiceStatus::Starting,
+                    "error" => ServiceStatus::Error,
+                    "disconnected" => ServiceStatus::Stopped,
+                    _ => ServiceStatus::Running,
+                }
+            }
+            None => ServiceStatus::Stopped,
+        }
+    }
+
+    async fn start(&self) -> anyhow::Result<()> {
+        // Plugin start is managed by the plugin activation system.
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        self.plugin_host.stop(&self.raw_plugin_id).await
+    }
+
+    fn last_error(&self) -> Option<String> {
+        self.plugin_host.get(&self.raw_plugin_id).and_then(|proc| {
+            let s = proc.status();
+            if s.state == "error" { s.message.clone() } else { None }
+        })
     }
 }
 

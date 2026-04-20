@@ -63,6 +63,8 @@ async fn boot() -> (String, Arc<Notify>, TempDir, Arc<SchedulerService>) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        None, // plugin_host
+        None, // plugin_registry
     ));
 
     let state = AppState::with_chat(config, audit, event_bus, shutdown.clone(), chat);
@@ -1575,6 +1577,7 @@ async fn t55_invoke_agent_fails_gracefully_without_runner() {
             persona_id: "analyst".into(),
             task: "Do something".into(),
             friendly_name: None,
+            async_exec: false,
             timeout_secs: None,
             permissions: None,
         },

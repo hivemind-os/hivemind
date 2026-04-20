@@ -1033,6 +1033,10 @@ pub struct ChatService {
     pub(crate) indexing_service: crate::indexing_service::IndexingService,
     /// Entity ownership graph (set after construction).
     pub(crate) entity_graph: Arc<Mutex<Option<Arc<hive_core::EntityGraph>>>>,
+    /// Plugin host for executing plugin tools.
+    plugin_host: Option<Arc<hive_plugins::PluginHost>>,
+    /// Plugin registry for plugin persona filtering.
+    plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
 }
 
 impl ChatService {
@@ -1078,6 +1082,8 @@ impl ChatService {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            None, // plugin_host
+            None, // plugin_registry
         )
     }
 
@@ -1106,6 +1112,8 @@ impl ChatService {
         sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>>,
         detected_shells: Arc<hive_contracts::DetectedShells>,
         tool_limits: hive_contracts::ToolLimitsConfig,
+        plugin_host: Option<Arc<hive_plugins::PluginHost>>,
+        plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
     ) -> Self {
         let connector_registry = connector_registry
             .unwrap_or_else(|| Arc::new(hive_connectors::ConnectorRegistry::new()));
@@ -1550,6 +1558,8 @@ impl ChatService {
             sandbox_config: sandbox_config.clone(),
             event_bus: event_bus.clone(),
             web_search_config: Arc::clone(&web_search_config_swap),
+            plugin_host: plugin_host.clone(),
+            plugin_registry: plugin_registry.clone(),
         };
 
         let indexing_service = crate::indexing_service::IndexingService {
@@ -1601,6 +1611,8 @@ impl ChatService {
             bot_service,
             indexing_service,
             entity_graph: Arc::new(Mutex::new(None)),
+            plugin_host,
+            plugin_registry,
         }
     }
 
@@ -1986,7 +1998,7 @@ impl ChatService {
         };
 
         let session_mcp_manager = {
-            let persona_mcp_configs = self.mcp_configs_for_persona(persona_id.as_deref());
+            let persona_mcp_configs = self.mcp_configs_for_persona(persona_id.as_deref().unwrap_or("system/general"));
             if let Some(mgr) =
                 self.build_session_mcp_from_configs(session_id.clone(), &persona_mcp_configs)
             {
@@ -2281,7 +2293,7 @@ impl ChatService {
 
             let restored_session_mcp = {
                 let persona_mcp_configs =
-                    self.mcp_configs_for_persona(restored.last_persona_id.as_deref());
+                    self.mcp_configs_for_persona(restored.last_persona_id.as_deref().unwrap_or("system/general"));
                 if let Some(mgr) = self.build_session_mcp_from_configs(
                     restored.session_id.clone(),
                     &persona_mcp_configs,
@@ -3594,7 +3606,7 @@ impl ChatService {
         for (session_id, record) in sessions.iter() {
             if let Some(ref smcp) = record.session_mcp {
                 let persona_configs =
-                    self.mcp_configs_for_persona(record.active_persona_id.as_deref());
+                    self.mcp_configs_for_persona(record.active_persona_id.as_deref().unwrap_or("system/general"));
                 smcp.update_servers(&persona_configs).await;
                 tracing::debug!(
                     session_id = %session_id,
@@ -3612,11 +3624,10 @@ impl ChatService {
     /// servers plus that persona's MCP servers.  If `None`, falls back to
     /// Returns MCP server configs for the given persona. If no persona is
     /// specified, returns servers from all personas (for legacy sessions).
-    fn mcp_configs_for_persona(&self, persona_id: Option<&str>) -> Vec<hive_core::McpServerConfig> {
-        let id = persona_id.unwrap_or("system/general");
+    pub fn mcp_configs_for_persona(&self, persona_id: &str) -> Vec<hive_core::McpServerConfig> {
         let personas = self.personas.lock();
 
-        let persona = personas.iter().find(|p| p.id == id);
+        let persona = personas.iter().find(|p| p.id == persona_id);
         match persona {
             Some(p) => {
                 let mut seen_keys = std::collections::HashSet::new();
@@ -3637,7 +3648,7 @@ impl ChatService {
         persona_id: &str,
     ) -> Result<ChatSessionSnapshot, ChatServiceError> {
         // Compute per-persona MCP configs before acquiring write lock.
-        let persona_mcp_configs = self.mcp_configs_for_persona(Some(persona_id));
+        let persona_mcp_configs = self.mcp_configs_for_persona(persona_id);
 
         let persona = {
             let personas = self.personas.lock();
@@ -3773,6 +3784,8 @@ impl ChatService {
             Some(Arc::clone(&self.model_router.load())),
             None, // supervisor tools — persona models resolved per-agent via PersonaToolFactory
             Some(&*self.web_search_config.load()),
+            self.plugin_host.as_ref(),
+            self.plugin_registry.as_ref().map(|r| r.as_ref()),
         )
         .await;
 
@@ -3810,6 +3823,8 @@ impl ChatService {
                     Arc::clone(&self.skills_service),
                     Some(Arc::clone(&self.model_router.load())),
                     Arc::clone(&self.web_search_config.load()),
+                    self.plugin_host.clone(),
+                    self.plugin_registry.clone(),
                 ));
 
             let supervisor = Arc::new(AgentSupervisor::with_executor_and_persona_factory(
@@ -6169,6 +6184,8 @@ impl ChatService {
                     .clone()
                     .or_else(|| pending.persona.preferred_models.clone()),
                 Some(&*self.web_search_config.load()),
+                self.plugin_host.as_ref(),
+                self.plugin_registry.as_ref().map(|r| r.as_ref()),
             )
             .await;
             let agent_orchestrator: Arc<dyn AgentOrchestrator> =
@@ -8471,6 +8488,8 @@ pub(crate) async fn build_session_tools(
     model_router: Option<Arc<ModelRouter>>,
     preferred_models: Option<Vec<String>>,
     web_search_config: Option<&hive_contracts::WebSearchConfig>,
+    plugin_host: Option<&Arc<hive_plugins::PluginHost>>,
+    plugin_registry: Option<&hive_plugins::PluginRegistry>,
 ) -> Arc<ToolRegistry> {
     let root = PathBuf::from(workspace_path);
     let mut registry = ToolRegistry::new();
@@ -8641,6 +8660,17 @@ pub(crate) async fn build_session_tools(
         let dyn_count = after - before;
         if dyn_count > 0 {
             tracing::info!(dyn_count, "registered dynamic connector service tools");
+        }
+    }
+
+    // Register plugin tools from enabled plugins.
+    if let (Some(host), Some(preg)) = (plugin_host, plugin_registry) {
+        let before = registry.list_definitions().len();
+        hive_plugins::register_plugin_tools(&mut registry, host, preg, persona_id).await;
+        let after = registry.list_definitions().len();
+        let plugin_count = after - before;
+        if plugin_count > 0 {
+            tracing::info!(plugin_count, "registered plugin tools for session");
         }
     }
 
@@ -10052,6 +10082,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .await;
 
@@ -10122,6 +10154,8 @@ mod tests {
             Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
+            None,
+            None,
             None,
             None,
             None,
@@ -11097,6 +11131,8 @@ mod tests {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            None, // plugin_host
+            None, // plugin_registry
         ));
         // Put the MCP server on the default persona so sessions pick it up.
         let mut default_persona = Persona::default_persona();
@@ -11146,6 +11182,8 @@ mod tests {
             service.sandbox_config.clone(),
             Arc::clone(&service.detected_shells),
             Some(&persona.id),
+            None,
+            None,
             None,
             None,
             None,
