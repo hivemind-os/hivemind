@@ -873,6 +873,9 @@ impl AppState {
         // plugin host handler can publish notifications.
         let plugin_notify_bus = event_bus.clone();
 
+        // Clone scheduler for the plugin host handler closure.
+        let plugin_scheduler = scheduler.clone();
+
         Ok(Self {
             start_time: Instant::now(),
             shutdown,
@@ -919,10 +922,12 @@ impl AppState {
                 // store via filesystem).
                 let store_base = data_dir;
                 let notify_event_bus = plugin_notify_bus.clone();
+                let scheduler_for_handler = plugin_scheduler.clone();
                 host = host.with_host_handler(Arc::new(move |method: &str, params: serde_json::Value| {
                     let method = method.to_string();
                     let store_base = store_base.clone();
                     let notify_bus = notify_event_bus.clone();
+                    let scheduler = scheduler_for_handler.clone();
                     Box::pin(async move {
                         match method.as_str() {
                             "host/secretGet" => {
@@ -1030,6 +1035,76 @@ impl AppState {
                             }
                             "host/httpFetch" => {
                                 anyhow::bail!("host/httpFetch not yet implemented in host handler")
+                            }
+                            "host/schedule" => {
+                                let id = params["id"].as_str().unwrap_or("").to_string();
+                                let interval_secs = params["intervalSeconds"].as_u64().unwrap_or(60);
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown").to_string();
+
+                                // Convert intervalSeconds to a cron expression (minimum 1 minute granularity)
+                                let minutes = std::cmp::max(1, interval_secs / 60);
+                                let cron_expr = if minutes >= 60 {
+                                    let hours = minutes / 60;
+                                    format!("0 */{} * * *", hours)
+                                } else {
+                                    format!("*/{} * * * *", minutes)
+                                };
+
+                                let task_name = format!("plugin:{}:{}", plugin_id, id);
+                                let request = CreateTaskRequest {
+                                    name: task_name,
+                                    description: Some(format!(
+                                        "Scheduled by plugin '{}' (interval: {}s)",
+                                        plugin_id, interval_secs
+                                    )),
+                                    schedule: TaskSchedule::Cron {
+                                        expression: cron_expr,
+                                    },
+                                    action: TaskAction::EmitEvent {
+                                        topic: "plugin.scheduled_task".to_string(),
+                                        payload: serde_json::json!({
+                                            "pluginId": plugin_id,
+                                            "taskId": id,
+                                        }),
+                                    },
+                                    owner_session_id: None,
+                                    owner_agent_id: Some(plugin_id),
+                                    max_retries: None,
+                                    retry_delay_ms: None,
+                                };
+
+                                match scheduler.create_task(request) {
+                                    Ok(task) => Ok(serde_json::json!({
+                                        "taskId": task.id,
+                                        "ok": true,
+                                    })),
+                                    Err(e) => {
+                                        anyhow::bail!("Failed to schedule task: {}", e)
+                                    }
+                                }
+                            }
+                            "host/unschedule" => {
+                                let id = params["id"].as_str().unwrap_or("").to_string();
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown").to_string();
+                                let task_name = format!("plugin:{}:{}", plugin_id, id);
+
+                                // Find the task by name and cancel it
+                                let tasks = scheduler.list_tasks();
+                                let task = tasks.iter().find(|t| t.name == task_name);
+                                match task {
+                                    Some(t) => {
+                                        match scheduler.cancel_task(&t.id) {
+                                            Ok(_) => Ok(serde_json::json!({ "ok": true })),
+                                            Err(e) => {
+                                                anyhow::bail!("Failed to unschedule task: {}", e)
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        // Task not found — not an error, just a no-op
+                                        Ok(serde_json::json!({ "ok": true, "found": false }))
+                                    }
+                                }
                             }
                             _ => {
                                 anyhow::bail!("Unknown host method: {}", method)

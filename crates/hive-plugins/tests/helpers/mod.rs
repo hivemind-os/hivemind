@@ -32,6 +32,7 @@ pub struct PluginTestEnv {
     pub secrets: Arc<parking_lot::Mutex<HashMap<String, String>>>,
     pub store: Arc<parking_lot::Mutex<HashMap<String, String>>>,
     pub notifications: Arc<parking_lot::Mutex<Vec<Value>>>,
+    pub schedules: Arc<parking_lot::Mutex<Vec<Value>>>,
     pub temp_dir: tempfile::TempDir,
 }
 
@@ -73,6 +74,8 @@ impl PluginTestEnv {
             Arc::new(parking_lot::Mutex::new(HashMap::new()));
         let notifications: Arc<parking_lot::Mutex<Vec<Value>>> =
             Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let schedules: Arc<parking_lot::Mutex<Vec<Value>>> =
+            Arc::new(parking_lot::Mutex::new(Vec::new()));
 
         // ── build the host handler closure ──────────────────────────────
         let handler = build_host_handler(
@@ -82,6 +85,7 @@ impl PluginTestEnv {
             secrets.clone(),
             store.clone(),
             notifications.clone(),
+            schedules.clone(),
         );
 
         // ── create host & spawn plugin ──────────────────────────────────
@@ -113,6 +117,7 @@ impl PluginTestEnv {
             secrets,
             store,
             notifications,
+            schedules,
             temp_dir,
         })
     }
@@ -235,6 +240,7 @@ fn build_host_handler(
     secrets: Arc<parking_lot::Mutex<HashMap<String, String>>>,
     store: Arc<parking_lot::Mutex<HashMap<String, String>>>,
     notifications: Arc<parking_lot::Mutex<Vec<Value>>>,
+    schedules: Arc<parking_lot::Mutex<Vec<Value>>>,
 ) -> HostHandler {
     Arc::new(move |method: &str, params: Value| {
         // Clone Arcs into the future
@@ -244,6 +250,7 @@ fn build_host_handler(
         let secrets = secrets.clone();
         let store = store.clone();
         let notifications = notifications.clone();
+        let schedules = schedules.clone();
         let method = method.to_string();
 
         Box::pin(async move {
@@ -363,6 +370,23 @@ fn build_host_handler(
                 // ── HTTP fetch (best-effort real request) ───────────
                 protocol::host_methods::HTTP_FETCH => {
                     handle_http_fetch(params).await
+                }
+
+                // ── scheduling ──────────────────────────────────────
+                protocol::host_methods::SCHEDULE => {
+                    schedules.lock().push(json!({
+                        "action": "schedule",
+                        "id": params["id"].as_str().unwrap_or(""),
+                        "intervalSeconds": params["intervalSeconds"].as_u64().unwrap_or(0),
+                    }));
+                    Ok(json!({ "ok": true, "taskId": format!("test-task-{}", params["id"].as_str().unwrap_or("unknown")) }))
+                }
+                protocol::host_methods::UNSCHEDULE => {
+                    schedules.lock().push(json!({
+                        "action": "unschedule",
+                        "id": params["id"].as_str().unwrap_or(""),
+                    }));
+                    Ok(json!({ "ok": true }))
                 }
 
                 // ── logging (no-op, just trace) ─────────────────────

@@ -3779,6 +3779,7 @@ dependencies = [
  "anyhow",
  "futures-util",
  "hive-contracts",
+ "hive-core",
  "hive-node-env",
  "parking_lot",
  "reqwest 0.12.28",

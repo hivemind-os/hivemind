@@ -287,6 +287,34 @@ export default definePlugin({
                 };
             },
         },
+        // ── 12. Scheduler ───────────────────────────────────────
+        {
+            name: "test_scheduler",
+            description: "Tests host scheduler integration (schedule/unschedule)",
+            parameters: z.object({
+                action: z.enum(["schedule", "unschedule"]),
+                id: z.string().describe("Task identifier"),
+                intervalSeconds: z.number().optional().describe("Interval in seconds (for schedule)"),
+            }),
+            execute: async (params, ctx) => {
+                switch (params.action) {
+                    case "schedule":
+                        await ctx.schedule({
+                            id: params.id,
+                            intervalSeconds: params.intervalSeconds ?? 60,
+                            handler: async () => {
+                                ctx.logger.info(`Scheduled task ${params.id} fired`);
+                            },
+                        });
+                        return { content: `Scheduled task '${params.id}'` };
+                    case "unschedule":
+                        await ctx.unschedule(params.id);
+                        return { content: `Unscheduled task '${params.id}'` };
+                    default:
+                        return { content: "unknown action", isError: true };
+                }
+            },
+        },
     ],
     // ── Background Loop ─────────────────────────────────────────
     loop: async (ctx) => {

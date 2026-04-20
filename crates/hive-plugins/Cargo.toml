@@ -26,3 +26,4 @@ hive-node-env = { path = "../hive-node-env" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+hive-core = { path = "../hive-core" }
