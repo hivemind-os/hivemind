@@ -45,7 +45,7 @@ export default definePlugin({
       .number()
       .min(1)
       .max(3600)
-      .default(5)
+      .default(30)
       .label("Poll Interval (seconds)")
       .section("Sync"),
     failOnActivate: z

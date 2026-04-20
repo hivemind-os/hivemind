@@ -23,7 +23,7 @@
     "pollInterval": {
       "type": "number",
       "description": "Poll Interval (seconds)",
-      "default": 5,
+      "default": 30,
       "hivemind": {
         "label": "Poll Interval (seconds)",
         "section": "Sync"
