@@ -77,7 +77,32 @@ pub(crate) async fn api_save_config(
     Json(config): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     match state.plugin_registry.update_config(&plugin_id, config) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            // Restart plugin with new config if it's enabled
+            if let Some(plugin) = state.plugin_registry.get(&plugin_id) {
+                if plugin.enabled {
+                    let host = state.plugin_host.clone();
+                    let pid = plugin_id.clone();
+                    let entry = plugin.manifest.main.clone();
+                    let new_config = plugin.config.clone();
+                    let path = plugin.install_path.clone();
+                    let meta = plugin.manifest.hivemind.clone();
+                    let has_loop = meta.permissions.iter().any(|p| p == "loop:background");
+                    tokio::spawn(async move {
+                        // Stop existing process
+                        let _ = host.stop(&pid).await;
+                        // Re-spawn with new config
+                        if let Ok(_) = host.spawn(&pid, &path, &entry, new_config.clone(), Some(&meta)).await {
+                            let _ = host.activate(&pid, Some(new_config)).await;
+                            if has_loop {
+                                let _ = host.start_loop(&pid).await;
+                            }
+                        }
+                    });
+                }
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": e.to_string() })),
@@ -97,7 +122,34 @@ pub(crate) async fn api_set_enabled(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     match state.plugin_registry.set_enabled(&plugin_id, enabled) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            if enabled {
+                // Spawn and activate the plugin
+                if let Some(plugin) = state.plugin_registry.get(&plugin_id) {
+                    let host = state.plugin_host.clone();
+                    let pid = plugin_id.clone();
+                    let entry = plugin.manifest.main.clone();
+                    let config = plugin.config.clone();
+                    let path = plugin.install_path.clone();
+                    let meta = plugin.manifest.hivemind.clone();
+                    let has_loop = meta.permissions.iter().any(|p| p == "loop:background");
+                    tokio::spawn(async move {
+                        if let Ok(_) = host.spawn(&pid, &path, &entry, config.clone(), Some(&meta)).await {
+                            let _ = host.activate(&pid, Some(config)).await;
+                            if has_loop {
+                                let _ = host.start_loop(&pid).await;
+                            }
+                        }
+                    });
+                }
+            } else {
+                // Stop the plugin process
+                let host = state.plugin_host.clone();
+                let pid = plugin_id.clone();
+                tokio::spawn(async move { let _ = host.stop(&pid).await; });
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": e.to_string() })),

@@ -1503,9 +1503,10 @@ impl AppState {
         self.service_registry.register(node_svc);
 
         // Plugin services — register each installed plugin so it appears in FlightDeck.
+        // Also spawn and activate enabled plugins so they actually run.
         {
             let plugins = self.plugin_registry.list();
-            for plugin in plugins {
+            for plugin in &plugins {
                 let plugin_id = plugin.manifest.plugin_id();
                 let display_name = plugin.manifest.hivemind.display_name.clone();
                 let svc = services::PluginDaemonService::new(
@@ -1515,6 +1516,44 @@ impl AppState {
                 );
                 self.service_registry.register(Arc::new(svc));
             }
+
+            // Auto-start enabled plugins
+            let host = self.plugin_host.clone();
+            let registry = self.plugin_registry.clone();
+            tokio::spawn(async move {
+                for plugin in registry.list() {
+                    if !plugin.enabled {
+                        continue;
+                    }
+                    let plugin_id = plugin.manifest.plugin_id();
+                    let entry_point = &plugin.manifest.main;
+                    let config = plugin.config.clone();
+                    let install_path = plugin.install_path.clone();
+                    let meta = plugin.manifest.hivemind.clone();
+                    let has_loop = meta.permissions.iter().any(|p| p == "loop:background");
+
+                    match host
+                        .spawn(&plugin_id, &install_path, entry_point, config.clone(), Some(&meta))
+                        .await
+                    {
+                        Ok(_) => {
+                            if let Err(e) = host.activate(&plugin_id, Some(config)).await {
+                                tracing::warn!(plugin_id, error = %e, "failed to activate plugin");
+                                continue;
+                            }
+                            if has_loop {
+                                if let Err(e) = host.start_loop(&plugin_id).await {
+                                    tracing::warn!(plugin_id, error = %e, "failed to start plugin loop");
+                                }
+                            }
+                            tracing::info!(plugin_id, "plugin auto-started");
+                        }
+                        Err(e) => {
+                            tracing::warn!(plugin_id, error = %e, "failed to spawn plugin");
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -1527,6 +1566,8 @@ impl AppState {
         }
         self.trigger_manager.stop().await;
         self.scheduler.stop().await;
+        // Stop all running plugin processes.
+        self.plugin_host.stop_all().await;
         // Disconnect all MCP servers (kills child processes + cancels tasks).
         // Per-session MCP managers handle their own connections.
         {
