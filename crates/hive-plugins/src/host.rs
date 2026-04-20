@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 /// An event emitted by a plugin via `host/emitEvent`.
 #[derive(Debug, Clone)]
@@ -27,6 +27,13 @@ pub struct PluginEvent {
     pub plugin_id: String,
     pub event_type: String,
     pub payload: Value,
+}
+
+/// Broadcast when a plugin's status changes via `host/updateStatus`.
+#[derive(Debug, Clone)]
+pub struct PluginStatusChange {
+    pub plugin_id: String,
+    pub status: PluginStatus,
 }
 
 /// A running plugin process.
@@ -104,11 +111,14 @@ pub struct PluginHost {
     health: Arc<HealthMonitor>,
     /// Broadcast channel for plugin events emitted via `host/emitEvent`.
     plugin_event_tx: broadcast::Sender<PluginEvent>,
+    /// Broadcast channel for plugin status changes via `host/updateStatus`.
+    status_tx: broadcast::Sender<PluginStatusChange>,
 }
 
 impl PluginHost {
     pub fn new(plugins_dir: PathBuf, data_dir: PathBuf) -> Self {
         let (plugin_event_tx, _) = broadcast::channel(256);
+        let (status_tx, _) = broadcast::channel(64);
         Self {
             plugins_dir,
             data_dir,
@@ -129,6 +139,7 @@ impl PluginHost {
             host_handler: None,
             health: Arc::new(HealthMonitor::new(HealthConfig::default())),
             plugin_event_tx,
+            status_tx,
         }
     }
 
@@ -149,6 +160,11 @@ impl PluginHost {
     /// running plugins.
     pub fn subscribe_events(&self) -> broadcast::Receiver<PluginEvent> {
         self.plugin_event_tx.subscribe()
+    }
+
+    /// Subscribe to plugin status changes emitted via `host/updateStatus`.
+    pub fn subscribe_status(&self) -> broadcast::Receiver<PluginStatusChange> {
+        self.status_tx.subscribe()
     }
 
     /// Spawn a plugin process from its package directory.
@@ -240,13 +256,14 @@ impl PluginHost {
 
         // Stderr reader task
         let pid = plugin_id.to_string();
+        let stderr_span = tracing::info_span!("plugin_stderr", service = %format!("plugin:{}", pid));
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                debug!(plugin_id = %pid, "[stderr] {}", line);
+                warn!("[stderr] {}", line);
             }
-        });
+        }.instrument(stderr_span));
 
         // Plugin event forwarder — bridge the per-process mpsc into the
         // shared broadcast channel so external subscribers (e.g. EventBus)
@@ -271,7 +288,11 @@ impl PluginHost {
         let host_handler = self.host_handler.clone();
         let process_for_reader = process.clone();
         let reader_sandbox = sandbox;
+        let status_broadcast_tx = self.status_tx.clone();
+        let plugin_id_for_status = plugin_id.to_string();
 
+        let stdout_service_id = format!("plugin:{}", plugin_id);
+        let stdout_span = tracing::info_span!("plugin_process", service = %stdout_service_id);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let mut header_buf = String::new();
@@ -443,7 +464,11 @@ impl PluginHost {
                                 tokio::spawn(async move { let _ = h("host/updateStatus", p).await; });
                             }
                             if let Ok(status) = serde_json::from_value::<PluginStatus>(params.clone()) {
-                                *process_status.write() = status;
+                                *process_status.write() = status.clone();
+                                let _ = status_broadcast_tx.send(PluginStatusChange {
+                                    plugin_id: plugin_id_for_status.clone(),
+                                    status,
+                                });
                             }
                             if has_id {
                                 let resp = JsonRpcResponse::success(msg["id"].clone(), Value::Null);
@@ -456,10 +481,10 @@ impl PluginHost {
                             let level = params["level"].as_str().unwrap_or("info");
                             let log_msg = params["msg"].as_str().unwrap_or("");
                             match level {
-                                "debug" => debug!(plugin = %"plugin", "{}", log_msg),
-                                "warn" => warn!(plugin = %"plugin", "{}", log_msg),
-                                "error" => error!(plugin = %"plugin", "{}", log_msg),
-                                _ => info!(plugin = %"plugin", "{}", log_msg),
+                                "debug" => debug!("{}", log_msg),
+                                "warn" => warn!("{}", log_msg),
+                                "error" => error!("{}", log_msg),
+                                _ => info!("{}", log_msg),
                             }
                             // Log is a notification, no response needed
                         }
@@ -496,7 +521,7 @@ impl PluginHost {
                     }
                 }
             }
-        });
+        }.instrument(stdout_span));
 
         // Wait for plugin/ready notification (with timeout)
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;

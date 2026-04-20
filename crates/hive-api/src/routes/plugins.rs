@@ -115,6 +115,8 @@ pub(crate) async fn api_uninstall(
     let host = state.plugin_host.clone();
     let pid = plugin_id.clone();
     let _ = tokio::spawn(async move { host.stop(&pid).await }).await;
+    // Deregister from FlightDeck services.
+    state.service_registry.deregister(&format!("plugin:{plugin_id}"));
     match state.plugin_registry.uninstall(&plugin_id) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (
@@ -142,7 +144,18 @@ pub(crate) async fn api_link_local(
     };
 
     match state.plugin_registry.register_local(&path) {
-        Ok(plugin_id) => Json(json!({ "plugin_id": plugin_id })).into_response(),
+        Ok(plugin_id) => {
+            // Register as a FlightDeck service.
+            if let Some(p) = state.plugin_registry.get(&plugin_id) {
+                let svc = crate::services::PluginDaemonService::new(
+                    plugin_id.clone(),
+                    p.manifest.hivemind.display_name.clone(),
+                    state.plugin_host.clone(),
+                );
+                state.service_registry.register(std::sync::Arc::new(svc));
+            }
+            Json(json!({ "plugin_id": plugin_id })).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": e.to_string() })),
@@ -168,7 +181,18 @@ pub(crate) async fn api_install_npm(
     };
 
     match state.plugin_registry.install_npm(&package_name) {
-        Ok(plugin_id) => Json(json!({ "plugin_id": plugin_id })).into_response(),
+        Ok(plugin_id) => {
+            // Register as a FlightDeck service.
+            if let Some(p) = state.plugin_registry.get(&plugin_id) {
+                let svc = crate::services::PluginDaemonService::new(
+                    plugin_id.clone(),
+                    p.manifest.hivemind.display_name.clone(),
+                    state.plugin_host.clone(),
+                );
+                state.service_registry.register(std::sync::Arc::new(svc));
+            }
+            Json(json!({ "plugin_id": plugin_id })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),

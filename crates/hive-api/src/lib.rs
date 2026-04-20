@@ -1205,6 +1205,43 @@ impl AppState {
             });
         }
 
+        // Forward plugin status changes to the ServiceRegistry so
+        // FlightDeck receives real-time status updates via SSE.
+        {
+            let mut plugin_status_rx = self.plugin_host.subscribe_status();
+            let service_status_tx = self.service_registry.status_sender();
+            tokio::spawn(async move {
+                loop {
+                    match plugin_status_rx.recv().await {
+                        Ok(change) => {
+                            let service_id = format!("plugin:{}", change.plugin_id);
+                            let service_status = match change.status.state.as_str() {
+                                "connected" | "syncing" => hive_contracts::ServiceStatus::Running,
+                                "connecting" => hive_contracts::ServiceStatus::Starting,
+                                "error" => hive_contracts::ServiceStatus::Error,
+                                "disconnected" | "stopped" => hive_contracts::ServiceStatus::Stopped,
+                                _ => hive_contracts::ServiceStatus::Running,
+                            };
+                            let error = if change.status.state == "error" {
+                                change.status.message.clone()
+                            } else {
+                                None
+                            };
+                            let _ = service_status_tx.send(services::ServiceStatusEvent {
+                                service_id,
+                                status: service_status,
+                                error,
+                            });
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(skipped = n, "plugin status subscriber lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+        }
+
         // Restore bots and backfill entity graph in the background.
         // (Sessions were already restored synchronously above, before
         // workflow recovery.)
@@ -1389,6 +1426,21 @@ impl AppState {
 
         // Node.js environment
         self.service_registry.register(node_svc);
+
+        // Plugin services — register each installed plugin so it appears in FlightDeck.
+        {
+            let plugins = self.plugin_registry.list();
+            for plugin in plugins {
+                let plugin_id = plugin.manifest.plugin_id();
+                let display_name = plugin.manifest.hivemind.display_name.clone();
+                let svc = services::PluginDaemonService::new(
+                    plugin_id,
+                    display_name,
+                    Arc::clone(&self.plugin_host),
+                );
+                self.service_registry.register(Arc::new(svc));
+            }
+        }
     }
 
     /// Stop all background services so the tokio runtime can shut down cleanly.
