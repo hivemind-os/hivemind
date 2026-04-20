@@ -328,6 +328,7 @@ export default function ConnectorsTab(_props: { daemon_url?: string; onConnector
   function closeWizard() {
     setShowWizard(false);
     resetOauthState();
+    reloadAll();
   }
 
   async function finishWizard(config: ConnectorConfig) {
