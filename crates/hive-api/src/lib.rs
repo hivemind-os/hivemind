@@ -2179,6 +2179,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/plugins/{plugin_id}/config-schema", get(plugins::api_get_config_schema))
         .route("/api/v1/plugins/{plugin_id}/config", post(plugins::api_save_config))
         .route("/api/v1/plugins/{plugin_id}/enabled", post(plugins::api_set_enabled))
+        .route("/api/v1/plugins/{plugin_id}/personas", post(plugins::api_set_personas))
         .route("/api/v1/plugins/{plugin_id}", delete(plugins::api_uninstall))
         .route("/api/v1/local-models", get(local_models::api_list_local_models))
         .route("/api/v1/local-models/install", post(local_models::api_install_local_model))

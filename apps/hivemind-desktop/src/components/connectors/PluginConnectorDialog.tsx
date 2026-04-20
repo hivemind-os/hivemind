@@ -1,8 +1,9 @@
-import { createSignal, Show, type Component } from 'solid-js';
+import { createSignal, Show, onMount, type Component } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import PluginConfigForm from '../plugins/PluginConfigForm';
 import type { PluginConfigSchema } from '../plugins/PluginConfigForm';
 import type { InstalledPlugin } from './types';
+import { PersonaSelector, type PersonaInfo } from '../shared';
 import { Button, Badge } from '~/ui';
 
 export interface PluginConnectorDialogProps {
@@ -18,6 +19,18 @@ export function PluginConnectorDialog(props: PluginConnectorDialogProps) {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
+  // Persona access control
+  const [availablePersonas, setAvailablePersonas] = createSignal<{ id: string; name: string }[]>([]);
+  const [selectedPersonas, setSelectedPersonas] = createSignal<string[]>(
+    props.plugin.allowed_personas ? [...props.plugin.allowed_personas] : []
+  );
+
+  onMount(() => {
+    invoke<{ id: string; name: string }[]>('list_personas', { include_archived: false })
+      .then((ps) => setAvailablePersonas(ps.map((p) => ({ id: p.id, name: p.name }))))
+      .catch(() => {});
+  });
+
   const schema = () => props.plugin.config_schema;
 
   async function saveConfig() {
@@ -27,6 +40,10 @@ export function PluginConnectorDialog(props: PluginConnectorDialogProps) {
       await invoke('plugin_save_config', {
         plugin_id: props.plugin.plugin_id,
         config: editConfig(),
+      });
+      await invoke('plugin_set_personas', {
+        plugin_id: props.plugin.plugin_id,
+        allowed_personas: selectedPersonas(),
       });
       props.onSave();
     } catch (e: any) {
@@ -139,6 +156,25 @@ export function PluginConnectorDialog(props: PluginConnectorDialogProps) {
               />
             )}
           </Show>
+
+          {/* Persona Access Control */}
+          <div class="mt-4 border-t border-input pt-4">
+            <span class="mb-1 block text-xs font-medium text-muted-foreground">Allowed Personas</span>
+            <p class="mb-2 text-xs text-muted-foreground">
+              Select which personas can use this plugin's tools. Leave empty for all personas.
+            </p>
+            <PersonaSelector
+              multiple
+              values={selectedPersonas()}
+              onChange={setSelectedPersonas}
+              personas={availablePersonas()}
+            />
+            <Show when={selectedPersonas().length === 0}>
+              <p class="mt-1 text-xs text-muted-foreground italic">
+                No restrictions — all personas can use this plugin.
+              </p>
+            </Show>
+          </div>
         </div>
 
         {/* Footer */}

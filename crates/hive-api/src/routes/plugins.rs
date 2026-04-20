@@ -32,6 +32,7 @@ pub(crate) async fn api_list_plugins(State(state): State<AppState>) -> Json<serd
                 "config_schema": p.config_schema,
                 "status": status,
                 "permissions": p.manifest.hivemind.permissions,
+                "allowed_personas": p.allowed_personas,
             })
         })
         .collect();
@@ -103,6 +104,26 @@ pub(crate) async fn api_save_config(
             }
             StatusCode::NO_CONTENT.into_response()
         }
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/v1/plugins/:id/personas — set allowed personas for a plugin.
+pub(crate) async fn api_set_personas(
+    State(state): State<AppState>,
+    Path(plugin_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let personas: Vec<String> = body
+        .get("allowed_personas")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    match state.plugin_registry.set_allowed_personas(&plugin_id, personas) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": e.to_string() })),

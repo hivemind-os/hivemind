@@ -18,6 +18,9 @@ pub struct InstalledPlugin {
     /// Cached config schema (extracted at registration time).
     #[serde(default)]
     pub config_schema: Option<serde_json::Value>,
+    /// Persona IDs allowed to use this plugin's tools. Empty = all personas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_personas: Vec<String>,
 }
 
 /// Manages installed plugins.
@@ -111,6 +114,7 @@ impl PluginRegistry {
             enabled: true,
             config: serde_json::Value::Object(Default::default()),
             config_schema,
+            allowed_personas: Vec::new(),
         };
 
         self.plugins.write().insert(plugin_id.clone(), installed);
@@ -156,6 +160,19 @@ impl PluginRegistry {
         let mut plugins = self.plugins.write();
         if let Some(plugin) = plugins.get_mut(plugin_id) {
             plugin.enabled = enabled;
+            drop(plugins);
+            self.save()?;
+            Ok(())
+        } else {
+            anyhow::bail!("Plugin not found: {}", plugin_id)
+        }
+    }
+
+    /// Update the allowed personas for a plugin.
+    pub fn set_allowed_personas(&self, plugin_id: &str, personas: Vec<String>) -> anyhow::Result<()> {
+        let mut plugins = self.plugins.write();
+        if let Some(plugin) = plugins.get_mut(plugin_id) {
+            plugin.allowed_personas = personas;
             drop(plugins);
             self.save()?;
             Ok(())
@@ -239,6 +256,7 @@ impl PluginRegistry {
             enabled: true,
             config: serde_json::Value::Object(Default::default()),
             config_schema,
+            allowed_personas: Vec::new(),
         };
 
         self.plugins.write().insert(plugin_id.clone(), installed);

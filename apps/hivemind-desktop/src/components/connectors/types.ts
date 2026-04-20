@@ -26,6 +26,7 @@ export interface InstalledPlugin {
   config_schema?: PluginConfigSchema | null;
   status?: { state: string; message?: string };
   permissions: string[];
+  allowed_personas?: string[];
 }
 
 // ── Unified Integration type ─────────────────────────────────────

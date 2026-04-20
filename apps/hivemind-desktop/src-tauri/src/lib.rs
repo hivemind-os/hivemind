@@ -5345,6 +5345,20 @@ async fn plugin_set_enabled(plugin_id: String, enabled: bool) -> Result<(), Stri
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn plugin_set_personas(plugin_id: String, allowed_personas: Vec<String>) -> Result<(), String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        blocking_post_json_no_content(
+            &base_url,
+            &format!("/api/v1/plugins/{}/personas", encode_query(&plugin_id)),
+            &serde_json::json!({ "allowed_personas": allowed_personas }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn plugin_uninstall(plugin_id: String) -> Result<(), String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -5635,6 +5649,7 @@ pub fn run() {
             plugin_get_config_schema,
             plugin_save_config,
             plugin_set_enabled,
+            plugin_set_personas,
             plugin_uninstall,
             plugin_link_local,
             plugin_install_npm,
