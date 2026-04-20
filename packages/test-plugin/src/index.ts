@@ -333,7 +333,7 @@ export default definePlugin({
   // ── Background Loop ─────────────────────────────────────────
   loop: async (ctx) => {
     let tick = 0;
-    const pollInterval = ctx.config.pollInterval as number;
+    const pollInterval = (ctx.config.pollInterval as number) || 30;
     await ctx.updateStatus({ state: "syncing", message: "Loop starting" });
 
     while (!ctx.signal.aborted) {
