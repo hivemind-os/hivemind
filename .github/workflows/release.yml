@@ -231,7 +231,7 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      - name: Repackage updater bundle with signed installer
+      - name: Re-sign installer after Azure code-signing
         if: env.HAS_AZURE_SIGNING == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -246,49 +246,24 @@ jobs:
           if (-not $setupExe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
           Write-Host "Using signed installer: $($setupExe.Name)"
 
-          # Repackage the .nsis.zip so the updater delivers the signed exe.
-          # IMPORTANT: Use .NET ZipFile with NoCompression (Stored, method 0).
-          # The tauri-plugin-updater uses the `zip` crate without deflate
-          # support, so it can ONLY extract Stored entries (method 0).
-          $oldZip = Get-ChildItem -Path $nsisDir |
-                    Where-Object { $_.Name -like "*.nsis.zip" } |
-                    Select-Object -First 1
-          if ($oldZip) {
-            Remove-Item $oldZip.FullName -Force
-            Remove-Item "$($oldZip.FullName).sig" -Force -ErrorAction SilentlyContinue
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $zip = [System.IO.Compression.ZipFile]::Open($oldZip.FullName, 'Create')
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-              $zip, $setupExe.FullName, $setupExe.Name,
-              [System.IO.Compression.CompressionLevel]::NoCompression)
-            $zip.Dispose()
-            Write-Host "Repackaged updater bundle: $($oldZip.Name)"
-
-            # Verify the zip uses Stored (method 0) — the tauri updater
-            # cannot handle any other compression method.
-            $bytes = [System.IO.File]::ReadAllBytes($oldZip.FullName)
-            $method = [BitConverter]::ToUInt16($bytes, 8)
-            if ($method -ne 0) {
-              Write-Error "FATAL: nsis.zip uses compression method $method (expected 0 = Stored). The Tauri updater will reject this."
-              exit 1
-            }
-            Write-Host "Verified: compression method = Stored (0)"
-
-            # Re-sign the .nsis.zip with Tauri Ed25519 key
-            Push-Location apps/hivemind-desktop
-            npx tauri signer sign "$($oldZip.FullName)"
-            Pop-Location
-            Write-Host "Ed25519-signed: $($oldZip.Name).sig"
+          # Azure code-signing modified the exe binary, so the existing
+          # Ed25519 updater signature is now invalid. Re-sign it.
+          Remove-Item "$($setupExe.FullName).sig" -Force -ErrorAction SilentlyContinue
+          Push-Location apps/hivemind-desktop
+          npx tauri signer sign "$($setupExe.FullName)"
+          Pop-Location
+          if (-not (Test-Path "$($setupExe.FullName).sig")) {
+            Write-Error "Ed25519 signature file was not created"; exit 1
           }
+          Write-Host "Ed25519-signed: $($setupExe.Name).sig"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
           path: |
-            target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip
-            target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip.sig
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe.sig
 
   # ── Publish GitHub Release ──────────────────────────────────────────
 
@@ -353,22 +328,22 @@ jobs:
             PLATFORMS="$PLATFORMS\"darwin-x86_64\":{\"url\":\"${BASE_URL}/${TAR_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
-          # Windows x64 (.nsis.zip produced by tauri build)
-          SIG=$(find artifacts/windows-x64 -name "*.nsis.zip.sig" -type f -exec cat {} \; | head -1)
-          ZIP=$(find artifacts/windows-x64 -name "*.nsis.zip" -not -name "*.sig" -type f | head -1)
-          if [ -n "$ZIP" ] && [ -n "$SIG" ]; then
-            ZIP_NAME=$(basename "$ZIP")
-            ZIP_NAME="${ZIP_NAME// /.}"
-            PLATFORMS="$PLATFORMS\"windows-x86_64\":{\"url\":\"${BASE_URL}/${ZIP_NAME}\",\"signature\":\"${SIG}\"},"
+          # Windows x64 (setup exe produced by tauri build)
+          SIG=$(find artifacts/windows-x64 -name "*-setup.exe.sig" -type f -exec cat {} \; | head -1)
+          EXE=$(find artifacts/windows-x64 -name "*-setup.exe" -not -name "*.sig" -type f | head -1)
+          if [ -n "$EXE" ] && [ -n "$SIG" ]; then
+            EXE_NAME=$(basename "$EXE")
+            EXE_NAME="${EXE_NAME// /.}"
+            PLATFORMS="$PLATFORMS\"windows-x86_64\":{\"url\":\"${BASE_URL}/${EXE_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
           # Windows arm64
-          SIG=$(find artifacts/windows-arm64 -name "*.nsis.zip.sig" -type f -exec cat {} \; | head -1)
-          ZIP=$(find artifacts/windows-arm64 -name "*.nsis.zip" -not -name "*.sig" -type f | head -1)
-          if [ -n "$ZIP" ] && [ -n "$SIG" ]; then
-            ZIP_NAME=$(basename "$ZIP")
-            ZIP_NAME="${ZIP_NAME// /.}"
-            PLATFORMS="$PLATFORMS\"windows-aarch64\":{\"url\":\"${BASE_URL}/${ZIP_NAME}\",\"signature\":\"${SIG}\"},"
+          SIG=$(find artifacts/windows-arm64 -name "*-setup.exe.sig" -type f -exec cat {} \; | head -1)
+          EXE=$(find artifacts/windows-arm64 -name "*-setup.exe" -not -name "*.sig" -type f | head -1)
+          if [ -n "$EXE" ] && [ -n "$SIG" ]; then
+            EXE_NAME=$(basename "$EXE")
+            EXE_NAME="${EXE_NAME// /.}"
+            PLATFORMS="$PLATFORMS\"windows-aarch64\":{\"url\":\"${BASE_URL}/${EXE_NAME}\",\"signature\":\"${SIG}\"},"
           fi
 
           # Strip trailing comma and close the object
@@ -415,8 +390,8 @@ jobs:
           overwrite_files: true
           files: |
             artifacts/**/*.pkg
-            artifacts/**/*.exe
-            artifacts/**/*.nsis.zip
+            artifacts/**/*-setup.exe
+            artifacts/**/*-setup.exe.sig
             artifacts/**/*.app.tar.gz
             artifacts/stable/*
             artifacts/latest.json
