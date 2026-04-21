@@ -12,6 +12,7 @@ hive-core = { path = "../hive-core" }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+backon = { workspace = true }
 base64 = "0.22"
 chrono = { workspace = true }
 futures-util = { workspace = true }
