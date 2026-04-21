@@ -104,6 +104,8 @@ The packages in this monorepo keep a local SDK dependency for development and CI
 
 Those workflows validate the tag, build and test the package, and stage a clean npm publish directory with the SDK dependency rewritten to the released semver version.
 
+You can also run the publish workflows manually from the **Actions** tab with `workflow_dispatch` if you prefer not to trigger releases by tag push.
+
 ## Best Practices
 
 1. **Write tests** — use the SDK test harness

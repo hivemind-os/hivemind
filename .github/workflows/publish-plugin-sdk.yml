@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "sdk-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional expected SDK version"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,10 +33,18 @@ jobs:
         run: |
           cd packages/plugin-sdk
           VERSION=$(node -p "require('./package.json').version")
-          EXPECTED_TAG="sdk-v${VERSION}"
-          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
-            echo "Ref ${GITHUB_REF_NAME} does not match ${EXPECTED_TAG}"
-            exit 1
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            EXPECTED_TAG="sdk-v${VERSION}"
+            if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+              echo "Ref ${GITHUB_REF_NAME} does not match ${EXPECTED_TAG}"
+              exit 1
+            fi
+          fi
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            if [ "${{ inputs.version }}" != "${VERSION}" ]; then
+              echo "Input version ${{ inputs.version }} does not match package version ${VERSION}"
+              exit 1
+            fi
           fi
 
       - name: Build

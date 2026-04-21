@@ -58,7 +58,7 @@ const sdkPackageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "packages", "plugin-sdk", "package.json"), "utf8"),
 );
 
-if (tagPrefix) {
+if (tagPrefix && (process.env.GITHUB_EVENT_NAME ?? "") === "push") {
   const refName = process.env.GITHUB_REF_NAME ?? "";
   const expectedTag = `${tagPrefix}-v${packageJson.version}`;
   if (refName && refName !== expectedTag) {

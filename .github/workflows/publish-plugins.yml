@@ -5,6 +5,19 @@ on:
     tags:
       - "plugin-github-issues-v*"
       - "test-plugin-v*"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Which package to publish"
+        required: true
+        type: choice
+        options:
+          - github-issues
+          - test-plugin
+      version:
+        description: "Optional expected package version"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +32,24 @@ jobs:
     steps:
       - id: resolve
         run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            case "${{ inputs.package }}" in
+              github-issues)
+                echo "package_dir=packages/sample-plugins/github-issues" >> "$GITHUB_OUTPUT"
+                echo "tag_prefix=plugin-github-issues" >> "$GITHUB_OUTPUT"
+                ;;
+              test-plugin)
+                echo "package_dir=packages/test-plugin" >> "$GITHUB_OUTPUT"
+                echo "tag_prefix=test-plugin" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "Unsupported package input: ${{ inputs.package }}"
+                exit 1
+                ;;
+            esac
+            exit 0
+          fi
+
           case "${GITHUB_REF_NAME}" in
             plugin-github-issues-v*)
               echo "package_dir=packages/sample-plugins/github-issues" >> "$GITHUB_OUTPUT"
