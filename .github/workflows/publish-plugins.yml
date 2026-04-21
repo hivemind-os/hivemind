@@ -11,17 +11,33 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  resolve-package:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package_dir: packages/sample-plugins/github-issues
-            tag_prefix: plugin-github-issues
-          - package_dir: packages/test-plugin
-            tag_prefix: test-plugin
-    if: startsWith(github.ref_name, format('{0}-v', matrix.tag_prefix))
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag_prefix: ${{ steps.resolve.outputs.tag_prefix }}
+    steps:
+      - id: resolve
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            plugin-github-issues-v*)
+              echo "package_dir=packages/sample-plugins/github-issues" >> "$GITHUB_OUTPUT"
+              echo "tag_prefix=plugin-github-issues" >> "$GITHUB_OUTPUT"
+              ;;
+            test-plugin-v*)
+              echo "package_dir=packages/test-plugin" >> "$GITHUB_OUTPUT"
+              echo "tag_prefix=test-plugin" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported tag: ${GITHUB_REF_NAME}"
+              exit 1
+              ;;
+          esac
+
+  publish:
+    needs: resolve-package
+    runs-on: ubuntu-latest
+    if: ${{ needs.resolve-package.result == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,18 +50,18 @@ jobs:
         run: cd packages/plugin-sdk && npm ci && npm run build
 
       - name: Install package dependencies
-        run: cd ${{ matrix.package_dir }} && npm ci
+        run: cd ${{ needs.resolve-package.outputs.package_dir }} && npm ci
 
       - name: Build and test package
         run: |
-          cd ${{ matrix.package_dir }}
+          cd ${{ needs.resolve-package.outputs.package_dir }}
           npm run build
           npm test
 
       - name: Dry-run publish package
-        run: node scripts/publish-plugin-package.mjs ${{ matrix.package_dir }} --tag-prefix ${{ matrix.tag_prefix }} --dry-run
+        run: node scripts/publish-plugin-package.mjs ${{ needs.resolve-package.outputs.package_dir }} --tag-prefix ${{ needs.resolve-package.outputs.tag_prefix }} --dry-run
 
       - name: Publish package
-        run: node scripts/publish-plugin-package.mjs ${{ matrix.package_dir }} --tag-prefix ${{ matrix.tag_prefix }} --publish
+        run: node scripts/publish-plugin-package.mjs ${{ needs.resolve-package.outputs.package_dir }} --tag-prefix ${{ needs.resolve-package.outputs.tag_prefix }} --publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
