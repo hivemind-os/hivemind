@@ -407,6 +407,8 @@ mod tests {
                 on_error: None,
                 next: vec!["process".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "process".into(),
@@ -415,6 +417,8 @@ mod tests {
                 on_error: None,
                 next: vec!["end".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "end".into(),
@@ -423,6 +427,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
         ]);
         assert!(validate_definition(&def).is_ok());
@@ -438,6 +444,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "start".into(),
@@ -446,6 +454,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
         ]);
         let err = validate_definition(&def).unwrap_err();
@@ -461,6 +471,8 @@ mod tests {
             on_error: None,
             next: vec!["nonexistent".into()],
             timeout_secs: None,
+        designer_x: None,
+        designer_y: None,
         }]);
         let err = validate_definition(&def).unwrap_err();
         assert!(matches!(err, WorkflowError::InvalidDefinition { .. }));
@@ -476,6 +488,8 @@ mod tests {
                 on_error: None,
                 next: vec!["b".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "b".into(),
@@ -484,6 +498,8 @@ mod tests {
                 on_error: None,
                 next: vec!["a".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
         ]);
         let err = validate_definition(&def).unwrap_err();
@@ -505,6 +521,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             }],
             output: None,
             requested_tools: vec![],
@@ -530,6 +548,8 @@ mod tests {
                 on_error: None,
                 next: vec!["check".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "check".into(),
@@ -544,6 +564,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "path_a".into(),
@@ -552,6 +574,8 @@ mod tests {
                 on_error: None,
                 next: vec!["end".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "path_b".into(),
@@ -560,6 +584,8 @@ mod tests {
                 on_error: None,
                 next: vec!["end".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "end".into(),
@@ -568,6 +594,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
         ]);
         assert!(validate_definition(&def).is_ok());
@@ -583,6 +611,8 @@ mod tests {
                 on_error: None,
                 next: vec!["process".into()],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
             StepDef {
                 id: "process".into(),
@@ -591,6 +621,8 @@ mod tests {
                 on_error: None,
                 next: vec![],
                 timeout_secs: None,
+            designer_x: None,
+            designer_y: None,
             },
         ]);
         let entries = find_entry_steps(&def);

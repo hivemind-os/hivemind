@@ -152,6 +152,12 @@ pub struct StepDef {
     /// Maximum execution time in seconds for this step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// Optional X coordinate for visual designer placement (no runtime effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub designer_x: Option<f64>,
+    /// Optional Y coordinate for visual designer placement (no runtime effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub designer_y: Option<f64>,
 }
 
 // SPEC-GAP: Stage type taxonomy differs from spec. See DESIGN_NOTES.md.

@@ -1441,6 +1441,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".to_string()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 hive_workflow::types::StepDef {
                     id: "end".to_string(),
@@ -1451,6 +1453,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,

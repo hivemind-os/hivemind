@@ -556,6 +556,10 @@ function toYaml(
     // Next steps
     if (nextSteps.length > 0) step.next = nextSteps;
 
+    // Designer position metadata (no runtime effect)
+    if (Number.isFinite(node.x)) step.designer_x = Math.round(node.x * 100) / 100;
+    if (Number.isFinite(node.y)) step.designer_y = Math.round(node.y * 100) / 100;
+
     steps.push(step);
   }
   doc.steps = steps;
@@ -848,8 +852,8 @@ function fromYaml(yamlStr: string): {
       id: step.id,
       type: node_type,
       subtype,
-      x: 0,
-      y: 0,
+      x: typeof step.designer_x === 'number' ? step.designer_x : 0,
+      y: typeof step.designer_y === 'number' ? step.designer_y : 0,
       config,
       outputs,
       onError,
@@ -904,8 +908,11 @@ function fromYaml(yamlStr: string): {
       }))
     : [];
 
-  // Auto-layout
-  autoLayout(nodes, edges);
+  // Auto-layout only when positions were not persisted
+  const hasPositions = nodes.length > 0 && nodes.every(n => n.x !== 0 || n.y !== 0);
+  if (!hasPositions) {
+    autoLayout(nodes, edges);
+  }
 
   return { nodes, edges, id, name, version, description, mode, resultMessage, variables, permissions, attachments };
 }
@@ -924,54 +931,55 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
     outgoing.get(e.source)?.add(e.target);
   }
 
-  // Phase 1: Layer assignment via Kahn's topological sort
-  const inDegree = new Map<string, number>();
-  for (const n of nodes) inDegree.set(n.id, incoming.get(n.id)?.size ?? 0);
-
-  const queue: string[] = [];
-  for (const n of nodes) {
-    if ((inDegree.get(n.id) ?? 0) === 0) queue.push(n.id);
-  }
-
-  const layers: string[][] = [];
-  const visited = new Set<string>();
-
-  while (queue.length > 0) {
-    const layer = [...queue];
-    layers.push(layer);
-    queue.length = 0;
-    for (const id of layer) {
-      visited.add(id);
-      for (const target of outgoing.get(id) ?? []) {
-        const d = (inDegree.get(target) ?? 1) - 1;
-        inDegree.set(target, d);
-        if (d === 0 && !visited.has(target)) queue.push(target);
-      }
-    }
-  }
-
-  for (const n of nodes) {
-    if (!visited.has(n.id)) {
-      if (layers.length === 0) layers.push([]);
-      layers[layers.length - 1].push(n.id);
-    }
-  }
-
-  // Build layer-index lookup: nodeId → [layerIndex, positionInLayer]
+  // Phase 1: Layer assignment via longest-path (pushes nodes as far down as
+  // possible so that edges span fewer layers and reduce crossings).
   const layerOf = new Map<string, number>();
-  for (let li = 0; li < layers.length; li++) {
-    for (const id of layers[li]) layerOf.set(id, li);
+
+  // Kahn's topological order
+  const inDeg = new Map<string, number>();
+  for (const n of nodes) inDeg.set(n.id, incoming.get(n.id)?.size ?? 0);
+  const topoQueue: string[] = [];
+  for (const n of nodes) { if ((inDeg.get(n.id) ?? 0) === 0) topoQueue.push(n.id); }
+  const topoOrder: string[] = [];
+  const visited = new Set<string>();
+  while (topoQueue.length > 0) {
+    const id = topoQueue.shift()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    topoOrder.push(id);
+    for (const t of outgoing.get(id) ?? []) {
+      const d = (inDeg.get(t) ?? 1) - 1;
+      inDeg.set(t, d);
+      if (d === 0 && !visited.has(t)) topoQueue.push(t);
+    }
   }
+  // Orphans (cycles)
+  for (const n of nodes) {
+    if (!visited.has(n.id)) { visited.add(n.id); topoOrder.push(n.id); }
+  }
+
+  // Longest-path layer assignment (ensures edges always go downward)
+  for (const id of topoOrder) {
+    const parents = incoming.get(id)!;
+    let maxParentLayer = -1;
+    for (const p of parents) {
+      maxParentLayer = Math.max(maxParentLayer, layerOf.get(p) ?? 0);
+    }
+    layerOf.set(id, maxParentLayer + 1);
+  }
+
+  const numLayers = Math.max(0, ...Array.from(layerOf.values())) + 1;
+  const layers: string[][] = Array.from({ length: numLayers }, () => []);
+  for (const id of topoOrder) layers[layerOf.get(id)!].push(id);
 
   // Phase 2: Barycenter cross-minimization (Sugiyama method)
-  // Reorder nodes within each layer to minimize edge crossings.
   const posInLayer = new Map<string, number>();
-  function updatePositions(): void {
+  function syncPositions(): void {
     for (const layer of layers) {
       for (let i = 0; i < layer.length; i++) posInLayer.set(layer[i], i);
     }
   }
-  updatePositions();
+  syncPositions();
 
   function barycenter(nodeId: string, neighborSet: Set<string>): number {
     if (neighborSet.size === 0) return posInLayer.get(nodeId) ?? 0;
@@ -980,16 +988,14 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
     return sum / neighborSet.size;
   }
 
-  // Run 4 sweeps (down-up-down-up) for good convergence
-  for (let sweep = 0; sweep < 4; sweep++) {
+  // 8 sweeps (down-up alternating) for better convergence
+  for (let sweep = 0; sweep < 8; sweep++) {
     if (sweep % 2 === 0) {
-      // Top-down: order each layer by barycenter of its parents (incoming neighbors)
       for (let li = 1; li < layers.length; li++) {
         layers[li].sort((a, b) => barycenter(a, incoming.get(a)!) - barycenter(b, incoming.get(b)!));
         for (let i = 0; i < layers[li].length; i++) posInLayer.set(layers[li][i], i);
       }
     } else {
-      // Bottom-up: order each layer by barycenter of its children (outgoing neighbors)
       for (let li = layers.length - 2; li >= 0; li--) {
         layers[li].sort((a, b) => barycenter(a, outgoing.get(a)!) - barycenter(b, outgoing.get(b)!));
         for (let i = 0; i < layers[li].length; i++) posInLayer.set(layers[li][i], i);
@@ -997,12 +1003,12 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
     }
   }
 
-  // Phase 3: Coordinate assignment with median-parent alignment
+  // Phase 3: Coordinate assignment – priority-based Brandes-Köpf style
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
-  const LAYER_GAP = 160;
-  const NODE_GAP = 180;
+  const LAYER_GAP = 140;
+  const NODE_GAP = 200;
 
-  // First pass: assign initial x via median of parents
+  // Initial placement: median of parents, or position in layer for roots
   const xPos = new Map<string, number>();
   for (let li = 0; li < layers.length; li++) {
     const layer = layers[li];
@@ -1010,10 +1016,8 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
       const id = layer[ni];
       const parents = incoming.get(id)!;
       if (li === 0 || parents.size === 0) {
-        // Root or orphan: use layer position
         xPos.set(id, ni);
       } else {
-        // Median of parent positions
         const parentXs = [...parents].map(p => xPos.get(p) ?? 0).sort((a, b) => a - b);
         const mid = Math.floor(parentXs.length / 2);
         xPos.set(id, parentXs.length % 2 === 1
@@ -1021,39 +1025,42 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
           : (parentXs[mid - 1] + parentXs[mid]) / 2);
       }
     }
+    resolveOverlaps(layer, xPos);
+  }
 
-    // Resolve overlaps: ensure minimum spacing within each layer
-    const sorted = [...layer].sort((a, b) => (xPos.get(a) ?? 0) - (xPos.get(b) ?? 0));
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = xPos.get(sorted[i - 1])!;
-      const curr = xPos.get(sorted[i])!;
-      if (curr - prev < 1) xPos.set(sorted[i], prev + 1);
+  // Three bottom-up + top-down refinement passes for tighter packing
+  for (let pass = 0; pass < 3; pass++) {
+    // Bottom-up: nudge parents toward median of children
+    for (let li = layers.length - 2; li >= 0; li--) {
+      for (const id of layers[li]) {
+        const children = outgoing.get(id)!;
+        if (children.size === 0) continue;
+        const childXs = [...children].map(c => xPos.get(c) ?? 0).sort((a, b) => a - b);
+        const mid = Math.floor(childXs.length / 2);
+        const median = childXs.length % 2 === 1
+          ? childXs[mid]
+          : (childXs[mid - 1] + childXs[mid]) / 2;
+        xPos.set(id, (xPos.get(id)! + median) / 2);
+      }
+      resolveOverlaps(layers[li], xPos);
+    }
+    // Top-down: nudge children toward median of parents
+    for (let li = 1; li < layers.length; li++) {
+      for (const id of layers[li]) {
+        const parents = incoming.get(id)!;
+        if (parents.size === 0) continue;
+        const parentXs = [...parents].map(p => xPos.get(p) ?? 0).sort((a, b) => a - b);
+        const mid = Math.floor(parentXs.length / 2);
+        const median = parentXs.length % 2 === 1
+          ? parentXs[mid]
+          : (parentXs[mid - 1] + parentXs[mid]) / 2;
+        xPos.set(id, (xPos.get(id)! + median) / 2);
+      }
+      resolveOverlaps(layers[li], xPos);
     }
   }
 
-  // Second pass (bottom-up): nudge parents toward median of children
-  for (let li = layers.length - 2; li >= 0; li--) {
-    const layer = layers[li];
-    for (const id of layer) {
-      const children = outgoing.get(id)!;
-      if (children.size === 0) continue;
-      const childXs = [...children].map(c => xPos.get(c) ?? 0).sort((a, b) => a - b);
-      const mid = Math.floor(childXs.length / 2);
-      const median = childXs.length % 2 === 1
-        ? childXs[mid]
-        : (childXs[mid - 1] + childXs[mid]) / 2;
-      xPos.set(id, (xPos.get(id)! + median) / 2);
-    }
-    // Re-resolve overlaps
-    const sorted = [...layer].sort((a, b) => (xPos.get(a) ?? 0) - (xPos.get(b) ?? 0));
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = xPos.get(sorted[i - 1])!;
-      const curr = xPos.get(sorted[i])!;
-      if (curr - prev < 1) xPos.set(sorted[i], prev + 1);
-    }
-  }
-
-  // Center the graph around x=0 and apply pixel coordinates
+  // Center and convert to pixel coordinates
   let minX = Infinity, maxX = -Infinity;
   for (const v of xPos.values()) { minX = Math.min(minX, v); maxX = Math.max(maxX, v); }
   const centerOffset = (minX + maxX) / 2;
@@ -1066,6 +1073,15 @@ function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
         node.y = li * LAYER_GAP;
       }
     }
+  }
+}
+
+function resolveOverlaps(layer: string[], xPos: Map<string, number>): void {
+  const sorted = [...layer].sort((a, b) => (xPos.get(a) ?? 0) - (xPos.get(b) ?? 0));
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = xPos.get(sorted[i - 1])!;
+    const curr = xPos.get(sorted[i])!;
+    if (curr - prev < 1) xPos.set(sorted[i], prev + 1);
   }
 }
 

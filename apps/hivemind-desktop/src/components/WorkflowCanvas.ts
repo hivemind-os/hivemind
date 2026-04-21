@@ -539,17 +539,36 @@ export class GraphCanvas {
     if (!src || !tgt) return false;
     const s = outputPort(src, edge.edgeType === 'then' ? 'then' : edge.edgeType === 'else' ? 'else' : edge.edgeType === 'body' ? 'body' : isLoopSubtype(src.subtype) ? 'next' : undefined);
     const t = inputPort(tgt);
-    const dy = Math.abs(t.y - s.y) / 2;
-    const cp = Math.max(30, dy);
     const threshold = 8 / this.zoom;
-    // Sample bezier at 24 points
-    for (let i = 0; i <= 24; i++) {
-      const u = i / 24;
-      const u1 = 1 - u;
-      // Control points: (s.x, s.y), (s.x, s.y+cp), (t.x, t.y-cp), (t.x, t.y)
-      const bx = u1*u1*u1*s.x + 3*u1*u1*u*s.x + 3*u1*u*u*t.x + u*u*u*t.x;
-      const by = u1*u1*u1*s.y + 3*u1*u1*u*(s.y+cp) + 3*u1*u*u*(t.y-cp) + u*u*u*t.y;
-      if (dist(gx, gy, bx, by) < threshold) return true;
+    const waypoints = this.routeEdge(s, t, edge.source, edge.target);
+
+    if (waypoints.length === 0) {
+      // Simple Bézier hit test
+      const dy = Math.abs(t.y - s.y) / 2;
+      const cp = Math.max(30, dy);
+      for (let i = 0; i <= 24; i++) {
+        const u = i / 24;
+        const u1 = 1 - u;
+        const bx = u1*u1*u1*s.x + 3*u1*u1*u*s.x + 3*u1*u*u*t.x + u*u*u*t.x;
+        const by = u1*u1*u1*s.y + 3*u1*u1*u*(s.y+cp) + 3*u1*u*u*(t.y-cp) + u*u*u*t.y;
+        if (dist(gx, gy, bx, by) < threshold) return true;
+      }
+    } else {
+      // Multi-segment hit test
+      const pts = [s, ...waypoints, t];
+      for (let seg = 0; seg < pts.length - 1; seg++) {
+        const p0 = pts[seg];
+        const p1 = pts[seg + 1];
+        const dy = Math.abs(p1.y - p0.y) / 2;
+        const cp = Math.max(20, dy);
+        for (let i = 0; i <= 12; i++) {
+          const u = i / 12;
+          const u1 = 1 - u;
+          const bx = u1*u1*u1*p0.x + 3*u1*u1*u*p0.x + 3*u1*u*u*p1.x + u*u*u*p1.x;
+          const by = u1*u1*u1*p0.y + 3*u1*u1*u*(p0.y+cp) + 3*u1*u*u*(p1.y-cp) + u*u*u*p1.y;
+          if (dist(gx, gy, bx, by) < threshold) return true;
+        }
+      }
     }
     return false;
   }
@@ -910,15 +929,7 @@ export class GraphCanvas {
 
       const s = outputPort(src, edge.edgeType === 'then' ? 'then' : edge.edgeType === 'else' ? 'else' : edge.edgeType === 'body' ? 'body' : isLoopSubtype(src.subtype) ? 'next' : undefined);
       const t = inputPort(tgt);
-      const dy = Math.abs(t.y - s.y) / 2;
-      const cp = Math.max(30, dy);
 
-      // Draw bezier
-      ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      ctx.bezierCurveTo(s.x, s.y + cp, t.x, t.y - cp, t.x, t.y);
-
-      // Hit highlight
       const isHovered = this.hoveredEdge === edge.id;
       let color = this.theme.borderSubtle;
       if (edge.edgeType === 'then') color = this.theme.green;
@@ -927,7 +938,10 @@ export class GraphCanvas {
 
       ctx.strokeStyle = color;
       ctx.lineWidth = (isHovered ? 3 : 2) / this.zoom;
-      ctx.stroke();
+
+      // Route around intermediate nodes
+      const waypoints = this.routeEdge(s, t, edge.source, edge.target);
+      this.drawRoutedPath(ctx, s, t, waypoints);
 
       // Arrowhead at target
       const aSize = 6 / this.zoom;
@@ -950,6 +964,97 @@ export class GraphCanvas {
         ctx.fillText(edge.edgeType, mx, my - 3 / this.zoom);
       }
     }
+  }
+
+  /** Find intermediate nodes the straight Bézier would cross and produce
+   *  an x-offset waypoint for each, so the edge detours around them. */
+  private routeEdge(
+    s: { x: number; y: number },
+    t: { x: number; y: number },
+    srcId: string,
+    tgtId: string,
+  ): { x: number; y: number }[] {
+    const MARGIN = 16;
+    const blockers: { x: number; y: number; w: number; h: number }[] = [];
+
+    for (const n of this.nodes) {
+      if (n.id === srcId || n.id === tgtId) continue;
+      const nw = nodeWidth(n.id);
+      const top = Math.min(s.y, t.y);
+      const bot = Math.max(s.y, t.y);
+      // Only consider nodes in the vertical band between source and target
+      if (n.y + NODE_H <= top || n.y >= bot) continue;
+      blockers.push({ x: n.x - MARGIN, y: n.y - MARGIN, w: nw + MARGIN * 2, h: NODE_H + MARGIN * 2 });
+    }
+
+    if (blockers.length === 0) return [];
+
+    // Check if the simple Bézier actually intersects any blocker
+    const dy = Math.abs(t.y - s.y) / 2;
+    const cp = Math.max(30, dy);
+    let hits = false;
+    for (const b of blockers) {
+      for (let i = 1; i < 20; i++) {
+        const u = i / 20;
+        const u1 = 1 - u;
+        const bx = u1*u1*u1*s.x + 3*u1*u1*u*s.x + 3*u1*u*u*t.x + u*u*u*t.x;
+        const by = u1*u1*u1*s.y + 3*u1*u1*u*(s.y+cp) + 3*u1*u*u*(t.y-cp) + u*u*u*t.y;
+        if (bx >= b.x && bx <= b.x + b.w && by >= b.y && by <= b.y + b.h) {
+          hits = true;
+          break;
+        }
+      }
+      if (hits) break;
+    }
+    if (!hits) return [];
+
+    // Route around: find the clear side (left or right of all blockers)
+    let leftClear = Infinity;
+    let rightClear = -Infinity;
+    for (const b of blockers) {
+      leftClear = Math.min(leftClear, b.x);
+      rightClear = Math.max(rightClear, b.x + b.w);
+    }
+
+    const midX = (s.x + t.x) / 2;
+    const detourX = (Math.abs(midX - leftClear) < Math.abs(midX - rightClear))
+      ? leftClear - MARGIN
+      : rightClear + MARGIN;
+
+    // Two waypoints: one near source Y, one near target Y
+    const wy1 = s.y + (t.y - s.y) * 0.25;
+    const wy2 = s.y + (t.y - s.y) * 0.75;
+
+    return [{ x: detourX, y: wy1 }, { x: detourX, y: wy2 }];
+  }
+
+  /** Draw a smooth path through waypoints using cubic segments. */
+  private drawRoutedPath(
+    ctx: CanvasRenderingContext2D,
+    s: { x: number; y: number },
+    t: { x: number; y: number },
+    waypoints: { x: number; y: number }[],
+  ): void {
+    ctx.beginPath();
+    if (waypoints.length === 0) {
+      // Simple vertical Bézier
+      const dy = Math.abs(t.y - s.y) / 2;
+      const cp = Math.max(30, dy);
+      ctx.moveTo(s.x, s.y);
+      ctx.bezierCurveTo(s.x, s.y + cp, t.x, t.y - cp, t.x, t.y);
+    } else {
+      // Multi-segment smooth path: s → wp[0] → wp[1] → ... → t
+      const pts = [s, ...waypoints, t];
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        const dy = Math.abs(p1.y - p0.y) / 2;
+        const cp = Math.max(20, dy);
+        ctx.bezierCurveTo(p0.x, p0.y + cp, p1.x, p1.y - cp, p1.x, p1.y);
+      }
+    }
+    ctx.stroke();
   }
 
   private drawConnectionLine(ctx: CanvasRenderingContext2D): void {

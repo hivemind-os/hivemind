@@ -3245,6 +3245,8 @@ mod tests {
                     on_error: None,
                     next: vec!["process".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "process".into(),
@@ -3258,6 +3260,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3266,6 +3270,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: Some(HashMap::from([(
@@ -3345,6 +3351,8 @@ mod tests {
                     on_error: None,
                     next: vec!["check".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "check".into(),
@@ -3359,6 +3367,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "high_path".into(),
@@ -3372,6 +3382,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "low_path".into(),
@@ -3385,6 +3397,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3393,6 +3407,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3447,6 +3463,8 @@ mod tests {
                     on_error: None,
                     next: vec!["gate".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "gate".into(),
@@ -3461,6 +3479,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3469,6 +3489,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3548,6 +3570,8 @@ mod tests {
                     on_error: None,
                     next: vec!["gate".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "gate".into(),
@@ -3562,6 +3586,8 @@ mod tests {
                     on_error: None,
                     next: vec!["notify".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "notify".into(),
@@ -3578,6 +3604,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3586,6 +3614,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3667,6 +3697,8 @@ mod tests {
                     on_error: None,
                     next: vec!["failing_step".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "failing_step".into(),
@@ -3682,6 +3714,8 @@ mod tests {
                     }),
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3690,6 +3724,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3743,6 +3779,8 @@ mod tests {
                     on_error: None,
                     next: vec!["gate".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "gate".into(),
@@ -3757,6 +3795,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3811,6 +3851,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait".into(),
@@ -3819,6 +3861,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3827,6 +3871,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3889,6 +3935,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait_event".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait_event".into(),
@@ -3903,6 +3951,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -3911,6 +3961,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -3995,6 +4047,8 @@ mod tests {
                     on_error: None,
                     next: vec!["tool_step".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "tool_step".into(),
@@ -4008,6 +4062,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4059,6 +4115,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait_event".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait_event".into(),
@@ -4073,6 +4131,8 @@ mod tests {
                     on_error: None,
                     next: vec!["process".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "process".into(),
@@ -4093,6 +4153,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4208,6 +4270,8 @@ mod tests {
                     on_error: None,
                     next: vec!["gate".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "gate".into(),
@@ -4222,6 +4286,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -4230,6 +4296,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4286,6 +4354,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait_event".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait_event".into(),
@@ -4300,6 +4370,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -4308,6 +4380,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4365,6 +4439,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait".into(),
@@ -4373,6 +4449,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -4381,6 +4459,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4483,6 +4563,8 @@ mod tests {
                     on_error: None,
                     next: vec!["wait_for_input".into(), "maybe_fail".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "wait_for_input".into(),
@@ -4497,6 +4579,8 @@ mod tests {
                     on_error: None,
                     next: vec!["join".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "maybe_fail".into(),
@@ -4510,6 +4594,8 @@ mod tests {
                     on_error: Some(ErrorStrategy::Skip { default_output: None }),
                     next: vec!["join".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "join".into(),
@@ -4523,6 +4609,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "end".into(),
@@ -4531,6 +4619,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4706,6 +4796,8 @@ mod tests {
                     on_error: None,
                     next: (0..4).map(|i| format!("task_{i}")).collect(),
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 }];
                 for i in 0..4 {
                     steps.push(StepDef {
@@ -4720,6 +4812,8 @@ mod tests {
                         on_error: None,
                         next: vec!["end".into()],
                         timeout_secs: None,
+                    designer_x: None,
+                    designer_y: None,
                     });
                 }
                 steps.push(StepDef {
@@ -4729,6 +4823,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 });
                 steps
             },
@@ -4858,6 +4954,8 @@ mod tests {
                     on_error: None,
                     next: vec!["set_vars".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "set_vars".into(),
@@ -4886,6 +4984,8 @@ mod tests {
                     on_error: None,
                     next: vec!["read_vars".into()],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
                 StepDef {
                     id: "read_vars".into(),
@@ -4902,6 +5002,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
+                designer_x: None,
+                designer_y: None,
                 },
             ],
             output: None,
@@ -4978,6 +5080,8 @@ mod tests {
             on_error: None,
             next: vec!["read_vars".into()],
             timeout_secs: None,
+        designer_x: None,
+        designer_y: None,
         };
 
         let store = Arc::new(WorkflowStore::in_memory().unwrap());
