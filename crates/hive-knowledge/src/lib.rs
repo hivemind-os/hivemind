@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Once;
 
 pub use memory::{MemoryEntry, MemoryManager, MemoryStore};
-pub use pool::{KgPool, PooledKg};
+pub use pool::{KgPool, KgWriteGuard, PooledKg};
 
 const DEFAULT_EMBEDDING_DIMENSIONS: usize = 384;
 

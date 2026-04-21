@@ -1,7 +1,7 @@
 use hive_classification::DataClass;
 use hive_contracts::{FileAuditRecord, WorkspaceClassification};
 use hive_inference::RuntimeManager;
-use hive_knowledge::KnowledgeGraph;
+use hive_knowledge::KgPool;
 use hive_workspace_index::WorkspaceIndexer;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -22,6 +22,7 @@ pub(crate) struct IndexingService {
     pub(crate) workspace_classifications: Arc<Mutex<HashMap<String, WorkspaceClassification>>>,
     pub(crate) file_audits: Arc<Mutex<HashMap<String, HashMap<String, FileAuditRecord>>>>,
     pub(crate) knowledge_graph_path: Arc<PathBuf>,
+    pub(crate) kg_pool: Arc<KgPool>,
 }
 
 impl IndexingService {
@@ -42,21 +43,29 @@ impl IndexingService {
                 detail: "no inference runtime available for reindexing".into(),
             })?;
 
-        let graph_path = Arc::clone(&self.knowledge_graph_path);
+        let pool = Arc::clone(&self.kg_pool);
         let model_id = new_model_id.clone();
 
         tokio::task::spawn(async move {
+            // Acquire the write guard (serializes with other writers)
+            let mut guard = match pool.write().await {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to acquire KG write guard for reindex");
+                    return;
+                }
+            };
+
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                let mut graph = KnowledgeGraph::open(&*graph_path)?;
-                graph.prepare_reindex(&model_id, new_dimensions)?;
+                guard.prepare_reindex(&model_id, new_dimensions)?;
 
                 const BATCH_SIZE: usize = 100;
-                let total = graph.node_count()? as usize;
+                let total = guard.node_count()? as usize;
                 let mut done = 0usize;
                 let _ = progress_tx.send(ReindexProgress { done, total });
 
                 loop {
-                    let batch = graph.nodes_needing_embedding(
+                    let batch = guard.nodes_needing_embedding(
                         &model_id,
                         &["file_chunk", "chat_message", "memory"],
                         BATCH_SIZE,
@@ -66,14 +75,15 @@ impl IndexingService {
                     }
 
                     for node_id in batch {
-                        let text = graph
+                        let text = guard
                             .get_node(node_id)?
                             .and_then(|n| n.content.or(Some(n.name)))
                             .unwrap_or_default();
 
                         match runtime.embed(&model_id, &text) {
                             Ok(embedding) => {
-                                if let Err(e) = graph.set_embedding(node_id, &embedding, &model_id)
+                                if let Err(e) =
+                                    guard.set_embedding(node_id, &embedding, &model_id)
                                 {
                                     tracing::warn!(
                                         node_id,
@@ -257,20 +267,27 @@ impl IndexingService {
     #[allow(dead_code)]
     pub fn embed_node_async(&self, node_id: i64, text: String, model_id: Option<String>) {
         let runtime = self.runtime_manager.lock().clone();
-        let graph_path = Arc::clone(&self.knowledge_graph_path);
+        let pool = Arc::clone(&self.kg_pool);
         let model = model_id
             .unwrap_or_else(|| hive_inference::defaults::DEFAULT_EMBEDDING_MODEL_ID.to_string());
         tokio::task::spawn(async move {
             let Some(rt) = runtime else {
                 return;
             };
+            // Acquire write guard before spawn_blocking
+            let guard = match pool.write().await {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::warn!(node_id, error = %e, "failed to acquire KG write guard for embed");
+                    return;
+                }
+            };
             let embed_model = model.clone();
             let store_model = model;
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
                 let embedding =
                     rt.embed(&embed_model, &text).map_err(|e| anyhow::anyhow!("{e}"))?;
-                let graph = open_graph(&graph_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-                graph.set_embedding(node_id, &embedding, &store_model)?;
+                guard.set_embedding(node_id, &embedding, &store_model)?;
                 Ok(())
             })
             .await;

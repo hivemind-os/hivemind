@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
 
 use super::api;
+use super::api::DiscordApiError;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,6 +94,10 @@ async fn gateway_loop(
     const RATE_WINDOW: Duration = Duration::from_secs(300); // 5 minutes
     const STABLE_THRESHOLD: Duration = Duration::from_secs(30);
 
+    // Circuit-breaker: stop after repeated auth failures (invalid token).
+    let mut consecutive_auth_failures: u32 = 0;
+    const MAX_AUTH_FAILURES: u32 = 3;
+
     loop {
         // Expire old entries and enforce rate limit
         let now = Instant::now();
@@ -125,6 +130,7 @@ async fn gateway_loop(
                 return;
             }
             Ok(SessionExit::Reconnect(state)) => {
+                consecutive_auth_failures = 0;
                 let was_stable = session_start.elapsed() >= STABLE_THRESHOLD;
                 if was_stable {
                     backoff = Duration::from_secs(1);
@@ -146,6 +152,7 @@ async fn gateway_loop(
                 reconnect_times.push_back(Instant::now());
             }
             Ok(SessionExit::InvalidSession) => {
+                consecutive_auth_failures = 0;
                 info!("Discord gateway: session invalidated, will re-IDENTIFY");
                 resume_state = None;
                 tokio::time::sleep(backoff.max(Duration::from_secs(3))).await;
@@ -153,6 +160,31 @@ async fn gateway_loop(
                 reconnect_times.push_back(Instant::now());
             }
             Err(e) => {
+                // Check if the error chain contains an auth failure.
+                let is_auth_failure = e.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<DiscordApiError>()
+                        .map_or(false, |de| matches!(de, DiscordApiError::AuthFailed(_)))
+                });
+
+                if is_auth_failure {
+                    consecutive_auth_failures += 1;
+                    if consecutive_auth_failures >= MAX_AUTH_FAILURES {
+                        error!(
+                            "Discord connector disabled — authentication failed after {} \
+                             consecutive attempts. Please update credentials in connector settings.",
+                            consecutive_auth_failures
+                        );
+                        return;
+                    }
+                    warn!(
+                        consecutive_auth_failures,
+                        "Discord gateway: authentication failed, will retry"
+                    );
+                } else {
+                    consecutive_auth_failures = 0;
+                }
+
                 warn!(?e, ?backoff, "Discord gateway session error, will reconnect");
                 if resume_state.is_some() {
                     info!("Resume connection failed, will try fresh IDENTIFY");

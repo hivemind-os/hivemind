@@ -148,6 +148,8 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
   const [confirmKill, setConfirmKill] = createSignal<number | null>(null);
   const [confirmReset, setConfirmReset] = createSignal<string | null>(null);
   const [confirmDelete, setConfirmDelete] = createSignal<{ name: string; version: string; triggers: any[]; scheduledTasks: any[] } | null>(null);
+  const [confirmArchiveDef, setConfirmArchiveDef] = createSignal<{ name: string; version: string } | null>(null);
+  const [confirmArchiveInst, setConfirmArchiveInst] = createSignal<number | null>(null);
   const [feedbackStep, setFeedbackStep] = createSignal<{ instanceId: number; stepId: string; prompt: string; choices: string[]; allow_freeform: boolean } | null>(null);
   const [feedbackText, setFeedbackText] = createSignal('');
   const [feedbackError, setFeedbackError] = createSignal<string | null>(null);
@@ -418,11 +420,7 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     const deps = await store.checkDefinitionDependents(name, version);
     const triggers = deps?.triggers ?? [];
     const tasks = deps?.scheduled_tasks ?? [];
-    if (triggers.length > 0 || tasks.length > 0) {
-      setConfirmDelete({ name, version, triggers, scheduledTasks: tasks });
-    } else {
-      await store.deleteDefinition(name, version);
-    }
+    setConfirmDelete({ name, version, triggers, scheduledTasks: tasks });
   }
 
   async function handleDeleteConfirmed() {
@@ -652,7 +650,7 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                     </button>
                   </Show>
                   {def.bundled ? (
-                    <button class="icon-btn" title="Hide" aria-label="Hide workflow" onClick={() => void store.archiveDefinition(def.name, def.version)}>
+                    <button class="icon-btn" title="Hide" aria-label="Hide workflow" onClick={() => setConfirmArchiveDef({ name: def.name, version: def.version })}>
                       <EyeOff size={14} />
                     </button>
                   ) : (
@@ -914,7 +912,7 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                           <button class="icon-btn" title="Kill" style="color:hsl(var(--destructive));" onClick={() => setConfirmKill(inst.id)}><CircleStop size={14} /></button>
                         </Show>
                         <Show when={['completed', 'failed', 'killed'].includes(inst.status) && !inst.archived}>
-                          <button class="icon-btn" title="Archive" onClick={() => void store.archiveInstance(inst.id)}><Archive size={14} /></button>
+                          <button class="icon-btn" title="Archive" onClick={() => setConfirmArchiveInst(inst.id)}><Archive size={14} /></button>
                         </Show>
                         <Show when={inst.archived}>
                           <button class="icon-btn" title="Unarchive" onClick={() => void store.archiveInstance(inst.id, false)}><ArchiveRestore size={14} /></button>
@@ -1247,35 +1245,69 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
               <DialogHeader>
                 <DialogTitle class="text-destructive">Delete "{info().name}" v{info().version}?</DialogTitle>
               </DialogHeader>
-              <p class="text-sm m-0 text-muted-foreground">
-                This workflow has connected resources that will also be deleted:
-              </p>
-              <div class="flex flex-col gap-1.5 p-2 rounded-md text-sm bg-background">
-                <Show when={info().triggers.length > 0}>
-                  <div class="text-foreground">
-                    <strong>Active triggers ({info().triggers.length}):</strong>
-                    <For each={info().triggers}>
-                      {(t: any) => <div class="pl-3 text-muted-foreground">• {t.trigger_kind ?? t.trigger_type?.type ?? 'trigger'}</div>}
-                    </For>
-                  </div>
-                </Show>
-                <Show when={info().scheduledTasks.length > 0}>
-                  <div class="text-foreground">
-                    <strong>Scheduled tasks ({info().scheduledTasks.length}):</strong>
-                    <For each={info().scheduledTasks}>
-                      {(t: any) => <div class="pl-3 text-muted-foreground">• {t.name} <span class="opacity-60">({t.status})</span></div>}
-                    </For>
-                  </div>
-                </Show>
-              </div>
+              <Show when={info().triggers.length > 0 || info().scheduledTasks.length > 0} fallback={
+                <p class="text-sm m-0 text-muted-foreground">
+                  This will permanently delete the workflow definition. This action cannot be undone.
+                </p>
+              }>
+                <p class="text-sm m-0 text-muted-foreground">
+                  This workflow has connected resources that will also be deleted:
+                </p>
+                <div class="flex flex-col gap-1.5 p-2 rounded-md text-sm bg-background">
+                  <Show when={info().triggers.length > 0}>
+                    <div class="text-foreground">
+                      <strong>Active triggers ({info().triggers.length}):</strong>
+                      <For each={info().triggers}>
+                        {(t: any) => <div class="pl-3 text-muted-foreground">• {t.trigger_kind ?? t.trigger_type?.type ?? 'trigger'}</div>}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={info().scheduledTasks.length > 0}>
+                    <div class="text-foreground">
+                      <strong>Scheduled tasks ({info().scheduledTasks.length}):</strong>
+                      <For each={info().scheduledTasks}>
+                        {(t: any) => <div class="pl-3 text-muted-foreground">• {t.name} <span class="opacity-60">({t.status})</span></div>}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
               <DialogFooter class="flex-row justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-                <Button variant="destructive" onClick={() => void handleDeleteConfirmed()}>Delete All</Button>
+                <Button variant="destructive" onClick={() => void handleDeleteConfirmed()}>Delete</Button>
               </DialogFooter>
           </>)}
         </Show>
         </DialogContent>
       </Dialog>
+
+      {/* Hide (Archive) Definition Confirmation */}
+      <ConfirmDialog
+        open={!!confirmArchiveDef()}
+        onOpenChange={(open) => { if (!open) setConfirmArchiveDef(null); }}
+        title={`Hide "${confirmArchiveDef()?.name}"?`}
+        description="This will hide the workflow from the list. You can unhide it later from the archived section."
+        confirmLabel="Hide"
+        variant="default"
+        onConfirm={() => {
+          const info = confirmArchiveDef();
+          if (info) void store.archiveDefinition(info.name, info.version);
+        }}
+      />
+
+      {/* Archive Instance Confirmation */}
+      <ConfirmDialog
+        open={confirmArchiveInst() !== null}
+        onOpenChange={(open) => { if (!open) setConfirmArchiveInst(null); }}
+        title="Archive this workflow run?"
+        description="The run will be moved to the archive. You can restore it later."
+        confirmLabel="Archive"
+        variant="default"
+        onConfirm={() => {
+          const id = confirmArchiveInst();
+          if (id !== null) void store.archiveInstance(id);
+        }}
+      />
 
       {/* Feedback Response Dialog */}
       <Dialog open={!!feedbackStep()} onOpenChange={(open) => { if (!open) setFeedbackStep(null); }}>

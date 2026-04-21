@@ -175,6 +175,9 @@ pub struct McpService {
     pub(crate) node_env: Option<Arc<hive_node_env::NodeEnvManager>>,
     /// Managed Python environment handle (if enabled).
     pub(crate) python_env: Option<Arc<hive_python_env::PythonEnvManager>>,
+    /// Servers whose catalog discovery failed because the required runtime
+    /// (Node.js or Python) was not yet installed.  Keyed by server ID.
+    pending_runtime_servers: Arc<parking_lot::RwLock<HashMap<String, runtime::McpRuntime>>>,
 }
 
 impl McpService {
@@ -197,6 +200,7 @@ impl McpService {
             global_sandbox,
             node_env: None,
             python_env: None,
+            pending_runtime_servers: Arc::new(parking_lot::RwLock::new(HashMap::new())),
         }
     }
 
@@ -1458,6 +1462,16 @@ impl McpService {
                         "catalog refreshed"
                     );
                 }
+                Err(ref e @ McpServiceError::RuntimeNotInstalled { can_auto_install: true, .. }) => {
+                    // Track for deferred re-discovery when the runtime becomes available.
+                    if let Some(cmd) = &config.command {
+                        let rt = runtime::detect_runtime(cmd);
+                        if matches!(rt, runtime::McpRuntime::Node | runtime::McpRuntime::Python) {
+                            self.pending_runtime_servers.write().insert(config.id.clone(), rt);
+                        }
+                    }
+                    tracing::warn!(server_id = %config.id, error = %e, "catalog refresh failed (runtime not ready, will retry)");
+                }
                 Err(e) => {
                     tracing::warn!(server_id = %config.id, error = %e, "catalog refresh failed");
                 }
@@ -1467,6 +1481,24 @@ impl McpService {
         // Remove catalog entries for servers that no longer exist.
         let keys: Vec<String> = configs.iter().map(|c| c.cache_key()).collect();
         catalog.retain_keys(&keys).await;
+    }
+
+    /// Take all server IDs whose catalog discovery failed because a specific
+    /// managed runtime was not yet installed.  Removes them from the pending set.
+    pub fn take_pending_servers_for_runtime(&self, rt: runtime::McpRuntime) -> Vec<String> {
+        let mut pending = self.pending_runtime_servers.write();
+        let ids: Vec<String> =
+            pending.iter().filter(|(_, r)| **r == rt).map(|(id, _)| id.clone()).collect();
+        for id in &ids {
+            pending.remove(id);
+        }
+        ids
+    }
+
+    /// Record a server whose catalog discovery failed because its runtime is
+    /// not yet available.  Called from startup code in `hive-api`.
+    pub fn record_pending_runtime_server(&self, server_id: String, rt: runtime::McpRuntime) {
+        self.pending_runtime_servers.write().insert(server_id, rt);
     }
 
     fn snapshot_for(state: &McpServerState) -> McpServerSnapshot {
