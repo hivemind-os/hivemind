@@ -119,6 +119,8 @@ prompts:
 
 Templates with an `input_schema` render an input form in the UI automatically.
 
+For the full template syntax reference — including conditionals, loops, strict mode behavior, and more examples — see the [Prompt Templates Reference](/reference/prompt-templates).
+
 ## Archiving and Restoring
 
 Don't need a persona right now? Archive it instead of deleting.

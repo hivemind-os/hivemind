@@ -66,6 +66,12 @@ An AI assistant you create with a specific personality, instructions, and tool a
 
 **See also:** [Personas Guide](/guides/personas)
 
+## Plugin
+
+A TypeScript package that extends HiveMind OS with new connector capabilities — tools, configuration UIs, and background sync loops. Plugins communicate with the host over JSON-RPC and run as isolated Node.js processes. The plugin protocol is a superset of MCP, so every plugin is also a valid MCP server.
+
+**See also:** [Plugin Development Guide](/plugin-development/)
+
 ## Provider
 
 An AI service that supplies the language models your personas use to think and respond. Examples include Anthropic (Claude), OpenAI (GPT), GitHub Copilot, and Ollama (local, free).

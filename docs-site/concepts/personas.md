@@ -18,7 +18,7 @@ Every persona is a configuration object with these building blocks:
 | **MCP servers** | Which external integrations (databases, APIs, services) this persona can connect to |
 | **Loop strategy** | How the agent reasons — `react` (think → act → observe), `sequential`, or `plan_then_execute` |
 | **Context map strategy** | How workspace context is gathered — `general`, `code`, or `advanced` (LLM-powered semantic analysis) |
-| **Prompt templates** | Reusable Handlebars prompt snippets with optional input schemas, invokable from chat or workflows |
+| **Prompt templates** | Reusable [Handlebars prompt snippets](/reference/prompt-templates) with optional input schemas, invokable from chat or workflows |
 
 ::: tip Why this matters
 Personas turn one-off configuration into **reusable, shareable agent profiles**. A "Code Reviewer" persona always reviews for security issues. A "Technical Writer" persona always outputs clean Markdown. You configure once and use everywhere — no drift, no forgotten instructions.

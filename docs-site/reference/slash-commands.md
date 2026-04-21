@@ -22,7 +22,7 @@ Invoke a reusable prompt template defined on the active persona (or a specific p
 When invoked, HiveMind OS looks up the template by ID on the current persona, renders any parameters (prompting you to fill them in if needed), and sends the result as your message.
 
 ::: tip
-Define prompt templates in your persona YAML under the `prompts` field. Each template has an `id`, `name`, `template` (Handlebars string), and optional `input_schema` for parameters.
+Define prompt templates in your persona YAML under the `prompts` field. Each template has an `id`, `name`, `template` (Handlebars string), and optional `input_schema` for parameters. See the [Prompt Templates Reference](/reference/prompt-templates) for full syntax details.
 :::
 
 ## Other Capabilities

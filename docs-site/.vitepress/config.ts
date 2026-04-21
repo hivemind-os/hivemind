@@ -174,6 +174,45 @@ export default withMermaid(
             ],
           },
           {
+            text: "Plugin Development",
+            collapsed: true,
+            items: [
+              { text: "Overview", link: "/plugin-development/" },
+              {
+                text: "Quick Start",
+                link: "/plugin-development/quick-start",
+              },
+              {
+                text: "Concepts",
+                link: "/plugin-development/concepts",
+              },
+              {
+                text: "Config Schemas",
+                link: "/plugin-development/config-schemas",
+              },
+              {
+                text: "Tools Guide",
+                link: "/plugin-development/tools-guide",
+              },
+              {
+                text: "Background Loops",
+                link: "/plugin-development/background-loops",
+              },
+              {
+                text: "Auth Guide",
+                link: "/plugin-development/auth-guide",
+              },
+              {
+                text: "Testing Guide",
+                link: "/plugin-development/testing-guide",
+              },
+              {
+                text: "Publishing Guide",
+                link: "/plugin-development/publishing-guide",
+              },
+            ],
+          },
+          {
             text: "CLI Reference",
             collapsed: true,
             items: [
@@ -188,6 +227,10 @@ export default withMermaid(
               {
                 text: "Configuration",
                 link: "/reference/configuration",
+              },
+              {
+                text: "Prompt Templates",
+                link: "/reference/prompt-templates",
               },
               {
                 text: "Slash Commands",

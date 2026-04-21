@@ -26,6 +26,16 @@ Every HiveMind OS installation ships with a rich set of tools the agent can call
 
 These tools are always available — no setup required. The agent calls them automatically as part of its [agentic loop](./agentic-loops).
 
+### Connector Plugins
+
+The `connector.*` tools above come from connectors you configure in Settings. Beyond the [built-in connectors](/guides/messaging-bridges) (Gmail, Slack, Microsoft 365, etc.), you can build **custom connector plugins** that add new tools, background sync loops, and configuration UIs — all in TypeScript.
+
+Connector plugins use a protocol that is a **superset of MCP**: standard `tools/list` and `tools/call` methods plus additional host APIs for messaging, secrets, storage, and more. This means every connector plugin also works as a standard MCP tool server.
+
+::: tip Developer?
+See the [Plugin Development Guide](/plugin-development/) to build your own connector plugin.
+:::
+
 ## What Is MCP?
 
 ::: info MCP in Plain English
@@ -186,4 +196,5 @@ HiveMind OS supports both — connect MCP servers for actions, install skills fo
 - [Configure MCP Servers](/guides/mcp-servers) — Detailed setup guide for MCP
 - [Agent Skills](/concepts/skills) — How skills complement tools with knowledge and procedures
 - [Privacy & Security](./privacy-and-security) — How classification protects your data across tools
+- [Plugin Development Guide](/plugin-development/) — Build custom connector plugins
 - [Agentic Loops](./agentic-loops) — How the agent decides which tools to call

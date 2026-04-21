@@ -161,6 +161,21 @@ With connectors configured, your agents can:
 
 These capabilities are exposed as tools that any persona (with access) can use, and as workflow triggers (e.g. `incoming_message` trigger type).
 
+## Building Custom Connectors
+
+The built-in connectors above cover common services, but you can build your own using the **Hivemind Plugin SDK**. Connector plugins are TypeScript packages that provide:
+
+- **Custom tools** — expose any API as agent-callable functions
+- **Configuration UI** — Zod-based schemas render settings forms automatically
+- **Background loops** — poll external services and push messages into Hivemind
+- **Lifecycle hooks** — validate credentials on activation, clean up on deactivation
+
+Plugins run as isolated Node.js processes and communicate with the host over JSON-RPC. The protocol is a superset of MCP, so every connector plugin is also a valid MCP tool server.
+
+::: tip Get started
+See the [Plugin Development Guide](/plugin-development/) to build your first connector plugin in 5 minutes, or jump straight to the [Quick Start](/plugin-development/quick-start).
+:::
+
 ## Learn More
 
 - [Workflows Guide](/guides/workflows) — Use `incoming_message` triggers with connectors

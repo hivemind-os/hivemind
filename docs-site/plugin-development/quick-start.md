@@ -154,8 +154,8 @@ Your plugin now appears in Hivemind's **Settings → Connectors** alongside buil
 
 ## Next Steps
 
-- **[Tools Guide](./tools-guide.md)** — Add more tools with parameters, side-effects, and approval
-- **[Background Loops](./background-loops.md)** — Add a polling loop for real-time updates
-- **[Config Schemas](./config-schemas.md)** — Rich configuration forms
-- **[Sample Plugin](../../packages/sample-plugins/github-issues/)** — Study a complete real-world example
+- **[Tools Guide](/plugin-development/tools-guide)** — Add more tools with parameters, side-effects, and approval
+- **[Background Loops](/plugin-development/background-loops)** — Add a polling loop for real-time updates
+- **[Config Schemas](/plugin-development/config-schemas)** — Rich configuration forms
+- **[Sample Plugin](https://github.com/hivemind-os/hivemind/tree/main/packages/sample-plugins/github-issues)** — Study a complete real-world example
 

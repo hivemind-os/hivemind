@@ -134,6 +134,12 @@ Only the servers listed in `mcpServers` are available to that persona. Each entr
 | **Permission errors** | Check the server's `channel_class` — it may be too restrictive for the data the agent needs to send |
 | **Timeout issues** | Increase the connection timeout in server settings; remote SSE servers may need longer initial handshakes |
 
+## Beyond MCP: Connector Plugins
+
+If you need more than what MCP provides — background sync loops, message emission, secret storage, configuration UIs — consider building a **connector plugin**. The plugin protocol is a superset of MCP, adding host APIs for messaging, events, and persistent storage on top of the standard MCP tool interface.
+
+See the [Plugin Development Guide](/plugin-development/) to get started.
+
 ## Learn More
 
 - [Tools & MCP](/concepts/tools-and-mcp) — How built-in tools and MCP work together
