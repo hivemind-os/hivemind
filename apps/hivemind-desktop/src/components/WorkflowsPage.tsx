@@ -1605,7 +1605,8 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                           signalTurnDone();
                         }
                       } else if (t === 'agent_completed') {
-                        terminated = true;
+                        // Don't set terminated — IdleAfterTask agents emit agent_completed
+                        // after every task but remain alive for follow-up messages.
                         signalTurnDone();
                       }
                     }
