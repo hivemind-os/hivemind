@@ -845,7 +845,7 @@ export function McpServerWizard(props: McpServerWizardProps) {
   return (
     <>
     <Dialog open={true} onOpenChange={(open) => { if (!open) props.onClose(); }}>
-      <DialogContent class="max-w-[700px] w-[90vw] max-h-[85vh] overflow-y-auto overflow-x-hidden flex flex-col p-0" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent class="max-w-[700px] w-[90vw] max-h-[85vh] overflow-hidden flex flex-col p-0" onInteractOutside={(e) => e.preventDefault()}>
         <div class="channel-wizard-header">
           <h2>{isEditing() ? 'Edit MCP Server' : 'Add MCP Server'}</h2>
           <div class="wizard-steps">

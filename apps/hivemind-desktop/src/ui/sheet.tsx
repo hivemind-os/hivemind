@@ -86,7 +86,7 @@ const SheetContent = <T extends ValidComponent = 'div'>(
         class={cn(
           sheetVariants({ position: local.position }),
           local.class,
-          'max-h-screen overflow-y-auto'
+          'max-h-screen overflow-y-auto overflow-x-hidden'
         )}
         {...others}
       >
@@ -107,7 +107,7 @@ const SheetFooter: Component<ComponentProps<'div'>> = (props) => {
   const [local, others] = splitProps(props, ['class']);
   return (
     <div
-      class={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', local.class)}
+      class={cn('sticky bottom-0 z-[1] mt-auto flex shrink-0 flex-col-reverse gap-2 bg-background sm:flex-row sm:justify-end', local.class)}
       {...others}
     />
   );

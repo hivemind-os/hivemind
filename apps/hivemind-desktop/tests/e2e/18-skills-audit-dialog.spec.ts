@@ -13,28 +13,20 @@ async function navigateToSkillsDiscover(page: import('@playwright/test').Page) {
   // Expand Agents & Automation section and select Personas tab
   await page.locator('text=AGENTS & AUTOMATION').first().click();
   await page.waitForTimeout(300);
-  await page.getByText('Personas', { exact: true }).click();
+  await page.locator('[data-testid="settings-tab-personas"]').click();
   await page.waitForTimeout(1000);
 
-  // Click edit icon on persona card (pencil icon is to the right of the name)
-  const coderTitle = page.getByText('Coder', { exact: true }).first();
-  const box = await coderTitle.boundingBox();
-  if (box) {
-    await page.mouse.click(box.x + box.width + 180, box.y + box.height / 2);
-    await page.waitForTimeout(1000);
-  }
+  const editBtn = page.locator('button[title^="Edit "]').first();
+  await expect(editBtn).toBeVisible({ timeout: 10_000 });
+  await editBtn.click();
+  await page.waitForTimeout(1000);
 
-  // Scroll to bottom to see Skills section
-  await page.evaluate(() => {
-    document.querySelectorAll('*').forEach(el => {
-      if (el.scrollHeight > el.clientHeight && el.scrollHeight > 500) {
-        el.scrollTop = el.scrollHeight;
-      }
-    });
-  });
-  await page.waitForTimeout(500);
+  const manageSkillsBtn = page.getByRole('button', { name: 'Manage Skills', exact: true });
+  await manageSkillsBtn.scrollIntoViewIfNeeded();
+  await expect(manageSkillsBtn).toBeVisible({ timeout: 10_000 });
+  await manageSkillsBtn.click();
 
-  await page.locator('button:has-text("Discover")').click();
+  await page.getByRole('tab', { name: /^Discover$/ }).click();
   await page.waitForTimeout(2000);
 }
 

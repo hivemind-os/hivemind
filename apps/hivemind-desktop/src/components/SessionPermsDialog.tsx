@@ -1,6 +1,6 @@
 import { createMemo, type Accessor, type Setter } from 'solid-js';
 import PermissionRulesEditor, { type PermissionRule, type ToolDef } from './PermissionRulesEditor';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button } from '~/ui';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button } from '~/ui';
 
 type SessionPermissions = { rules: PermissionRule[] };
 
@@ -21,16 +21,18 @@ const SessionPermsDialog = (props: SessionPermsDialogProps) => {
       open={props.open}
       onOpenChange={(open) => { if (!open) props.onClose(); }}
     >
-      <DialogContent class="min-w-[500px] max-w-[700px] max-h-[80vh] overflow-y-auto" data-testid="session-perms-dialog">
+      <DialogContent class="min-w-[500px] max-w-[700px] max-h-[80vh] flex flex-col overflow-hidden" data-testid="session-perms-dialog">
         <DialogHeader>
           <DialogTitle>Session Permissions</DialogTitle>
         </DialogHeader>
 
-        <PermissionRulesEditor
-          rules={rules}
-          setRules={(newRules) => props.setSessionPerms({ rules: newRules })}
-          toolDefinitions={props.toolDefinitions}
-        />
+        <DialogBody>
+          <PermissionRulesEditor
+            rules={rules}
+            setRules={(newRules) => props.setSessionPerms({ rules: newRules })}
+            toolDefinitions={props.toolDefinitions}
+          />
+        </DialogBody>
 
         <DialogFooter class="gap-2 sm:gap-2">
           <Button variant="outline" onClick={props.onClose}>Cancel</Button>

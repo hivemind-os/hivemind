@@ -877,7 +877,7 @@ export function PersonaWizard(props: PersonaWizardProps) {
 
   return (
     <Dialog open={true} onOpenChange={(open) => { if (!open) void handleCancel(); }}>
-      <DialogContent class="max-w-[750px] w-[90vw] max-h-[85vh] overflow-y-auto overflow-x-hidden flex flex-col p-0" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent class="max-w-[750px] w-[90vw] max-h-[85vh] overflow-hidden flex flex-col p-0" onInteractOutside={(e) => e.preventDefault()}>
         <div class="channel-wizard-header">
           <h2>Create Persona</h2>
           <div class="wizard-steps">

@@ -50,8 +50,9 @@ const DialogContent = <T extends ValidComponent = 'div'>(
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        data-slot="dialog-content"
         class={cn(
-          'fixed left-1/2 top-1/2 z-[1301] grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border border-popover-border bg-popover p-6 shadow-xl shadow-black/25 duration-200 pointer-events-auto data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 sm:rounded-lg',
+          'fixed left-1/2 top-1/2 z-[1301] flex max-h-[calc(100vh-2rem)] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto overflow-x-hidden border border-popover-border bg-popover p-6 shadow-xl shadow-black/25 duration-200 pointer-events-auto data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 sm:rounded-lg',
           props.class,
         )}
         {...rest}
@@ -64,12 +65,26 @@ const DialogContent = <T extends ValidComponent = 'div'>(
 
 const DialogHeader: Component<ComponentProps<'div'>> = (props) => {
   const [, rest] = splitProps(props, ['class']);
-  return <div class={cn('flex flex-col space-y-1.5 text-center sm:text-left', props.class)} {...rest} />;
+  return <div data-slot="dialog-header" class={cn('shrink-0 flex flex-col space-y-1.5 text-center sm:text-left', props.class)} {...rest} />;
+};
+
+const DialogBody: Component<ComponentProps<'div'>> = (props) => {
+  const [, rest] = splitProps(props, ['class']);
+  return <div data-slot="dialog-body" class={cn('min-h-0 flex-1 overflow-y-auto overflow-x-hidden', props.class)} {...rest} />;
 };
 
 const DialogFooter: Component<ComponentProps<'div'>> = (props) => {
   const [, rest] = splitProps(props, ['class']);
-  return <div class={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', props.class)} {...rest} />;
+  return (
+    <div
+      data-slot="dialog-footer"
+      class={cn(
+        'sticky bottom-0 z-[1] mt-auto flex shrink-0 flex-col-reverse gap-2 bg-popover sm:flex-row sm:justify-end',
+        props.class,
+      )}
+      {...rest}
+    />
+  );
 };
 
 type DialogTitleProps<T extends ValidComponent = 'h2'> = DialogPrimitive.DialogTitleProps<T> & {
@@ -94,4 +109,4 @@ const DialogDescription = <T extends ValidComponent = 'p'>(
   return <DialogPrimitive.Description class={cn('text-sm text-muted-foreground', props.class)} {...rest} />;
 };
 
-export { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription };
+export { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle, DialogDescription };

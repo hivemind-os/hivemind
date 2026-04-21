@@ -1,7 +1,7 @@
 import { For, Show, Index, createSignal, createEffect, createMemo } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import type { PromptTemplate } from '../../types';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '~/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '~/ui/dialog';
 import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Button } from '~/ui/button';
 import { evaluateFieldCondition } from '~/lib/formConditions';
@@ -252,7 +252,7 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
 
   return (
     <Dialog open={props.open ?? true} onOpenChange={(open) => { if (!open) props.onCancel(); }}>
-      <DialogContent class="max-w-[500px] max-h-[80vh] overflow-y-auto">
+      <DialogContent class="max-w-[500px] max-h-[80vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{props.template.name || 'Prompt Template'}</DialogTitle>
           <Show when={props.template.description}>
@@ -262,6 +262,7 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
           </Show>
         </DialogHeader>
 
+        <DialogBody>
           <div class="space-y-3">
             <Show when={fields().length > 0}>
               <div class="flex items-center justify-between mb-1.5">
@@ -316,14 +317,16 @@ const PromptParameterDialog = (props: PromptParameterDialogProps) => {
               <pre class="text-xs bg-secondary border border-border rounded-md p-2 overflow-x-auto whitespace-pre-wrap break-words max-h-[200px] font-mono">{preview()}</pre>
             </div>
           </div>
+        </DialogBody>
 
-      <DialogFooter class="flex-row gap-2">
-        <Button variant="outline" onClick={() => props.onCancel()}>Cancel</Button>
-        <Button disabled={!canSubmit()} onClick={() => void handleSubmit()}>
-          {props.submitLabel ?? 'Send'}
-        </Button>
-      </DialogFooter>
-    </DialogContent></Dialog>
+        <DialogFooter class="flex-row gap-2">
+          <Button variant="outline" onClick={() => props.onCancel()}>Cancel</Button>
+          <Button disabled={!canSubmit()} onClick={() => void handleSubmit()}>
+            {props.submitLabel ?? 'Send'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

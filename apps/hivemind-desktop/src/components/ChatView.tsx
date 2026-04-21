@@ -19,7 +19,7 @@ import { CheckCircle, XCircle, Radio, Brain, Lock, Wrench, Tag, Target, MessageC
 import InlineQuestion, { AnsweredQuestion, type PendingQuestion } from './InlineQuestion';
 import SessionConfigDialog from './SessionConfigDialog';
 import { highlightYaml } from './YamlHighlight';
-import { Dialog, DialogContent, DialogFooter, Button, Badge, Card, CardContent, Separator, Tooltip, TooltipTrigger, TooltipContent } from '~/ui';
+import { Dialog, DialogBody, DialogContent, DialogFooter, Button, Badge, Card, CardContent, Separator, Tooltip, TooltipTrigger, TooltipContent } from '~/ui';
 import { Popover, PopoverTrigger, PopoverContent } from '~/ui/popover';
 import WorkflowLauncher, { extractManualTriggers } from './shared/WorkflowLauncher';
 import PromptParameterDialog from './shared/PromptParameterDialog';
@@ -514,27 +514,27 @@ const ChatView = (props: ChatViewProps) => {
             open={props.showMemoriesDialog() && activeSession().recalled_memories.length > 0}
             onOpenChange={(open) => { if (!open) props.setShowMemoriesDialog(false); }}
           >
-            <DialogContent class="max-w-xl min-w-[400px] max-h-[70vh] overflow-y-auto rounded-xl bg-background p-6">
-                <header class="flex items-center justify-between gap-2 mb-3">
-                  <h3 class="m-0 text-foreground"><Brain size={14} /> Recalled Memories</h3>
-                  <span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{activeSession().recalled_memories.length} items</span>
-                </header>
-                <div class="space-y-2">
-                  <For each={activeSession().recalled_memories}>
-                    {(memory) => (
-                      <article class="rounded-lg border border-border bg-card p-3">
-                        <header>
-                          <strong>{memory.name}</strong>
-                          <span class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">{memory.data_class}</span>
-                        </header>
-                        <p>{memory.content ?? 'No stored content.'}</p>
-                      </article>
-                    )}
-                  </For>
-                </div>
-                <DialogFooter class="mt-3">
-                  <Button variant="outline" onClick={() => props.setShowMemoriesDialog(false)}>Close</Button>
-                </DialogFooter>
+            <DialogContent class="max-w-xl min-w-[400px] max-h-[70vh] flex flex-col overflow-hidden rounded-xl bg-background p-6">
+              <header class="mb-3 flex items-center justify-between gap-2">
+                <h3 class="m-0 text-foreground"><Brain size={14} /> Recalled Memories</h3>
+                <span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{activeSession().recalled_memories.length} items</span>
+              </header>
+              <DialogBody class="space-y-2">
+                <For each={activeSession().recalled_memories}>
+                  {(memory) => (
+                    <article class="rounded-lg border border-border bg-card p-3">
+                      <header>
+                        <strong>{memory.name}</strong>
+                        <span class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">{memory.data_class}</span>
+                      </header>
+                      <p>{memory.content ?? 'No stored content.'}</p>
+                    </article>
+                  )}
+                </For>
+              </DialogBody>
+              <DialogFooter class="mt-3">
+                <Button variant="outline" onClick={() => props.setShowMemoriesDialog(false)}>Close</Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
 
@@ -1679,26 +1679,28 @@ const ChatView = (props: ChatViewProps) => {
       open={showWfLauncher()}
       onOpenChange={(open) => { if (!open) setShowWfLauncher(false); }}
     >
-      <DialogContent class="min-w-[400px] max-w-[640px] w-[90vw] max-h-[80vh] overflow-auto p-4">
-          <h3 class="m-0 mb-3 text-base text-foreground">
-            <GitBranch size={14} /> Launch Chat Workflow
-          </h3>
+      <DialogContent class="min-w-[400px] max-w-[640px] w-[90vw] max-h-[80vh] flex flex-col overflow-hidden p-4">
+        <h3 class="m-0 mb-3 text-base text-foreground">
+          <GitBranch size={14} /> Launch Chat Workflow
+        </h3>
+        <DialogBody>
           <WorkflowLauncher
             definitions={props.chatWorkflowDefinitions().map(d => ({ name: d.name, version: d.version, description: d.description }))}
             fetchParsedDefinition={props.fetchParsedWorkflow}
             value={wfLaunchValue()}
             onChange={setWfLaunchValue}
           />
-          <div class="flex gap-2 justify-end mt-3">
-            <Button variant="outline" size="sm" onClick={() => setShowWfLauncher(false)}>Cancel</Button>
-            <Button
-              disabled={!wfLaunchValue()?.definition || wfLaunching()}
-              onClick={() => void handleLaunchChatWorkflow()}
-              class="bg-blue-400 text-background font-semibold disabled:opacity-50"
-            >
-              {wfLaunching() ? 'Launching…' : 'Launch'}
-            </Button>
-          </div>
+        </DialogBody>
+        <div class="mt-3 flex shrink-0 justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowWfLauncher(false)}>Cancel</Button>
+          <Button
+            disabled={!wfLaunchValue()?.definition || wfLaunching()}
+            onClick={() => void handleLaunchChatWorkflow()}
+            class="bg-blue-400 text-background font-semibold disabled:opacity-50"
+          >
+            {wfLaunching() ? 'Launching…' : 'Launch'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
     {/* ── Prompt parameter dialog ── */}

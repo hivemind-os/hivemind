@@ -1469,7 +1469,7 @@ const PersonasTab = (props: PersonasTabProps) => {
         open={showSkillsDialog() && !!editingId() && editingId() !== NEW_AGENT_SENTINEL}
         onOpenChange={(open) => { if (!open) { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); } }}
       >
-        <DialogContent class="max-w-[720px] w-[90vw] max-h-[85vh] flex flex-col overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
+        <DialogContent class="max-w-[720px] w-[90vw] max-h-[85vh] flex flex-col overflow-hidden" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader class="flex flex-row items-center justify-between">
             <DialogTitle>Manage Skills</DialogTitle>
             <button class="text-muted-foreground hover:text-foreground text-lg" onClick={() => { setShowSkillsDialog(false); void loadPersonaSkills(editingId()!); }}>✕</button>

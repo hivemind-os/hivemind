@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  outputDir: './test-results/artifacts',
   timeout: 180_000, // 3 minutes per test
   retries: 1,
   workers: 2, // limit parallelism to avoid Vite server contention
