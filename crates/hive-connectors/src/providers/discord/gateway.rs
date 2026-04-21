@@ -1,12 +1,14 @@
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::api;
 
@@ -84,7 +86,29 @@ async fn gateway_loop(
     let http = reqwest::Client::new();
     let mut resume_state: Option<ResumeState> = None;
 
+    // Rate limiter: stop the gateway if too many reconnects happen without
+    // establishing a stable session.
+    let mut reconnect_times: VecDeque<Instant> = VecDeque::new();
+    const MAX_RECONNECTS: usize = 10;
+    const RATE_WINDOW: Duration = Duration::from_secs(300); // 5 minutes
+    const STABLE_THRESHOLD: Duration = Duration::from_secs(30);
+
     loop {
+        // Expire old entries and enforce rate limit
+        let now = Instant::now();
+        while reconnect_times.front().map_or(false, |t| now.duration_since(*t) > RATE_WINDOW) {
+            reconnect_times.pop_front();
+        }
+        if reconnect_times.len() >= MAX_RECONNECTS {
+            error!(
+                "Discord gateway: {} reconnects in {:?} without a stable session, stopping",
+                MAX_RECONNECTS, RATE_WINDOW
+            );
+            return;
+        }
+
+        let session_start = Instant::now();
+
         match run_session(
             &http,
             &bot_token,
@@ -101,29 +125,42 @@ async fn gateway_loop(
                 return;
             }
             Ok(SessionExit::Reconnect(state)) => {
+                let was_stable = session_start.elapsed() >= STABLE_THRESHOLD;
+                if was_stable {
+                    backoff = Duration::from_secs(1);
+                    reconnect_times.clear();
+                }
+
                 resume_state = state;
                 if resume_state.is_some() {
                     info!("Discord gateway: reconnecting with RESUME");
+                    tokio::time::sleep(backoff.max(Duration::from_secs(1))).await;
                 } else {
                     info!("Discord gateway: reconnecting with fresh IDENTIFY");
+                    tokio::time::sleep(backoff).await;
                 }
-                backoff = Duration::from_secs(1);
+
+                if !was_stable {
+                    backoff = (backoff * 2).min(max_backoff);
+                }
+                reconnect_times.push_back(Instant::now());
             }
             Ok(SessionExit::InvalidSession) => {
                 info!("Discord gateway: session invalidated, will re-IDENTIFY");
                 resume_state = None;
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                backoff = Duration::from_secs(1);
+                tokio::time::sleep(backoff.max(Duration::from_secs(3))).await;
+                backoff = (backoff * 2).min(max_backoff);
+                reconnect_times.push_back(Instant::now());
             }
             Err(e) => {
                 warn!(?e, ?backoff, "Discord gateway session error, will reconnect");
                 if resume_state.is_some() {
                     info!("Resume connection failed, will try fresh IDENTIFY");
                     resume_state = None;
-                } else {
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(max_backoff);
                 }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+                reconnect_times.push_back(Instant::now());
             }
         }
     }
@@ -221,6 +258,10 @@ async fn run_session(
     let sink = Arc::new(tokio::sync::Mutex::new(sink));
     let sink_hb = Arc::clone(&sink);
 
+    // Heartbeat ACK tracking — detect zombie connections per Discord protocol
+    let ack_pending = Arc::new(AtomicBool::new(false));
+    let ack_hb = Arc::clone(&ack_pending);
+
     // Spawn heartbeat task
     let heartbeat_handle = tokio::spawn(async move {
         let interval = Duration::from_millis(heartbeat_interval_ms);
@@ -228,6 +269,13 @@ async fn run_session(
         ticker.tick().await; // first tick is immediate — skip it
         loop {
             ticker.tick().await;
+            // If previous heartbeat was not ACKed, connection is zombie — close it
+            if ack_hb.load(Ordering::SeqCst) {
+                warn!("Discord gateway: missed heartbeat ACK, closing zombie connection");
+                let _ = sink_hb.lock().await.close().await;
+                return;
+            }
+            ack_hb.store(true, Ordering::SeqCst);
             let s = *seq_hb.lock();
             let payload = serde_json::json!({ "op": 1, "d": s });
             let msg = WsMessage::Text(payload.to_string().into());
@@ -333,7 +381,9 @@ async fn run_session(
                 }
             }
             // Heartbeat ACK
-            11 => {}
+            11 => {
+                ack_pending.store(false, Ordering::SeqCst);
+            }
             // Reconnect
             7 => {
                 info!("Discord gateway requested reconnect (op 7)");

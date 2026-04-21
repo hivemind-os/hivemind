@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -77,6 +77,7 @@ async fn run_loop(
     let mut wss_url = initial_url;
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(60);
+    const STABLE_THRESHOLD: Duration = Duration::from_secs(30);
 
     loop {
         if tx.is_closed() {
@@ -86,10 +87,7 @@ async fn run_loop(
 
         info!("Slack Socket Mode: connecting to WebSocket");
         let ws_stream = match tokio_tungstenite::connect_async(&wss_url).await {
-            Ok((stream, _)) => {
-                backoff = Duration::from_secs(1);
-                stream
-            }
+            Ok((stream, _)) => stream,
             Err(e) => {
                 warn!("Slack Socket Mode: WebSocket connect error: {e}");
                 tokio::time::sleep(backoff).await;
@@ -104,6 +102,8 @@ async fn run_loop(
                 continue;
             }
         };
+
+        let session_start = Instant::now();
 
         let (mut sink, mut stream) = ws_stream.split();
 
@@ -215,14 +215,19 @@ async fn run_loop(
             }
         }
 
-        // Reconnect with backoff
+        // Reconnect: only reset backoff after sessions that ran long enough
+        let was_stable = session_start.elapsed() >= STABLE_THRESHOLD;
+        if was_stable {
+            backoff = Duration::from_secs(1);
+        }
         tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(max_backoff);
+        if !was_stable {
+            backoff = (backoff * 2).min(max_backoff);
+        }
 
         match api::connections_open(&http_client, &app_token).await {
             Ok(url) => {
                 wss_url = url;
-                backoff = Duration::from_secs(1);
             }
             Err(e) => {
                 error!("Slack Socket Mode: connections.open failed during reconnect: {e}");
