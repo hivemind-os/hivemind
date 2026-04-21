@@ -425,17 +425,16 @@ impl KnowledgeGraph {
         // writer cannot insert a new edge between the edge-delete and the
         // node-delete, which would cause a FOREIGN KEY constraint failure.
         let tx = self.connection.unchecked_transaction()?;
-        tx.execute("DELETE FROM embedding_meta WHERE node_id = ?1", params![id])
-            .unwrap_or_else(|e| {
+        tx.execute("DELETE FROM embedding_meta WHERE node_id = ?1", params![id]).unwrap_or_else(
+            |e| {
                 tracing::warn!("failed to delete embedding_meta for node {id}: {e}");
                 0
-            });
+            },
+        );
         for tbl in &tables {
             tx.execute(&format!("DELETE FROM \"{tbl}\" WHERE rowid = ?1"), params![id])
                 .unwrap_or_else(|e| {
-                    tracing::warn!(
-                        "failed to delete embedding row from {tbl} for node {id}: {e}"
-                    );
+                    tracing::warn!("failed to delete embedding row from {tbl} for node {id}: {e}");
                     0
                 });
         }

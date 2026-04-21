@@ -710,8 +710,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         answer_text: &str,
     ) -> Result<(), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
-        chat.mark_question_message_answered(session_id, request_id, answer_text)
-            .await;
+        chat.mark_question_message_answered(session_id, request_id, answer_text).await;
         Ok(())
     }
 }

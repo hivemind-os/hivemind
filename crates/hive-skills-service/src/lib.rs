@@ -6,7 +6,9 @@ use hive_contracts::{
     SkillRiskSeverity, SkillSourceConfig, SkillsConfig,
 };
 use hive_model::{CompletionMessage, CompletionRequest, ModelRouter};
-use hive_skills::{parse_skill_md, GitHubRepoSource, LocalDirSource, SkillCatalog, SkillIndex, SkillIndexStore};
+use hive_skills::{
+    parse_skill_md, GitHubRepoSource, LocalDirSource, SkillCatalog, SkillIndex, SkillIndexStore,
+};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -47,7 +49,10 @@ impl SkillsService {
         Ok(Self { index, config: RwLock::new(config), cache_dir, personas_dir, model_router })
     }
 
-    pub async fn discover(&self, persona_id: Option<&str>) -> Result<Vec<DiscoveredSkill>, SkillsServiceError> {
+    pub async fn discover(
+        &self,
+        persona_id: Option<&str>,
+    ) -> Result<Vec<DiscoveredSkill>, SkillsServiceError> {
         let config = self.config.read().await.clone();
         if !config.enabled {
             return Ok(Vec::new());

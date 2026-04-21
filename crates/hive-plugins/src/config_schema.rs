@@ -94,13 +94,7 @@ impl ConfigSchema {
     pub fn secret_fields(&self) -> Vec<&str> {
         self.properties
             .iter()
-            .filter(|(_, field)| {
-                field
-                    .hivemind
-                    .as_ref()
-                    .and_then(|m| m.secret)
-                    .unwrap_or(false)
-            })
+            .filter(|(_, field)| field.hivemind.as_ref().and_then(|m| m.secret).unwrap_or(false))
             .map(|(name, _)| name.as_str())
             .collect()
     }

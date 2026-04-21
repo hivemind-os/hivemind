@@ -280,9 +280,7 @@ async fn daemon_stop() -> Result<(), String> {
 /// the app process to exit).
 #[tauri::command(rename_all = "snake_case")]
 fn set_update_installing(state: tauri::State<'_, AppState>) {
-    state
-        .update_installing
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    state.update_installing.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1969,10 +1967,8 @@ async fn mcp_registry_search(
     cursor: Option<String>,
     limit: Option<u32>,
 ) -> Result<serde_json::Value, String> {
-    let mut url = reqwest::Url::parse(
-        "https://registry.modelcontextprotocol.io/v0.1/servers",
-    )
-    .map_err(|e| e.to_string())?;
+    let mut url = reqwest::Url::parse("https://registry.modelcontextprotocol.io/v0.1/servers")
+        .map_err(|e| e.to_string())?;
     url.query_pairs_mut().append_pair("version", "latest");
     if let Some(ref q) = search {
         if !q.is_empty() {
@@ -1982,16 +1978,11 @@ async fn mcp_registry_search(
     if let Some(ref c) = cursor {
         url.query_pairs_mut().append_pair("cursor", c);
     }
-    url.query_pairs_mut()
-        .append_pair("limit", &limit.unwrap_or(30).to_string());
+    url.query_pairs_mut().append_pair("limit", &limit.unwrap_or(30).to_string());
 
     let client = shared_async_client();
-    let resp = client
-        .get(url)
-        .timeout(std::time::Duration::from_secs(30))
-        .send()
-        .await
-        .map_err(|e| {
+    let resp =
+        client.get(url).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|e| {
             if e.is_timeout() {
                 "Registry request timed out. Check your network connection.".to_string()
             } else {
@@ -2001,9 +1992,7 @@ async fn mcp_registry_search(
     if !resp.status().is_success() {
         return Err(format!("Registry search failed: {}", resp.status()));
     }
-    resp.json::<serde_json::Value>()
-        .await
-        .map_err(|e| e.to_string())
+    resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2011,10 +2000,7 @@ async fn tools_list(persona_id: Option<String>) -> Result<Vec<ToolDefinition>, S
     let base_url = daemon_url(None).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let path = match persona_id {
-            Some(ref pid) => format!(
-                "/api/v1/tools?persona_id={}",
-                urlencoding::encode(pid)
-            ),
+            Some(ref pid) => format!("/api/v1/tools?persona_id={}", urlencoding::encode(pid)),
             None => "/api/v1/tools".to_string(),
         };
         blocking_get_json::<Vec<ToolDefinition>>(&base_url, &path)
@@ -2479,7 +2465,10 @@ async fn set_bot_permissions(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn bot_workspace_list_files(bot_id: String, path: Option<String>) -> Result<serde_json::Value, String> {
+async fn bot_workspace_list_files(
+    bot_id: String,
+    path: Option<String>,
+) -> Result<serde_json::Value, String> {
     let base_url = daemon_url(None).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let url = match &path {
@@ -5294,22 +5283,47 @@ async fn plugin_list() -> Result<Vec<PluginInfo>, String> {
                     Some(PluginInfo {
                         plugin_id: v.get("plugin_id")?.as_str()?.to_string(),
                         name: v.get("name")?.as_str()?.to_string(),
-                        version: v.get("version").and_then(|x| x.as_str()).unwrap_or("0.0.0").to_string(),
-                        display_name: v.get("display_name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                        description: v.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                        plugin_type: v.get("plugin_type").and_then(|x| x.as_str()).unwrap_or("connector").to_string(),
+                        version: v
+                            .get("version")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("0.0.0")
+                            .to_string(),
+                        display_name: v
+                            .get("display_name")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        description: v
+                            .get("description")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        plugin_type: v
+                            .get("plugin_type")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("connector")
+                            .to_string(),
                         enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
-                        config: v.get("config").cloned().unwrap_or(serde_json::Value::Object(Default::default())),
+                        config: v
+                            .get("config")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Object(Default::default())),
                         config_schema: v.get("config_schema").cloned().filter(|v| !v.is_null()),
                         status: v.get("status").and_then(|s| {
                             Some(PluginStatusInfo {
                                 state: s.get("state")?.as_str()?.to_string(),
-                                message: s.get("message").and_then(|x| x.as_str()).map(|x| x.to_string()),
+                                message: s
+                                    .get("message")
+                                    .and_then(|x| x.as_str())
+                                    .map(|x| x.to_string()),
                             })
                         }),
-                        permissions: v.get("permissions")
+                        permissions: v
+                            .get("permissions")
                             .and_then(|x| x.as_array())
-                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                            .map(|a| {
+                                a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+                            })
                             .unwrap_or_default(),
                     })
                 })
@@ -5363,7 +5377,10 @@ async fn plugin_set_enabled(plugin_id: String, enabled: bool) -> Result<(), Stri
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn plugin_set_personas(plugin_id: String, allowed_personas: Vec<String>) -> Result<(), String> {
+async fn plugin_set_personas(
+    plugin_id: String,
+    allowed_personas: Vec<String>,
+) -> Result<(), String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         blocking_post_json_no_content(
@@ -5380,7 +5397,10 @@ async fn plugin_set_personas(plugin_id: String, allowed_personas: Vec<String>) -
 async fn plugin_uninstall(plugin_id: String) -> Result<(), String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        blocking_delete_no_content(&base_url, &format!("/api/v1/plugins/{}", encode_query(&plugin_id)))
+        blocking_delete_no_content(
+            &base_url,
+            &format!("/api/v1/plugins/{}", encode_query(&plugin_id)),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -5391,11 +5411,8 @@ async fn plugin_link_local(path: String) -> Result<String, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let body = serde_json::json!({ "path": path });
-        blocking_post_json::<_, serde_json::Value>(
-            &base_url,
-            "/api/v1/plugins/link",
-            &body,
-        ).map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+        blocking_post_json::<_, serde_json::Value>(&base_url, "/api/v1/plugins/link", &body)
+            .map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -5406,11 +5423,8 @@ async fn plugin_install_npm(package_name: String) -> Result<String, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let body = serde_json::json!({ "package": package_name });
-        blocking_post_json::<_, serde_json::Value>(
-            &base_url,
-            "/api/v1/plugins/install",
-            &body,
-        ).map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+        blocking_post_json::<_, serde_json::Value>(&base_url, "/api/v1/plugins/install", &body)
+            .map(|v| v.get("plugin_id").and_then(|x| x.as_str()).unwrap_or("").to_string())
     })
     .await
     .map_err(|e| e.to_string())?

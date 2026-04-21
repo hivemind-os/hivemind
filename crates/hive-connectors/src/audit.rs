@@ -225,11 +225,7 @@ impl SqliteAuditStore {
     ///
     /// Uses `INSERT OR IGNORE` so the check+insert is a single atomic
     /// statement, eliminating races between overlapping poll tasks.
-    pub fn try_mark_poll_published(
-        &self,
-        connector_id: &str,
-        external_id: &str,
-    ) -> Result<bool> {
+    pub fn try_mark_poll_published(&self, connector_id: &str, external_id: &str) -> Result<bool> {
         let conn = self.conn.lock();
         let inserted = conn
             .execute(
@@ -246,10 +242,7 @@ impl SqliteAuditStore {
         let conn = self.conn.lock();
         let cutoff = now_ms().saturating_sub(max_age_ms as u128) as i64;
         let deleted = conn
-            .execute(
-                "DELETE FROM poll_dedup WHERE created_at_ms <= ?1",
-                params![cutoff],
-            )
+            .execute("DELETE FROM poll_dedup WHERE created_at_ms <= ?1", params![cutoff])
             .context("pruning poll dedup")?;
         Ok(deleted)
     }

@@ -292,10 +292,8 @@ mod tests {
 
     #[test]
     fn source_id_local_directory() {
-        let config = SkillSourceConfig::LocalDirectory {
-            path: "/tmp/skills".to_string(),
-            enabled: false,
-        };
+        let config =
+            SkillSourceConfig::LocalDirectory { path: "/tmp/skills".to_string(), enabled: false };
         assert_eq!(config.source_id(), "local:/tmp/skills");
         assert!(!config.is_enabled());
     }

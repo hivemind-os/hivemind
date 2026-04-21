@@ -1061,7 +1061,10 @@ impl BotService {
         })?
     }
 
-    pub(crate) async fn remove_persisted_bot(&self, agent_id: &str) -> Result<(), ChatServiceError> {
+    pub(crate) async fn remove_persisted_bot(
+        &self,
+        agent_id: &str,
+    ) -> Result<(), ChatServiceError> {
         let graph_path = Arc::clone(&self.knowledge_graph_path);
         let agent_id = agent_id.to_string();
         tokio::task::spawn_blocking(move || {

@@ -317,8 +317,8 @@ mod tests {
             on_error: None,
             next: vec![],
             timeout_secs: None,
-        designer_x: None,
-        designer_y: None,
+            designer_x: None,
+            designer_y: None,
         }
     }
 

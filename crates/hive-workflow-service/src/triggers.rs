@@ -756,7 +756,8 @@ impl TriggerManager {
 
         replay_events.sort_by_key(|e| e.id);
         let replayed = replay_events.len();
-        let comm_events = replay_events.iter().filter(|e| e.topic.starts_with("comm.message.received")).count();
+        let comm_events =
+            replay_events.iter().filter(|e| e.topic.starts_with("comm.message.received")).count();
         if replayed > 0 {
             info!(replayed, comm_events, since_ms, "replaying missed events");
         }
@@ -1333,14 +1334,9 @@ fn payload_matches_incoming(
     if ignore_replies {
         if let Some(meta) = payload.get("metadata").and_then(|m| m.as_object()) {
             // Helper: key exists and has a non-empty string value.
-            let has = |key: &str| {
-                meta.get(key)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|s| !s.is_empty())
-            };
-            let is_reply = has("referenced_message_id")
-                || has("thread_ts")
-                || has("in_reply_to");
+            let has =
+                |key: &str| meta.get(key).and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
+            let is_reply = has("referenced_message_id") || has("thread_ts") || has("in_reply_to");
             if is_reply {
                 info!(
                     has_referenced_message_id = has("referenced_message_id"),
@@ -1441,8 +1437,8 @@ mod tests {
                     on_error: None,
                     next: vec!["end".to_string()],
                     timeout_secs: None,
-                designer_x: None,
-                designer_y: None,
+                    designer_x: None,
+                    designer_y: None,
                 },
                 hive_workflow::types::StepDef {
                     id: "end".to_string(),
@@ -1453,8 +1449,8 @@ mod tests {
                     on_error: None,
                     next: vec![],
                     timeout_secs: None,
-                designer_x: None,
-                designer_y: None,
+                    designer_x: None,
+                    designer_y: None,
                 },
             ],
             output: None,
@@ -1916,24 +1912,28 @@ mod tests {
         let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
         tm.set_workflow_service(Arc::clone(&svc)).await;
 
-        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector")
+            .await;
 
         // Simulate the event that poll_connector_once publishes
         let payload = incoming_email_payload("gmail-connector", "gmail:msg-001");
         tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
 
         // Verify: a workflow instance should have been launched
-        let result = svc.list_instances(&InstanceFilter {
-            statuses: vec![],
-            definition_names: vec!["user/email-wf".to_string()],
-            definition_id: None,
-            parent_session_id: None,
-            parent_agent_id: None,
-            mode: None,
-            limit: None,
-            offset: None,
-            include_archived: false,
-        }).await.unwrap();
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/email-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
         assert_eq!(result.total, 1, "expected exactly one workflow instance to be launched");
     }
 
@@ -1947,22 +1947,26 @@ mod tests {
         tm.set_workflow_service(Arc::clone(&svc)).await;
 
         // Register trigger for "gmail-connector" but send event for "outlook-connector"
-        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector")
+            .await;
 
         let payload = incoming_email_payload("outlook-connector", "ms:msg-001");
         tm.evaluate_event("comm.message.received.outlook-connector", &payload).await;
 
-        let result = svc.list_instances(&InstanceFilter {
-            statuses: vec![],
-            definition_names: vec!["user/email-wf".to_string()],
-            definition_id: None,
-            parent_session_id: None,
-            parent_agent_id: None,
-            mode: None,
-            limit: None,
-            offset: None,
-            include_archived: false,
-        }).await.unwrap();
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/email-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
         assert_eq!(result.total, 0, "should NOT launch for wrong channel_id");
     }
 
@@ -1975,7 +1979,8 @@ mod tests {
         let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
         tm.set_workflow_service(Arc::clone(&svc)).await;
 
-        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector").await;
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "gmail-connector")
+            .await;
 
         let payload = incoming_email_payload("gmail-connector", "gmail:msg-dup");
 
@@ -1984,17 +1989,20 @@ mod tests {
         // Second evaluation with same external_id should be deduped
         tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
 
-        let result = svc.list_instances(&InstanceFilter {
-            statuses: vec![],
-            definition_names: vec!["user/email-wf".to_string()],
-            definition_id: None,
-            parent_session_id: None,
-            parent_agent_id: None,
-            mode: None,
-            limit: None,
-            offset: None,
-            include_archived: false,
-        }).await.unwrap();
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/email-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
         assert_eq!(result.total, 1, "dedup should prevent second launch for same external_id");
     }
 
@@ -2008,7 +2016,8 @@ mod tests {
         let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
         tm.set_workflow_service(Arc::clone(&svc)).await;
 
-        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "test-connector").await;
+        setup_incoming_trigger(&bus, &svc, &tm, "def-email", "user/email-wf", "test-connector")
+            .await;
 
         // Start the TriggerManager background loop
         tm.start().await;
@@ -2023,18 +2032,24 @@ mod tests {
         // Wait for the trigger manager to process the event and launch
         sleep(Duration::from_millis(500)).await;
 
-        let result = svc.list_instances(&InstanceFilter {
-            statuses: vec![],
-            definition_names: vec!["user/email-wf".to_string()],
-            definition_id: None,
-            parent_session_id: None,
-            parent_agent_id: None,
-            mode: None,
-            limit: None,
-            offset: None,
-            include_archived: false,
-        }).await.unwrap();
-        assert_eq!(result.total, 1, "event bus → trigger manager → workflow launch should work end-to-end");
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/email-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            result.total, 1,
+            "event bus → trigger manager → workflow launch should work end-to-end"
+        );
 
         // Clean up: stop the trigger manager
         tm.stop().await;
@@ -2097,17 +2112,20 @@ mod tests {
         });
         tm.evaluate_event("comm.message.received.ch1", &payload_vip).await;
 
-        let result = svc.list_instances(&InstanceFilter {
-            statuses: vec![],
-            definition_names: vec!["user/filtered-wf".to_string()],
-            definition_id: None,
-            parent_session_id: None,
-            parent_agent_id: None,
-            mode: None,
-            limit: None,
-            offset: None,
-            include_archived: false,
-        }).await.unwrap();
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/filtered-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
         assert_eq!(result.total, 1, "only the VIP email should trigger the workflow");
     }
 }

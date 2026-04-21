@@ -99,14 +99,10 @@ async fn classify_response(resp: reqwest::Response) -> Result<reqwest::Response,
     }
 
     if status.is_server_error() {
-        return Err(DiscordApiError::Transient(format!(
-            "Discord API error {status}: {body}"
-        )));
+        return Err(DiscordApiError::Transient(format!("Discord API error {status}: {body}")));
     }
 
-    Err(DiscordApiError::Permanent(format!(
-        "Discord API error {status}: {body}"
-    )))
+    Err(DiscordApiError::Permanent(format!("Discord API error {status}: {body}")))
 }
 
 /// Maximum number of retry attempts (applies to both rate-limit and transient errors).
@@ -191,9 +187,7 @@ pub async fn list_guilds_with_url(
             .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
 
         let resp = classify_response(resp).await?;
-        resp.json::<Vec<Guild>>()
-            .await
-            .map_err(|e| DiscordApiError::Transient(e.to_string()))
+        resp.json::<Vec<Guild>>().await.map_err(|e| DiscordApiError::Transient(e.to_string()))
     })
     .await
 }
@@ -224,9 +218,7 @@ pub async fn list_guild_channels_with_url(
             .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
 
         let resp = classify_response(resp).await?;
-        resp.json::<Vec<Channel>>()
-            .await
-            .map_err(|e| DiscordApiError::Transient(e.to_string()))
+        resp.json::<Vec<Channel>>().await.map_err(|e| DiscordApiError::Transient(e.to_string()))
     })
     .await
 }
@@ -291,10 +283,8 @@ pub async fn send_message_rich_with_url(
                 .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
 
             let resp = classify_response(resp).await?;
-            let msg: MessageResponse = resp
-                .json()
-                .await
-                .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
+            let msg: MessageResponse =
+                resp.json().await.map_err(|e| DiscordApiError::Transient(e.to_string()))?;
             Ok(msg.id)
         }
     })
@@ -366,10 +356,8 @@ pub async fn send_message_with_attachments_url(
             .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
 
         let resp = classify_response(resp).await?;
-        let msg: MessageResponse = resp
-            .json()
-            .await
-            .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
+        let msg: MessageResponse =
+            resp.json().await.map_err(|e| DiscordApiError::Transient(e.to_string()))?;
         Ok(msg.id)
     })
     .await
@@ -396,10 +384,8 @@ pub async fn get_gateway_url_with_url(
             .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
 
         let resp = classify_response(resp).await?;
-        let gw: GatewayBotResponse = resp
-            .json()
-            .await
-            .map_err(|e| DiscordApiError::Transient(e.to_string()))?;
+        let gw: GatewayBotResponse =
+            resp.json().await.map_err(|e| DiscordApiError::Transient(e.to_string()))?;
         Ok(gw.url)
     })
     .await
@@ -435,8 +421,7 @@ pub async fn acknowledge_interaction_with_url(
     base_url: &str,
 ) -> Result<()> {
     with_retry(|| async {
-        let url =
-            format!("{base_url}/interactions/{interaction_id}/{interaction_token}/callback");
+        let url = format!("{base_url}/interactions/{interaction_id}/{interaction_token}/callback");
         let body = serde_json::json!({
             "type": 7,
             "data": {

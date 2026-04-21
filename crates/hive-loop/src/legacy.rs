@@ -2327,8 +2327,9 @@ async fn execute_tool_call(
             }
         }
     } else {
-        tool.execute(call.input).await.map_err(|error| {
-            LoopError::ToolExecutionFailed { tool_id: call.tool_id.clone(), detail: error.to_string() }
+        tool.execute(call.input).await.map_err(|error| LoopError::ToolExecutionFailed {
+            tool_id: call.tool_id.clone(),
+            detail: error.to_string(),
         })?
     };
 
@@ -6074,10 +6075,7 @@ Let me know if you need anything else."#;
 
         let result = execute_tool_call(
             &context,
-            ToolCall {
-                tool_id: "test.slow".to_string(),
-                input: json!({}),
-            },
+            ToolCall { tool_id: "test.slow".to_string(), input: json!({}) },
             &[],
             None,
             None,

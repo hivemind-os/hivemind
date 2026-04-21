@@ -1525,12 +1525,8 @@ fn anthropic_messages_from_request(
 ) -> (Option<String>, Vec<AnthropicMessage>) {
     // Anthropic requires system messages as a top-level `system` parameter,
     // not as `{"role": "system"}` entries in the messages array.
-    let system_parts: Vec<String> = request
-        .messages
-        .iter()
-        .filter(|m| m.role == "system")
-        .map(|m| m.content.clone())
-        .collect();
+    let system_parts: Vec<String> =
+        request.messages.iter().filter(|m| m.role == "system").map(|m| m.content.clone()).collect();
     let system = if system_parts.is_empty() { None } else { Some(system_parts.join("\n\n")) };
 
     let mut messages: Vec<AnthropicMessage> = request

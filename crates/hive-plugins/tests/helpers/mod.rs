@@ -92,20 +92,12 @@ impl PluginTestEnv {
         let host = PluginHost::new(plugin_dir.clone(), data_dir).with_host_handler(handler);
 
         let process = host
-            .spawn(
-                &plugin_id,
-                &plugin_dir,
-                &entry_point,
-                config.clone(),
-                Some(&manifest.hivemind),
-            )
+            .spawn(&plugin_id, &plugin_dir, &entry_point, config.clone(), Some(&manifest.hivemind))
             .await
             .context("spawn test plugin")?;
 
         // Activate
-        host.activate(&plugin_id, Some(config))
-            .await
-            .context("activate test plugin")?;
+        host.activate(&plugin_id, Some(config)).await.context("activate test plugin")?;
 
         Ok(Self {
             host,
@@ -141,7 +133,11 @@ impl PluginTestEnv {
 
     /// Poll until at least `count` messages have been captured,
     /// or `timeout` has elapsed.
-    pub async fn wait_for_messages(&self, count: usize, timeout: std::time::Duration) -> Vec<Value> {
+    pub async fn wait_for_messages(
+        &self,
+        count: usize,
+        timeout: std::time::Duration,
+    ) -> Vec<Value> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             {
@@ -202,14 +198,17 @@ fn resolve_test_plugin_dir() -> Result<PathBuf> {
         // Resolve relative paths against the workspace root, since cargo test
         // sets CWD to the package root (crates/hive-plugins/) not the workspace.
         let dir = if dir.is_relative() {
-            let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("..");
+            let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
             workspace_root.join(&dir)
         } else {
             dir
         };
-        anyhow::ensure!(dir.exists(), "HIVEMIND_TEST_PLUGIN_PATH does not exist: {} (resolved from {:?})", dir.display(), p);
+        anyhow::ensure!(
+            dir.exists(),
+            "HIVEMIND_TEST_PLUGIN_PATH does not exist: {} (resolved from {:?})",
+            dir.display(),
+            p
+        );
         return Ok(dir);
     }
 
@@ -282,14 +281,8 @@ fn build_host_handler(
                     Ok(Value::Null)
                 }
                 protocol::host_methods::EMIT_EVENT => {
-                    let event_type = params["eventType"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    let payload = params
-                        .get("payload")
-                        .cloned()
-                        .unwrap_or(Value::Null);
+                    let event_type = params["eventType"].as_str().unwrap_or("").to_string();
+                    let payload = params.get("payload").cloned().unwrap_or(Value::Null);
                     events.lock().push((event_type, payload));
                     Ok(Value::Null)
                 }
@@ -300,74 +293,46 @@ fn build_host_handler(
 
                 // ── secrets ─────────────────────────────────────────
                 protocol::host_methods::SECRET_GET => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
                     let val = secrets.lock().get(&key).cloned();
                     Ok(json!({ "value": val }))
                 }
                 protocol::host_methods::SECRET_SET => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
-                    let value = params["value"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
+                    let value = params["value"].as_str().unwrap_or_default().to_string();
                     secrets.lock().insert(key, value);
                     Ok(Value::Null)
                 }
                 protocol::host_methods::SECRET_DELETE => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
                     secrets.lock().remove(&key);
                     Ok(Value::Null)
                 }
                 protocol::host_methods::SECRET_HAS => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
                     let has = secrets.lock().contains_key(&key);
                     Ok(json!({ "exists": has }))
                 }
 
                 // ── key-value store ─────────────────────────────────
                 protocol::host_methods::STORE_GET => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
                     let val = store.lock().get(&key).cloned();
                     Ok(json!({ "value": val }))
                 }
                 protocol::host_methods::STORE_SET => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
-                    let value = params["value"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
+                    let value = params["value"].as_str().unwrap_or_default().to_string();
                     store.lock().insert(key, value);
                     Ok(Value::Null)
                 }
                 protocol::host_methods::STORE_DELETE => {
-                    let key = params["key"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string();
+                    let key = params["key"].as_str().unwrap_or_default().to_string();
                     store.lock().remove(&key);
                     Ok(Value::Null)
                 }
                 protocol::host_methods::STORE_KEYS => {
-                    let keys: Vec<String> =
-                        store.lock().keys().cloned().collect();
+                    let keys: Vec<String> = store.lock().keys().cloned().collect();
                     Ok(json!({ "keys": keys }))
                 }
 
@@ -378,9 +343,7 @@ fn build_host_handler(
                 }
 
                 // ── HTTP fetch (best-effort real request) ───────────
-                protocol::host_methods::HTTP_FETCH => {
-                    handle_http_fetch(params).await
-                }
+                protocol::host_methods::HTTP_FETCH => handle_http_fetch(params).await,
 
                 // ── scheduling ──────────────────────────────────────
                 protocol::host_methods::SCHEDULE => {
@@ -389,7 +352,9 @@ fn build_host_handler(
                         "id": params["id"].as_str().unwrap_or(""),
                         "intervalSeconds": params["intervalSeconds"].as_u64().unwrap_or(0),
                     }));
-                    Ok(json!({ "ok": true, "taskId": format!("test-task-{}", params["id"].as_str().unwrap_or("unknown")) }))
+                    Ok(
+                        json!({ "ok": true, "taskId": format!("test-task-{}", params["id"].as_str().unwrap_or("unknown")) }),
+                    )
                 }
                 protocol::host_methods::UNSCHEDULE => {
                     schedules.lock().push(json!({
@@ -419,18 +384,9 @@ fn build_host_handler(
 
 /// Best-effort HTTP fetch using reqwest.  Falls back to a mock on error.
 async fn handle_http_fetch(params: Value) -> Result<Value> {
-    let url = params["url"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let method = params["method"]
-        .as_str()
-        .unwrap_or("GET")
-        .to_uppercase();
-    let headers = params
-        .get("headers")
-        .cloned()
-        .unwrap_or(Value::Object(Default::default()));
+    let url = params["url"].as_str().unwrap_or_default().to_string();
+    let method = params["method"].as_str().unwrap_or("GET").to_uppercase();
+    let headers = params.get("headers").cloned().unwrap_or(Value::Object(Default::default()));
     let body = params.get("body").cloned();
 
     let client = reqwest::Client::new();
@@ -463,12 +419,7 @@ async fn handle_http_fetch(params: Value) -> Result<Value> {
             let resp_headers: HashMap<String, String> = resp
                 .headers()
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.as_str().to_string(),
-                        v.to_str().unwrap_or("").to_string(),
-                    )
-                })
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
             let body_text = resp.text().await.unwrap_or_default();
             Ok(json!({

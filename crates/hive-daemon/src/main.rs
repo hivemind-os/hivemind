@@ -209,11 +209,7 @@ fn main() -> Result<()> {
             "daemon.start",
             "daemon",
             DataClass::Internal,
-            format!(
-                "starting hive-daemon v{} on {}",
-                env!("CARGO_PKG_VERSION"),
-                config.api.bind
-            ),
+            format!("starting hive-daemon v{} on {}", env!("CARGO_PKG_VERSION"), config.api.bind),
             "success",
         ))
         .context("failed to write daemon startup audit entry")?;

@@ -1262,10 +1262,7 @@ mod tests {
         let handle = tokio::spawn(runner.run());
 
         // Send Kill signal
-        inbox_tx
-            .send(AgentMessage::Control(ControlSignal::Kill))
-            .await
-            .unwrap();
+        inbox_tx.send(AgentMessage::Control(ControlSignal::Kill)).await.unwrap();
 
         // Runner should complete
         tokio::time::timeout(std::time::Duration::from_secs(2), handle)
@@ -1326,10 +1323,7 @@ mod tests {
 
         // Send a task — without executor, returns placeholder immediately
         inbox_tx
-            .send(AgentMessage::Task {
-                content: "do something".to_string(),
-                from: None,
-            })
+            .send(AgentMessage::Task { content: "do something".to_string(), from: None })
             .await
             .unwrap();
 

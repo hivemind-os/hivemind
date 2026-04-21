@@ -2009,7 +2009,8 @@ impl ChatService {
         };
 
         let session_mcp_manager = {
-            let persona_mcp_configs = self.mcp_configs_for_persona(persona_id.as_deref().unwrap_or("system/general"));
+            let persona_mcp_configs =
+                self.mcp_configs_for_persona(persona_id.as_deref().unwrap_or("system/general"));
             if let Some(mgr) =
                 self.build_session_mcp_from_configs(session_id.clone(), &persona_mcp_configs)
             {
@@ -2303,8 +2304,9 @@ impl ChatService {
             });
 
             let restored_session_mcp = {
-                let persona_mcp_configs =
-                    self.mcp_configs_for_persona(restored.last_persona_id.as_deref().unwrap_or("system/general"));
+                let persona_mcp_configs = self.mcp_configs_for_persona(
+                    restored.last_persona_id.as_deref().unwrap_or("system/general"),
+                );
                 if let Some(mgr) = self.build_session_mcp_from_configs(
                     restored.session_id.clone(),
                     &persona_mcp_configs,
@@ -3473,12 +3475,7 @@ impl ChatService {
             // Remove persisted agent nodes linked to this session so that
             // their edges are gone before we delete the session node.
             let agent_nodes = graph
-                .list_outbound_nodes(
-                    session_node_id,
-                    "session_agent",
-                    DataClass::Internal,
-                    10_000,
-                )
+                .list_outbound_nodes(session_node_id, "session_agent", DataClass::Internal, 10_000)
                 .unwrap_or_default();
             if !agent_nodes.is_empty() {
                 let ids: Vec<i64> = agent_nodes.iter().map(|n| n.id).collect();
@@ -3616,8 +3613,9 @@ impl ChatService {
         let sessions = self.sessions.read().await;
         for (session_id, record) in sessions.iter() {
             if let Some(ref smcp) = record.session_mcp {
-                let persona_configs =
-                    self.mcp_configs_for_persona(record.active_persona_id.as_deref().unwrap_or("system/general"));
+                let persona_configs = self.mcp_configs_for_persona(
+                    record.active_persona_id.as_deref().unwrap_or("system/general"),
+                );
                 smcp.update_servers(&persona_configs).await;
                 tracing::debug!(
                     session_id = %session_id,
@@ -5580,20 +5578,20 @@ impl ChatService {
                     if let Some((req_id, InteractionKind::Question { allow_freeform: true, .. })) =
                         pending.first()
                     {
-                        session.interaction_gate.respond(
-                            hive_contracts::UserInteractionResponse {
-                                request_id: req_id.clone(),
-                                payload: hive_contracts::InteractionResponsePayload::Answer {
-                                    selected_choice: None,
-                                    selected_choices: None,
-                                    text: Some(content_to_queue.clone()),
-                                },
+                        session.interaction_gate.respond(hive_contracts::UserInteractionResponse {
+                            request_id: req_id.clone(),
+                            payload: hive_contracts::InteractionResponsePayload::Answer {
+                                selected_choice: None,
+                                selected_choices: None,
+                                text: Some(content_to_queue.clone()),
                             },
-                        );
+                        });
                         // Mark the question message as answered in the snapshot.
-                        if let Some(msg) = session.snapshot.messages.iter_mut().find(|m| {
-                            m.interaction_request_id.as_deref() == Some(req_id.as_str())
-                        }) {
+                        if let Some(msg) =
+                            session.snapshot.messages.iter_mut().find(|m| {
+                                m.interaction_request_id.as_deref() == Some(req_id.as_str())
+                            })
+                        {
                             msg.interaction_answer = Some(content_to_queue.clone());
                             msg.status = ChatMessageStatus::Complete;
                             msg.updated_at_ms = now;
@@ -6455,7 +6453,9 @@ impl ChatService {
                         }
                         if broadcast_tx.send(event.into()).is_err() {
                             // All subscribers have dropped — session stream closed, nothing to do.
-                            tracing::debug!("failed to broadcast loop event: no active subscribers");
+                            tracing::debug!(
+                                "failed to broadcast loop event: no active subscribers"
+                            );
                         }
                     }
                 });
@@ -7648,20 +7648,22 @@ impl ChatService {
                             detail: e.to_string(),
                         }
                     })?;
-                    graph.insert_node_linked(
-                        &NewNode {
-                            node_type: "session_agent".to_string(),
-                            name: agent_name,
-                            data_class: DataClass::Internal,
-                            content: Some(content),
-                        },
-                        session_node_id,
-                        "session_agent",
-                        1.0,
-                    ).map_err(|e| ChatServiceError::KnowledgeGraphFailed {
-                        operation: "insert_agent_node",
-                        detail: e.to_string(),
-                    })?;
+                    graph
+                        .insert_node_linked(
+                            &NewNode {
+                                node_type: "session_agent".to_string(),
+                                name: agent_name,
+                                data_class: DataClass::Internal,
+                                content: Some(content),
+                            },
+                            session_node_id,
+                            "session_agent",
+                            1.0,
+                        )
+                        .map_err(|e| ChatServiceError::KnowledgeGraphFailed {
+                            operation: "insert_agent_node",
+                            detail: e.to_string(),
+                        })?;
                 }
             }
             Ok(())
@@ -7724,7 +7726,11 @@ impl ChatService {
     //  Bot KG persistence (delegated to BotService)
 
     #[allow(dead_code)]
-    async fn persist_bot_config(&self, config: &BotConfig, allow_insert: bool) -> Result<(), ChatServiceError> {
+    async fn persist_bot_config(
+        &self,
+        config: &BotConfig,
+        allow_insert: bool,
+    ) -> Result<(), ChatServiceError> {
         self.bot_service.persist_bot_config(config, allow_insert).await
     }
 
@@ -11060,11 +11066,7 @@ mod tests {
             );
             // The user message should exist in the snapshot but be Complete
             // (not Queued) since it wasn't queued for a separate turn.
-            let user_msg = record
-                .snapshot
-                .messages
-                .last()
-                .expect("should have a last message");
+            let user_msg = record.snapshot.messages.last().expect("should have a last message");
             assert_eq!(user_msg.role, ChatMessageRole::User);
             assert_eq!(user_msg.content, "never mind, do something else");
             assert_eq!(

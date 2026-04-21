@@ -498,7 +498,10 @@ impl McpService {
                             .cloned()
                             .or_else(|| {
                                 resolve_env(&config).ok().and_then(|pairs| {
-                                    pairs.into_iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v)
+                                    pairs
+                                        .into_iter()
+                                        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+                                        .map(|(_, v)| v)
                                 })
                             });
                         if let Some(ref path_var) = effective_path {
@@ -656,10 +659,7 @@ impl McpService {
                         // reason (e.g. a Python traceback) instead of a generic
                         // protocol error.
                         let base = format!("protocol handshake with `{command}` failed: {error}");
-                        McpServiceError::ConnectionFailed {
-                            server_id: sid.clone(),
-                            detail: base,
-                        }
+                        McpServiceError::ConnectionFailed { server_id: sid.clone(), detail: base }
                     })?;
 
                     Ok((service, Some(child)))
@@ -767,7 +767,8 @@ impl McpService {
                 }
                 return Err(McpServiceError::ConnectionFailed {
                     server_id: server_id.to_string(),
-                    detail: enriched_error.replace(&format!("mcp server `{server_id}` failed to connect: "), ""),
+                    detail: enriched_error
+                        .replace(&format!("mcp server `{server_id}` failed to connect: "), ""),
                 });
             }
         };
@@ -1462,7 +1463,9 @@ impl McpService {
                         "catalog refreshed"
                     );
                 }
-                Err(ref e @ McpServiceError::RuntimeNotInstalled { can_auto_install: true, .. }) => {
+                Err(
+                    ref e @ McpServiceError::RuntimeNotInstalled { can_auto_install: true, .. },
+                ) => {
                     // Track for deferred re-discovery when the runtime becomes available.
                     if let Some(cmd) = &config.command {
                         let rt = runtime::detect_runtime(cmd);

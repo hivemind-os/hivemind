@@ -1192,7 +1192,11 @@ impl ConnectorService {
         Self::create_connector(config, Path::new("/tmp"))
     }
 
-    async fn poll_connector_once(&self, connector_id: &str, published_ids: &mut HashSet<String>) -> bool {
+    async fn poll_connector_once(
+        &self,
+        connector_id: &str,
+        published_ids: &mut HashSet<String>,
+    ) -> bool {
         let (connector, config) = {
             let handles = self.handles.read();
             match handles.get(connector_id) {

@@ -33,11 +33,7 @@ pub struct PluginRegistry {
 impl PluginRegistry {
     pub fn new(plugins_dir: PathBuf) -> Self {
         let state_file = plugins_dir.join("plugins.json");
-        Self {
-            plugins_dir,
-            state_file,
-            plugins: parking_lot::RwLock::new(HashMap::new()),
-        }
+        Self { plugins_dir, state_file, plugins: parking_lot::RwLock::new(HashMap::new()) }
     }
 
     /// Load registry state from disk.
@@ -185,7 +181,11 @@ impl PluginRegistry {
     }
 
     /// Update the allowed personas for a plugin.
-    pub fn set_allowed_personas(&self, plugin_id: &str, personas: Vec<String>) -> anyhow::Result<()> {
+    pub fn set_allowed_personas(
+        &self,
+        plugin_id: &str,
+        personas: Vec<String>,
+    ) -> anyhow::Result<()> {
         let mut plugins = self.plugins.write();
         if let Some(plugin) = plugins.get_mut(plugin_id) {
             plugin.allowed_personas = personas;
@@ -230,10 +230,7 @@ impl PluginRegistry {
         // Determine the actual package directory name (strip scope if present)
         let dir_name = if package_name.starts_with('@') {
             // Scoped package: @scope/name → node_modules/@scope/name
-            package_name
-                .split('/')
-                .last()
-                .unwrap_or(package_name)
+            package_name.split('/').last().unwrap_or(package_name)
         } else {
             // Strip version specifiers: name@1.0.0 → name
             package_name.split('@').next().unwrap_or(package_name)
@@ -256,10 +253,7 @@ impl PluginRegistry {
 
         let plugin_pkg_json = install_path.join("package.json");
         if !plugin_pkg_json.exists() {
-            anyhow::bail!(
-                "Installed package not found at {}",
-                plugin_pkg_json.display()
-            );
+            anyhow::bail!("Installed package not found at {}", plugin_pkg_json.display());
         }
 
         let manifest = PluginManifest::from_package_json(&plugin_pkg_json)?;
@@ -343,9 +337,7 @@ mod tests {
         assert_eq!(registry.list().len(), 1);
 
         // Update config
-        registry
-            .update_config("test-plugin", serde_json::json!({"key": "val"}))
-            .unwrap();
+        registry.update_config("test-plugin", serde_json::json!({"key": "val"})).unwrap();
         let plugin = registry.get("test-plugin").unwrap();
         assert_eq!(plugin.config["key"], "val");
 

@@ -7,7 +7,7 @@
 use crate::health::{HealthConfig, HealthMonitor, PluginHealth};
 use crate::manifest::HivemindMeta;
 use crate::protocol::{
-    self, HostInfo, InitializeParams, IncomingMessage, JsonRpcRequest, JsonRpcResponse,
+    self, HostInfo, IncomingMessage, InitializeParams, JsonRpcRequest, JsonRpcResponse,
     PluginStatus, PluginToolDef,
 };
 use crate::sandbox::PluginSandbox;
@@ -49,7 +49,14 @@ pub struct PluginProcess {
 }
 
 /// Host API callback for handling plugin→host requests.
-pub type HostHandler = Arc<dyn Fn(&str, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send>> + Send + Sync>;
+pub type HostHandler = Arc<
+    dyn Fn(
+            &str,
+            Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send>>
+        + Send
+        + Sync,
+>;
 
 impl PluginProcess {
     /// Send a JSON-RPC request to the plugin and wait for a response.
@@ -178,16 +185,10 @@ impl PluginHost {
     ) -> Result<Arc<PluginProcess>> {
         let entry_path = package_dir.join(entry_point);
         if !entry_path.exists() {
-            anyhow::bail!(
-                "Plugin entry point not found: {}",
-                entry_path.display()
-            );
+            anyhow::bail!("Plugin entry point not found: {}", entry_path.display());
         }
 
-        let node_path = self
-            .node_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("node"));
+        let node_path = self.node_path.clone().unwrap_or_else(|| PathBuf::from("node"));
 
         info!(plugin_id, entry_path = %entry_path.display(), "Spawning plugin process");
 
@@ -230,7 +231,8 @@ impl PluginHost {
         }));
 
         // Create sandbox from manifest permissions
-        let sandbox = manifest_meta.map(|meta| Arc::new(PluginSandbox::new(plugin_id.into(), meta)));
+        let sandbox =
+            manifest_meta.map(|meta| Arc::new(PluginSandbox::new(plugin_id.into(), meta)));
 
         let process = Arc::new(PluginProcess {
             plugin_id: plugin_id.into(),
@@ -256,14 +258,18 @@ impl PluginHost {
 
         // Stderr reader task
         let pid = plugin_id.to_string();
-        let stderr_span = tracing::info_span!("plugin_stderr", service = %format!("plugin:{}", pid));
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                warn!("[stderr] {}", line);
+        let stderr_span =
+            tracing::info_span!("plugin_stderr", service = %format!("plugin:{}", pid));
+        tokio::spawn(
+            async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    warn!("[stderr] {}", line);
+                }
             }
-        }.instrument(stderr_span));
+            .instrument(stderr_span),
+        );
 
         // Plugin event forwarder — bridge the per-process mpsc into the
         // shared broadcast channel so external subscribers (e.g. EventBus)
@@ -293,235 +299,295 @@ impl PluginHost {
 
         let stdout_service_id = format!("plugin:{}", plugin_id);
         let stdout_span = tracing::info_span!("plugin_process", service = %stdout_service_id);
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-            let mut header_buf = String::new();
-
-            loop {
-                header_buf.clear();
-                // Read headers until \r\n\r\n
-                let mut found_empty = false;
-                let mut content_length: Option<usize> = None;
+        tokio::spawn(
+            async move {
+                let mut reader = BufReader::new(stdout);
+                let mut header_buf = String::new();
 
                 loop {
                     header_buf.clear();
-                    match reader.read_line(&mut header_buf).await {
-                        Ok(0) => return, // EOF
-                        Ok(_) => {
-                            let trimmed = header_buf.trim();
-                            if trimmed.is_empty() {
-                                found_empty = true;
-                                break;
+                    // Read headers until \r\n\r\n
+                    let mut found_empty = false;
+                    let mut content_length: Option<usize> = None;
+
+                    loop {
+                        header_buf.clear();
+                        match reader.read_line(&mut header_buf).await {
+                            Ok(0) => return, // EOF
+                            Ok(_) => {
+                                let trimmed = header_buf.trim();
+                                if trimmed.is_empty() {
+                                    found_empty = true;
+                                    break;
+                                }
+                                if let Some(val) = trimmed.strip_prefix("Content-Length:") {
+                                    content_length = val.trim().parse().ok();
+                                }
                             }
-                            if let Some(val) = trimmed.strip_prefix("Content-Length:") {
-                                content_length = val.trim().parse().ok();
-                            }
+                            Err(_) => return,
                         }
-                        Err(_) => return,
                     }
-                }
 
-                if !found_empty {
-                    continue;
-                }
-
-                let len = match content_length {
-                    Some(l) => l,
-                    None => continue,
-                };
-
-                let mut body = vec![0u8; len];
-                if reader.read_exact(&mut body).await.is_err() {
-                    return;
-                }
-
-                // Payload size check
-                if let Some(ref sandbox) = reader_sandbox {
-                    if let Err(reason) = sandbox.check_payload_size(body.len()) {
-                        warn!("{}", reason);
+                    if !found_empty {
                         continue;
                     }
-                }
 
-                let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
-                    continue;
-                };
+                    let len = match content_length {
+                        Some(l) => l,
+                        None => continue,
+                    };
 
-                // Determine if it's a response, request, or notification
-                if msg.get("id").is_some() && (msg.get("result").is_some() || msg.get("error").is_some()) {
-                    // Response to our request
-                    if let Some(id) = msg["id"].as_u64() {
-                        if let Some(tx) = pending_clone.lock().remove(&id) {
-                            if let Some(err) = msg.get("error") {
-                                let msg_str = err["message"].as_str().unwrap_or("Unknown error");
-                                let _ = tx.send(Err(anyhow::anyhow!("{}", msg_str)));
-                            } else {
-                                let result = msg.get("result").cloned().unwrap_or(Value::Null);
-                                let _ = tx.send(Ok(result));
-                            }
-                        }
+                    let mut body = vec![0u8; len];
+                    if reader.read_exact(&mut body).await.is_err() {
+                        return;
                     }
-                } else if let Some(method) = msg["method"].as_str() {
-                    let params = msg.get("params").cloned().unwrap_or(Value::Null);
-                    let has_id = msg.get("id").is_some();
 
-                    // Permission check: verify the host call is allowed
+                    // Payload size check
                     if let Some(ref sandbox) = reader_sandbox {
-                        let check = sandbox.check_host_call(method, &params);
-                        if !check.allowed {
-                            warn!("Sandbox denied host call '{}': {}", method, check.reason.as_deref().unwrap_or("denied"));
-                            if has_id {
-                                let resp = JsonRpcResponse::error(
-                                    msg["id"].clone(),
-                                    -32003,
-                                    check.reason.unwrap_or_default(),
-                                );
-                                let json = serde_json::to_string(&resp).unwrap();
-                                let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                            }
+                        if let Err(reason) = sandbox.check_payload_size(body.len()) {
+                            warn!("{}", reason);
                             continue;
                         }
                     }
 
-                    // Handle host API calls from the plugin
-                    match method {
-                        protocol::host_methods::EMIT_MESSAGE => {
-                            // Forward to host handler for testing/capture
-                            if let Some(ref handler) = host_handler {
-                                let h = handler.clone();
-                                let p = params.clone();
-                                tokio::spawn(async move { let _ = h("host/emitMessage", p).await; });
-                            }
-                            // Rate limit check for messages
-                            if let Some(ref sandbox) = reader_sandbox {
-                                if let Err(reason) = sandbox.check_message_rate() {
-                                    warn!("{}", reason);
-                                    if has_id {
-                                        let resp = JsonRpcResponse::error(
-                                            msg["id"].clone(),
-                                            -32003,
-                                            reason,
-                                        );
-                                        let json = serde_json::to_string(&resp).unwrap();
-                                        let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                        let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                                    }
-                                    continue;
-                                }
-                            }
-                            if let Ok(im) = serde_json::from_value::<IncomingMessage>(
-                                params.get("message").cloned().unwrap_or(params.clone()),
-                            ) {
-                                let _ = msg_tx.send(im).await;
-                            }
-                            if has_id {
-                                let resp = JsonRpcResponse::success(msg["id"].clone(), Value::Null);
-                                let json = serde_json::to_string(&resp).unwrap();
-                                let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                            }
-                        }
-                        protocol::host_methods::EMIT_EVENT => {
-                            // Forward to host handler for testing/capture
-                            if let Some(ref handler) = host_handler {
-                                let h = handler.clone();
-                                let p = params.clone();
-                                tokio::spawn(async move { let _ = h("host/emitEvent", p).await; });
-                            }
-                            // Rate limit check for events
-                            if let Some(ref sandbox) = reader_sandbox {
-                                if let Err(reason) = sandbox.check_event_rate() {
-                                    warn!("{}", reason);
-                                    if has_id {
-                                        let resp = JsonRpcResponse::error(
-                                            msg["id"].clone(),
-                                            -32003,
-                                            reason,
-                                        );
-                                        let json = serde_json::to_string(&resp).unwrap();
-                                        let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                        let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                                    }
-                                    continue;
-                                }
-                            }
-                            let event_type = params["eventType"].as_str().unwrap_or("").to_string();
-                            let payload = params.get("payload").cloned().unwrap_or(Value::Null);
-                            let _ = evt_tx.send((event_type, payload)).await;
-                            if has_id {
-                                let resp = JsonRpcResponse::success(msg["id"].clone(), Value::Null);
-                                let json = serde_json::to_string(&resp).unwrap();
-                                let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                            }
-                        }
-                        protocol::host_methods::UPDATE_STATUS => {
-                            // Forward to host handler for testing/capture
-                            if let Some(ref handler) = host_handler {
-                                let h = handler.clone();
-                                let p = params.clone();
-                                tokio::spawn(async move { let _ = h("host/updateStatus", p).await; });
-                            }
-                            if let Ok(status) = serde_json::from_value::<PluginStatus>(params.clone()) {
-                                *process_status.write() = status.clone();
-                                let _ = status_broadcast_tx.send(PluginStatusChange {
-                                    plugin_id: plugin_id_for_status.clone(),
-                                    status,
-                                });
-                            }
-                            if has_id {
-                                let resp = JsonRpcResponse::success(msg["id"].clone(), Value::Null);
-                                let json = serde_json::to_string(&resp).unwrap();
-                                let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
-                            }
-                        }
-                        protocol::host_methods::LOG => {
-                            let level = params["level"].as_str().unwrap_or("info");
-                            let log_msg = params["msg"].as_str().unwrap_or("");
-                            match level {
-                                "debug" => debug!("{}", log_msg),
-                                "warn" => warn!("{}", log_msg),
-                                "error" => error!("{}", log_msg),
-                                _ => info!("{}", log_msg),
-                            }
-                            // Log is a notification, no response needed
-                        }
-                        _ => {
-                            // Delegate to host handler if available
-                            if has_id {
-                                if let Some(ref handler) = host_handler {
-                                    let handler = handler.clone();
-                                    let method = method.to_string();
-                                    let process_ref = process_for_reader.clone();
-                                    let id = msg["id"].clone();
-                                    tokio::spawn(async move {
-                                        let result = handler(&method, params).await;
-                                        let resp = match result {
-                                            Ok(val) => JsonRpcResponse::success(id, val),
-                                            Err(e) => JsonRpcResponse::error(id, -32000, e.to_string()),
-                                        };
-                                        let json = serde_json::to_string(&resp).unwrap();
-                                        let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                        let _ = process_ref.stdin_tx.send(frame.into_bytes()).await;
-                                    });
+                    let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
+                        continue;
+                    };
+
+                    // Determine if it's a response, request, or notification
+                    if msg.get("id").is_some()
+                        && (msg.get("result").is_some() || msg.get("error").is_some())
+                    {
+                        // Response to our request
+                        if let Some(id) = msg["id"].as_u64() {
+                            if let Some(tx) = pending_clone.lock().remove(&id) {
+                                if let Some(err) = msg.get("error") {
+                                    let msg_str =
+                                        err["message"].as_str().unwrap_or("Unknown error");
+                                    let _ = tx.send(Err(anyhow::anyhow!("{}", msg_str)));
                                 } else {
+                                    let result = msg.get("result").cloned().unwrap_or(Value::Null);
+                                    let _ = tx.send(Ok(result));
+                                }
+                            }
+                        }
+                    } else if let Some(method) = msg["method"].as_str() {
+                        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                        let has_id = msg.get("id").is_some();
+
+                        // Permission check: verify the host call is allowed
+                        if let Some(ref sandbox) = reader_sandbox {
+                            let check = sandbox.check_host_call(method, &params);
+                            if !check.allowed {
+                                warn!(
+                                    "Sandbox denied host call '{}': {}",
+                                    method,
+                                    check.reason.as_deref().unwrap_or("denied")
+                                );
+                                if has_id {
                                     let resp = JsonRpcResponse::error(
                                         msg["id"].clone(),
-                                        -32601,
-                                        format!("No host handler for: {}", method),
+                                        -32003,
+                                        check.reason.unwrap_or_default(),
                                     );
                                     let json = serde_json::to_string(&resp).unwrap();
-                                    let frame = format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
-                                    let _ = process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                    let frame =
+                                        format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                    let _ =
+                                        process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                }
+                                continue;
+                            }
+                        }
+
+                        // Handle host API calls from the plugin
+                        match method {
+                            protocol::host_methods::EMIT_MESSAGE => {
+                                // Forward to host handler for testing/capture
+                                if let Some(ref handler) = host_handler {
+                                    let h = handler.clone();
+                                    let p = params.clone();
+                                    tokio::spawn(async move {
+                                        let _ = h("host/emitMessage", p).await;
+                                    });
+                                }
+                                // Rate limit check for messages
+                                if let Some(ref sandbox) = reader_sandbox {
+                                    if let Err(reason) = sandbox.check_message_rate() {
+                                        warn!("{}", reason);
+                                        if has_id {
+                                            let resp = JsonRpcResponse::error(
+                                                msg["id"].clone(),
+                                                -32003,
+                                                reason,
+                                            );
+                                            let json = serde_json::to_string(&resp).unwrap();
+                                            let frame = format!(
+                                                "Content-Length: {}\r\n\r\n{}",
+                                                json.len(),
+                                                json
+                                            );
+                                            let _ = process_for_reader
+                                                .stdin_tx
+                                                .send(frame.into_bytes())
+                                                .await;
+                                        }
+                                        continue;
+                                    }
+                                }
+                                if let Ok(im) = serde_json::from_value::<IncomingMessage>(
+                                    params.get("message").cloned().unwrap_or(params.clone()),
+                                ) {
+                                    let _ = msg_tx.send(im).await;
+                                }
+                                if has_id {
+                                    let resp =
+                                        JsonRpcResponse::success(msg["id"].clone(), Value::Null);
+                                    let json = serde_json::to_string(&resp).unwrap();
+                                    let frame =
+                                        format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                    let _ =
+                                        process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                }
+                            }
+                            protocol::host_methods::EMIT_EVENT => {
+                                // Forward to host handler for testing/capture
+                                if let Some(ref handler) = host_handler {
+                                    let h = handler.clone();
+                                    let p = params.clone();
+                                    tokio::spawn(async move {
+                                        let _ = h("host/emitEvent", p).await;
+                                    });
+                                }
+                                // Rate limit check for events
+                                if let Some(ref sandbox) = reader_sandbox {
+                                    if let Err(reason) = sandbox.check_event_rate() {
+                                        warn!("{}", reason);
+                                        if has_id {
+                                            let resp = JsonRpcResponse::error(
+                                                msg["id"].clone(),
+                                                -32003,
+                                                reason,
+                                            );
+                                            let json = serde_json::to_string(&resp).unwrap();
+                                            let frame = format!(
+                                                "Content-Length: {}\r\n\r\n{}",
+                                                json.len(),
+                                                json
+                                            );
+                                            let _ = process_for_reader
+                                                .stdin_tx
+                                                .send(frame.into_bytes())
+                                                .await;
+                                        }
+                                        continue;
+                                    }
+                                }
+                                let event_type =
+                                    params["eventType"].as_str().unwrap_or("").to_string();
+                                let payload = params.get("payload").cloned().unwrap_or(Value::Null);
+                                let _ = evt_tx.send((event_type, payload)).await;
+                                if has_id {
+                                    let resp =
+                                        JsonRpcResponse::success(msg["id"].clone(), Value::Null);
+                                    let json = serde_json::to_string(&resp).unwrap();
+                                    let frame =
+                                        format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                    let _ =
+                                        process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                }
+                            }
+                            protocol::host_methods::UPDATE_STATUS => {
+                                // Forward to host handler for testing/capture
+                                if let Some(ref handler) = host_handler {
+                                    let h = handler.clone();
+                                    let p = params.clone();
+                                    tokio::spawn(async move {
+                                        let _ = h("host/updateStatus", p).await;
+                                    });
+                                }
+                                if let Ok(status) =
+                                    serde_json::from_value::<PluginStatus>(params.clone())
+                                {
+                                    *process_status.write() = status.clone();
+                                    let _ = status_broadcast_tx.send(PluginStatusChange {
+                                        plugin_id: plugin_id_for_status.clone(),
+                                        status,
+                                    });
+                                }
+                                if has_id {
+                                    let resp =
+                                        JsonRpcResponse::success(msg["id"].clone(), Value::Null);
+                                    let json = serde_json::to_string(&resp).unwrap();
+                                    let frame =
+                                        format!("Content-Length: {}\r\n\r\n{}", json.len(), json);
+                                    let _ =
+                                        process_for_reader.stdin_tx.send(frame.into_bytes()).await;
+                                }
+                            }
+                            protocol::host_methods::LOG => {
+                                let level = params["level"].as_str().unwrap_or("info");
+                                let log_msg = params["msg"].as_str().unwrap_or("");
+                                match level {
+                                    "debug" => debug!("{}", log_msg),
+                                    "warn" => warn!("{}", log_msg),
+                                    "error" => error!("{}", log_msg),
+                                    _ => info!("{}", log_msg),
+                                }
+                                // Log is a notification, no response needed
+                            }
+                            _ => {
+                                // Delegate to host handler if available
+                                if has_id {
+                                    if let Some(ref handler) = host_handler {
+                                        let handler = handler.clone();
+                                        let method = method.to_string();
+                                        let process_ref = process_for_reader.clone();
+                                        let id = msg["id"].clone();
+                                        tokio::spawn(async move {
+                                            let result = handler(&method, params).await;
+                                            let resp = match result {
+                                                Ok(val) => JsonRpcResponse::success(id, val),
+                                                Err(e) => JsonRpcResponse::error(
+                                                    id,
+                                                    -32000,
+                                                    e.to_string(),
+                                                ),
+                                            };
+                                            let json = serde_json::to_string(&resp).unwrap();
+                                            let frame = format!(
+                                                "Content-Length: {}\r\n\r\n{}",
+                                                json.len(),
+                                                json
+                                            );
+                                            let _ =
+                                                process_ref.stdin_tx.send(frame.into_bytes()).await;
+                                        });
+                                    } else {
+                                        let resp = JsonRpcResponse::error(
+                                            msg["id"].clone(),
+                                            -32601,
+                                            format!("No host handler for: {}", method),
+                                        );
+                                        let json = serde_json::to_string(&resp).unwrap();
+                                        let frame = format!(
+                                            "Content-Length: {}\r\n\r\n{}",
+                                            json.len(),
+                                            json
+                                        );
+                                        let _ = process_for_reader
+                                            .stdin_tx
+                                            .send(frame.into_bytes())
+                                            .await;
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }.instrument(stdout_span));
+            .instrument(stdout_span),
+        );
 
         // Wait for plugin/ready notification (with timeout)
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -533,10 +599,7 @@ impl PluginHost {
             host_info: self.host_info.clone(),
         };
         let init_result = process
-            .request(
-                protocol::methods::INITIALIZE,
-                Some(serde_json::to_value(&init_params)?),
-            )
+            .request(protocol::methods::INITIALIZE, Some(serde_json::to_value(&init_params)?))
             .await
             .context("Plugin initialization failed")?;
 
@@ -597,9 +660,7 @@ impl PluginHost {
         let process = self.processes.write().remove(plugin_id);
         if let Some(process) = process {
             // Try graceful deactivate first
-            let _ = process
-                .request(protocol::methods::DEACTIVATE, None)
-                .await;
+            let _ = process.request(protocol::methods::DEACTIVATE, None).await;
             process.kill().await;
             info!(plugin_id, "Plugin stopped");
         }
@@ -634,9 +695,8 @@ impl PluginHost {
             .ok_or_else(|| anyhow::anyhow!("Plugin not running: {}", plugin_id))?;
 
         let result = process.request(protocol::methods::TOOLS_LIST, None).await?;
-        let tools: Vec<PluginToolDef> = serde_json::from_value(
-            result.get("tools").cloned().unwrap_or(Value::Array(vec![])),
-        )?;
+        let tools: Vec<PluginToolDef> =
+            serde_json::from_value(result.get("tools").cloned().unwrap_or(Value::Array(vec![])))?;
         Ok(tools)
     }
 
@@ -655,9 +715,7 @@ impl PluginHost {
             "name": tool_name,
             "arguments": arguments,
         });
-        process
-            .request(protocol::methods::TOOLS_CALL, Some(params))
-            .await
+        process.request(protocol::methods::TOOLS_CALL, Some(params)).await
     }
 
     /// Get the config schema from a running plugin.
@@ -665,9 +723,7 @@ impl PluginHost {
         let process = self
             .get(plugin_id)
             .ok_or_else(|| anyhow::anyhow!("Plugin not running: {}", plugin_id))?;
-        process
-            .request(protocol::methods::CONFIG_SCHEMA, None)
-            .await
+        process.request(protocol::methods::CONFIG_SCHEMA, None).await
     }
 
     /// Activate a plugin (run onActivate hook).
@@ -676,9 +732,7 @@ impl PluginHost {
             .get(plugin_id)
             .ok_or_else(|| anyhow::anyhow!("Plugin not running: {}", plugin_id))?;
         let params = config.map(|c| serde_json::json!({ "config": c }));
-        process
-            .request(protocol::methods::ACTIVATE, params)
-            .await?;
+        process.request(protocol::methods::ACTIVATE, params).await?;
         Ok(())
     }
 
@@ -687,9 +741,7 @@ impl PluginHost {
         let process = self
             .get(plugin_id)
             .ok_or_else(|| anyhow::anyhow!("Plugin not running: {}", plugin_id))?;
-        process
-            .request(protocol::methods::START_LOOP, None)
-            .await?;
+        process.request(protocol::methods::START_LOOP, None).await?;
         Ok(())
     }
 
@@ -698,9 +750,7 @@ impl PluginHost {
         let process = self
             .get(plugin_id)
             .ok_or_else(|| anyhow::anyhow!("Plugin not running: {}", plugin_id))?;
-        process
-            .request(protocol::methods::STOP_LOOP, None)
-            .await?;
+        process.request(protocol::methods::STOP_LOOP, None).await?;
         Ok(())
     }
 }

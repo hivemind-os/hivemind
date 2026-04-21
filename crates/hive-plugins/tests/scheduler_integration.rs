@@ -30,11 +30,7 @@ async fn test_plugin_can_schedule_task() {
 
     // The tool should return success content
     let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("Scheduled task"),
-        "expected success message, got: {:?}",
-        result
-    );
+    assert!(content.contains("Scheduled task"), "expected success message, got: {:?}", result);
 
     // Verify the host handler captured the schedule request
     {
@@ -79,11 +75,7 @@ async fn test_plugin_can_unschedule_task() {
         .expect("unschedule tool should succeed");
 
     let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("Unscheduled task"),
-        "expected unschedule message, got: {:?}",
-        result
-    );
+    assert!(content.contains("Unscheduled task"), "expected unschedule message, got: {:?}", result);
 
     // Verify the host handler captured both requests
     {

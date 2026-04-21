@@ -48,23 +48,13 @@ impl JsonRpcRequest {
     }
 
     pub fn notification(method: &str, params: Option<Value>) -> Self {
-        Self {
-            jsonrpc: "2.0".into(),
-            id: None,
-            method: method.into(),
-            params,
-        }
+        Self { jsonrpc: "2.0".into(), id: None, method: method.into(), params }
     }
 }
 
 impl JsonRpcResponse {
     pub fn success(id: Value, result: Value) -> Self {
-        Self {
-            jsonrpc: "2.0".into(),
-            id,
-            result: Some(result),
-            error: None,
-        }
+        Self { jsonrpc: "2.0".into(), id, result: Some(result), error: None }
     }
 
     pub fn error(id: Value, code: i64, message: impl Into<String>) -> Self {
@@ -72,11 +62,7 @@ impl JsonRpcResponse {
             jsonrpc: "2.0".into(),
             id,
             result: None,
-            error: Some(JsonRpcError {
-                code,
-                message: message.into(),
-                data: None,
-            }),
+            error: Some(JsonRpcError { code, message: message.into(), data: None }),
         }
     }
 }

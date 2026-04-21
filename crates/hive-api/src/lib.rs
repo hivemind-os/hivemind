@@ -679,192 +679,189 @@ impl AppState {
             let store_base = data_dir;
             let notify_event_bus = event_bus.clone();
             let scheduler_for_handler = scheduler.clone();
-            host = host.with_host_handler(Arc::new(move |method: &str, params: serde_json::Value| {
-                let method = method.to_string();
-                let store_base = store_base.clone();
-                let notify_bus = notify_event_bus.clone();
-                let scheduler = scheduler_for_handler.clone();
-                Box::pin(async move {
-                    match method.as_str() {
-                        "host/secretGet" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let scoped_key = format!("plugin:{}:{}", plugin_id, key);
-                            let value = hive_core::secret_store::load(&scoped_key);
-                            Ok(serde_json::json!({ "value": value }))
-                        }
-                        "host/secretSet" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let value = params["value"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let scoped_key = format!("plugin:{}:{}", plugin_id, key);
-                            hive_core::secret_store::save(&scoped_key, value);
-                            Ok(serde_json::json!({}))
-                        }
-                        "host/secretDelete" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let scoped_key = format!("plugin:{}:{}", plugin_id, key);
-                            hive_core::secret_store::delete(&scoped_key);
-                            Ok(serde_json::json!({}))
-                        }
-                        "host/secretHas" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let scoped_key = format!("plugin:{}:{}", plugin_id, key);
-                            let exists = hive_core::secret_store::load(&scoped_key).is_some();
-                            Ok(serde_json::json!({ "exists": exists }))
-                        }
-                        "host/storeGet" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let dir = store_base.join(plugin_id);
-                            let path = dir.join(format!("{}.json", key));
-                            match std::fs::read_to_string(&path) {
-                                Ok(raw) => {
-                                    let val = serde_json::from_str::<serde_json::Value>(&raw)
-                                        .unwrap_or(serde_json::Value::Null);
-                                    Ok(serde_json::json!({ "value": val }))
-                                }
-                                Err(_) => Ok(serde_json::json!({ "value": null })),
+            host =
+                host.with_host_handler(Arc::new(move |method: &str, params: serde_json::Value| {
+                    let method = method.to_string();
+                    let store_base = store_base.clone();
+                    let notify_bus = notify_event_bus.clone();
+                    let scheduler = scheduler_for_handler.clone();
+                    Box::pin(async move {
+                        match method.as_str() {
+                            "host/secretGet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                let value = hive_core::secret_store::load(&scoped_key);
+                                Ok(serde_json::json!({ "value": value }))
                             }
-                        }
-                        "host/storeSet" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let value = params.get("value").cloned().unwrap_or(serde_json::Value::Null);
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let dir = store_base.join(plugin_id);
-                            std::fs::create_dir_all(&dir)?;
-                            let path = dir.join(format!("{}.json", key));
-                            std::fs::write(&path, serde_json::to_string(&value)?)?;
-                            Ok(serde_json::json!({}))
-                        }
-                        "host/storeDelete" => {
-                            let key = params["key"].as_str().unwrap_or("");
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let dir = store_base.join(plugin_id);
-                            let path = dir.join(format!("{}.json", key));
-                            let _ = std::fs::remove_file(&path);
-                            Ok(serde_json::json!({}))
-                        }
-                        "host/storeKeys" => {
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let dir = store_base.join(plugin_id);
-                            let keys: Vec<String> = std::fs::read_dir(&dir)
-                                .ok()
-                                .map(|entries| {
-                                    entries
-                                        .filter_map(|e| e.ok())
-                                        .filter_map(|e| {
-                                            let p = e.path();
-                                            if p.extension().and_then(|x| x.to_str()) == Some("json") {
-                                                p.file_stem().map(|s| s.to_string_lossy().to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            Ok(serde_json::json!({ "keys": keys }))
-                        }
-                        "host/notify" => {
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
-                            let title = params["title"].as_str().unwrap_or("");
-                            let body = params["body"].as_str().unwrap_or("");
-                            tracing::info!(
-                                plugin_id,
-                                title,
-                                body,
-                                "Plugin notification"
-                            );
-                            let _ = notify_bus.publish(
-                                "plugin.notification",
-                                format!("plugin:{}", plugin_id),
-                                serde_json::json!({
-                                    "pluginId": plugin_id,
-                                    "title": title,
-                                    "body": body,
-                                }),
-                            );
-                            Ok(serde_json::json!({}))
-                        }
-                        "host/httpFetch" => {
-                            anyhow::bail!("host/httpFetch not yet implemented in host handler")
-                        }
-                        "host/schedule" => {
-                            let id = params["id"].as_str().unwrap_or("").to_string();
-                            let interval_secs = params["intervalSeconds"].as_u64().unwrap_or(60);
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown").to_string();
-
-                            let minutes = std::cmp::max(1, interval_secs / 60);
-                            let cron_expr = if minutes >= 60 {
-                                let hours = minutes / 60;
-                                format!("0 */{} * * *", hours)
-                            } else {
-                                format!("*/{} * * * *", minutes)
-                            };
-
-                            let task_name = format!("plugin:{}:{}", plugin_id, id);
-                            let request = CreateTaskRequest {
-                                name: task_name,
-                                description: Some(format!(
-                                    "Scheduled by plugin '{}' (interval: {}s)",
-                                    plugin_id, interval_secs
-                                )),
-                                schedule: TaskSchedule::Cron {
-                                    expression: cron_expr,
-                                },
-                                action: TaskAction::EmitEvent {
-                                    topic: "plugin.scheduled_task".to_string(),
-                                    payload: serde_json::json!({
+                            "host/secretSet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let value = params["value"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                hive_core::secret_store::save(&scoped_key, value);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/secretDelete" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                hive_core::secret_store::delete(&scoped_key);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/secretHas" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let scoped_key = format!("plugin:{}:{}", plugin_id, key);
+                                let exists = hive_core::secret_store::load(&scoped_key).is_some();
+                                Ok(serde_json::json!({ "exists": exists }))
+                            }
+                            "host/storeGet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let path = dir.join(format!("{}.json", key));
+                                match std::fs::read_to_string(&path) {
+                                    Ok(raw) => {
+                                        let val = serde_json::from_str::<serde_json::Value>(&raw)
+                                            .unwrap_or(serde_json::Value::Null);
+                                        Ok(serde_json::json!({ "value": val }))
+                                    }
+                                    Err(_) => Ok(serde_json::json!({ "value": null })),
+                                }
+                            }
+                            "host/storeSet" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let value =
+                                    params.get("value").cloned().unwrap_or(serde_json::Value::Null);
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                std::fs::create_dir_all(&dir)?;
+                                let path = dir.join(format!("{}.json", key));
+                                std::fs::write(&path, serde_json::to_string(&value)?)?;
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/storeDelete" => {
+                                let key = params["key"].as_str().unwrap_or("");
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let path = dir.join(format!("{}.json", key));
+                                let _ = std::fs::remove_file(&path);
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/storeKeys" => {
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let dir = store_base.join(plugin_id);
+                                let keys: Vec<String> = std::fs::read_dir(&dir)
+                                    .ok()
+                                    .map(|entries| {
+                                        entries
+                                            .filter_map(|e| e.ok())
+                                            .filter_map(|e| {
+                                                let p = e.path();
+                                                if p.extension().and_then(|x| x.to_str())
+                                                    == Some("json")
+                                                {
+                                                    p.file_stem()
+                                                        .map(|s| s.to_string_lossy().to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                Ok(serde_json::json!({ "keys": keys }))
+                            }
+                            "host/notify" => {
+                                let plugin_id = params["pluginId"].as_str().unwrap_or("unknown");
+                                let title = params["title"].as_str().unwrap_or("");
+                                let body = params["body"].as_str().unwrap_or("");
+                                tracing::info!(plugin_id, title, body, "Plugin notification");
+                                let _ = notify_bus.publish(
+                                    "plugin.notification",
+                                    format!("plugin:{}", plugin_id),
+                                    serde_json::json!({
                                         "pluginId": plugin_id,
-                                        "taskId": id,
+                                        "title": title,
+                                        "body": body,
                                     }),
-                                },
-                                owner_session_id: None,
-                                owner_agent_id: Some(plugin_id),
-                                max_retries: None,
-                                retry_delay_ms: None,
-                            };
+                                );
+                                Ok(serde_json::json!({}))
+                            }
+                            "host/httpFetch" => {
+                                anyhow::bail!("host/httpFetch not yet implemented in host handler")
+                            }
+                            "host/schedule" => {
+                                let id = params["id"].as_str().unwrap_or("").to_string();
+                                let interval_secs =
+                                    params["intervalSeconds"].as_u64().unwrap_or(60);
+                                let plugin_id =
+                                    params["pluginId"].as_str().unwrap_or("unknown").to_string();
 
-                            match scheduler.create_task(request) {
-                                Ok(task) => Ok(serde_json::json!({
-                                    "taskId": task.id,
-                                    "ok": true,
-                                })),
-                                Err(e) => {
-                                    anyhow::bail!("Failed to schedule task: {}", e)
+                                let minutes = std::cmp::max(1, interval_secs / 60);
+                                let cron_expr = if minutes >= 60 {
+                                    let hours = minutes / 60;
+                                    format!("0 */{} * * *", hours)
+                                } else {
+                                    format!("*/{} * * * *", minutes)
+                                };
+
+                                let task_name = format!("plugin:{}:{}", plugin_id, id);
+                                let request = CreateTaskRequest {
+                                    name: task_name,
+                                    description: Some(format!(
+                                        "Scheduled by plugin '{}' (interval: {}s)",
+                                        plugin_id, interval_secs
+                                    )),
+                                    schedule: TaskSchedule::Cron { expression: cron_expr },
+                                    action: TaskAction::EmitEvent {
+                                        topic: "plugin.scheduled_task".to_string(),
+                                        payload: serde_json::json!({
+                                            "pluginId": plugin_id,
+                                            "taskId": id,
+                                        }),
+                                    },
+                                    owner_session_id: None,
+                                    owner_agent_id: Some(plugin_id),
+                                    max_retries: None,
+                                    retry_delay_ms: None,
+                                };
+
+                                match scheduler.create_task(request) {
+                                    Ok(task) => Ok(serde_json::json!({
+                                        "taskId": task.id,
+                                        "ok": true,
+                                    })),
+                                    Err(e) => {
+                                        anyhow::bail!("Failed to schedule task: {}", e)
+                                    }
                                 }
                             }
-                        }
-                        "host/unschedule" => {
-                            let id = params["id"].as_str().unwrap_or("").to_string();
-                            let plugin_id = params["pluginId"].as_str().unwrap_or("unknown").to_string();
-                            let task_name = format!("plugin:{}:{}", plugin_id, id);
+                            "host/unschedule" => {
+                                let id = params["id"].as_str().unwrap_or("").to_string();
+                                let plugin_id =
+                                    params["pluginId"].as_str().unwrap_or("unknown").to_string();
+                                let task_name = format!("plugin:{}:{}", plugin_id, id);
 
-                            let tasks = scheduler.list_tasks();
-                            let task = tasks.iter().find(|t| t.name == task_name);
-                            match task {
-                                Some(t) => {
-                                    match scheduler.cancel_task(&t.id) {
+                                let tasks = scheduler.list_tasks();
+                                let task = tasks.iter().find(|t| t.name == task_name);
+                                match task {
+                                    Some(t) => match scheduler.cancel_task(&t.id) {
                                         Ok(_) => Ok(serde_json::json!({ "ok": true })),
                                         Err(e) => {
                                             anyhow::bail!("Failed to unschedule task: {}", e)
                                         }
-                                    }
-                                }
-                                None => {
-                                    Ok(serde_json::json!({ "ok": true, "found": false }))
+                                    },
+                                    None => Ok(serde_json::json!({ "ok": true, "found": false })),
                                 }
                             }
+                            _ => {
+                                anyhow::bail!("Unknown host method: {}", method)
+                            }
                         }
-                        _ => {
-                            anyhow::bail!("Unknown host method: {}", method)
-                        }
-                    }
-                })
-            }));
+                    })
+                }));
 
             Arc::new(host)
         };
@@ -1289,7 +1286,9 @@ impl AppState {
                                 "connected" | "syncing" => hive_contracts::ServiceStatus::Running,
                                 "connecting" => hive_contracts::ServiceStatus::Starting,
                                 "error" => hive_contracts::ServiceStatus::Error,
-                                "disconnected" | "stopped" => hive_contracts::ServiceStatus::Stopped,
+                                "disconnected" | "stopped" => {
+                                    hive_contracts::ServiceStatus::Stopped
+                                }
                                 _ => hive_contracts::ServiceStatus::Running,
                             };
                             let error = if change.status.state == "error" {
@@ -1497,13 +1496,15 @@ impl AppState {
                     let mut server_ids = Vec::new();
                     if pending_node {
                         server_ids.extend(
-                            mcp.take_pending_servers_for_runtime(hive_mcp::runtime::McpRuntime::Node),
+                            mcp.take_pending_servers_for_runtime(
+                                hive_mcp::runtime::McpRuntime::Node,
+                            ),
                         );
                     }
                     if pending_python {
-                        server_ids.extend(
-                            mcp.take_pending_servers_for_runtime(hive_mcp::runtime::McpRuntime::Python),
-                        );
+                        server_ids.extend(mcp.take_pending_servers_for_runtime(
+                            hive_mcp::runtime::McpRuntime::Python,
+                        ));
                     }
                     pending_node = false;
                     pending_python = false;
@@ -1826,7 +1827,9 @@ impl AppState {
             forwarded_interactions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             service_log_collector: hive_core::ServiceLogCollector::new(),
             service_registry: Arc::new(services::ServiceRegistry::new()),
-            plugin_registry: Arc::new(hive_plugins::PluginRegistry::new(std::env::temp_dir().join("hive-test-plugins"))),
+            plugin_registry: Arc::new(hive_plugins::PluginRegistry::new(
+                std::env::temp_dir().join("hive-test-plugins"),
+            )),
             plugin_host: Arc::new(hive_plugins::PluginHost::new(
                 std::env::temp_dir().join("hive-test-plugins"),
                 std::env::temp_dir().join("hive-test-plugin-data"),

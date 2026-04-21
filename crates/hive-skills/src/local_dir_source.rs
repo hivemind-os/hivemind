@@ -80,20 +80,17 @@ impl LocalDirSource {
         &self,
         source_path: &str,
     ) -> Result<hive_contracts::SkillContent, LocalSourceError> {
-        let skill_dir = if source_path == "." {
-            self.path.clone()
-        } else {
-            self.path.join(source_path)
-        };
+        let skill_dir =
+            if source_path == "." { self.path.clone() } else { self.path.join(source_path) };
 
         // Containment check: ensure the resolved path stays under the source root
         let canonical_root = self
             .path
             .canonicalize()
             .map_err(|e| LocalSourceError::IoFailed(format!("failed to canonicalize root: {e}")))?;
-        let canonical_skill = skill_dir
-            .canonicalize()
-            .map_err(|e| LocalSourceError::IoFailed(format!("failed to canonicalize skill dir: {e}")))?;
+        let canonical_skill = skill_dir.canonicalize().map_err(|e| {
+            LocalSourceError::IoFailed(format!("failed to canonicalize skill dir: {e}"))
+        })?;
         if !canonical_skill.starts_with(&canonical_root) {
             return Err(LocalSourceError::IoFailed(format!(
                 "skill path escapes source root: {}",
@@ -136,9 +133,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn write_skill_md(dir: &Path, name: &str, description: &str) {
-        let skill_md = format!(
-            "---\nname: {name}\ndescription: {description}\n---\nSkill body for {name}.\n"
-        );
+        let skill_md =
+            format!("---\nname: {name}\ndescription: {description}\n---\nSkill body for {name}.\n");
         fs::write(dir.join("SKILL.md"), skill_md).unwrap();
     }
 
@@ -230,10 +226,7 @@ mod tests {
 
     #[test]
     fn from_config_disabled() {
-        let config = SkillSourceConfig::LocalDirectory {
-            path: "/tmp".to_string(),
-            enabled: false,
-        };
+        let config = SkillSourceConfig::LocalDirectory { path: "/tmp".to_string(), enabled: false };
         assert!(LocalDirSource::from_config(&config).is_none());
     }
 

@@ -59,10 +59,7 @@ async fn test_plugin_activation_failure() {
     .await;
 
     // Activation should fail because failOnActivate = true
-    assert!(
-        result.is_err(),
-        "activation should fail with failOnActivate=true"
-    );
+    assert!(result.is_err(), "activation should fail with failOnActivate=true");
     let err = match result {
         Err(e) => format!("{:#}", e),
         Ok(_) => panic!("expected error"),
@@ -98,11 +95,7 @@ async fn test_plugin_stop() {
 async fn test_config_schema_retrieval() {
     let env = PluginTestEnv::new().await.expect("setup");
 
-    let schema = env
-        .host
-        .get_config_schema(&env.plugin_id)
-        .await
-        .expect("get config schema");
+    let schema = env.host.get_config_schema(&env.plugin_id).await.expect("get config schema");
 
     // Verify it's an object with properties
     assert!(schema.is_object(), "schema should be a JSON object");
@@ -123,18 +116,10 @@ async fn test_config_schema_retrieval() {
 async fn test_tool_listing() {
     let env = PluginTestEnv::new().await.expect("setup");
 
-    let tools = env
-        .host
-        .list_tools(&env.plugin_id)
-        .await
-        .expect("list tools");
+    let tools = env.host.list_tools(&env.plugin_id).await.expect("list tools");
 
     // The test plugin defines 11 tools
-    assert!(
-        tools.len() >= 11,
-        "expected at least 11 tools, got {}",
-        tools.len()
-    );
+    assert!(tools.len() >= 11, "expected at least 11 tools, got {}", tools.len());
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     let expected = [
@@ -151,22 +136,13 @@ async fn test_tool_listing() {
         "test_http",
     ];
     for name in &expected {
-        assert!(
-            names.contains(name),
-            "tool '{}' not found in {:?}",
-            name,
-            names
-        );
+        assert!(names.contains(name), "tool '{}' not found in {:?}", name, names);
     }
 
     // Each tool should have a description and input_schema
     for tool in &tools {
         assert!(!tool.description.is_empty(), "tool {} needs description", tool.name);
-        assert!(
-            tool.input_schema.is_object(),
-            "tool {} needs input_schema",
-            tool.name
-        );
+        assert!(tool.input_schema.is_object(), "tool {} needs input_schema", tool.name);
     }
 
     env.shutdown().await.unwrap();
@@ -178,17 +154,11 @@ async fn test_tool_listing() {
 async fn test_echo_tool() {
     let env = PluginTestEnv::new().await.expect("setup");
 
-    let result = env
-        .call_tool("echo", json!({ "message": "hello world" }))
-        .await
-        .expect("echo tool");
+    let result =
+        env.call_tool("echo", json!({ "message": "hello world" })).await.expect("echo tool");
 
     let content = extract_content(&result);
-    assert!(
-        content.contains("hello world"),
-        "echo should return the input, got: {:?}",
-        result
-    );
+    assert!(content.contains("hello world"), "echo should return the input, got: {:?}", result);
 
     env.shutdown().await.unwrap();
 }
@@ -198,17 +168,10 @@ async fn test_echo_tool_special_characters() {
     let env = PluginTestEnv::new().await.expect("setup");
 
     let msg = r#"He said "hello" & <world>"#;
-    let result = env
-        .call_tool("echo", json!({ "message": msg }))
-        .await
-        .expect("echo tool");
+    let result = env.call_tool("echo", json!({ "message": msg })).await.expect("echo tool");
 
     let content = extract_content(&result);
-    assert!(
-        content.contains("hello"),
-        "should handle special chars, got: {:?}",
-        result
-    );
+    assert!(content.contains("hello"), "should handle special chars, got: {:?}", result);
 
     env.shutdown().await.unwrap();
 }
@@ -221,50 +184,31 @@ async fn test_secret_storage_roundtrip() {
 
     // Set a secret
     let r = env
-        .call_tool(
-            "test_secrets",
-            json!({ "action": "set", "key": "mykey", "value": "myval" }),
-        )
+        .call_tool("test_secrets", json!({ "action": "set", "key": "mykey", "value": "myval" }))
         .await
         .expect("secret set");
-    assert!(
-        extract_content(&r).contains("stored"),
-        "set should confirm storage"
-    );
+    assert!(extract_content(&r).contains("stored"), "set should confirm storage");
 
     // Get the secret
     let r = env
         .call_tool("test_secrets", json!({ "action": "get", "key": "mykey" }))
         .await
         .expect("secret get");
-    assert!(
-        extract_content(&r).contains("myval"),
-        "get should return stored value, got: {:?}",
-        r
-    );
+    assert!(extract_content(&r).contains("myval"), "get should return stored value, got: {:?}", r);
 
     // Has the secret
     let r = env
         .call_tool("test_secrets", json!({ "action": "has", "key": "mykey" }))
         .await
         .expect("secret has");
-    assert!(
-        extract_content(&r).contains("true"),
-        "has should return true"
-    );
+    assert!(extract_content(&r).contains("true"), "has should return true");
 
     // Delete the secret
     let r = env
-        .call_tool(
-            "test_secrets",
-            json!({ "action": "delete", "key": "mykey" }),
-        )
+        .call_tool("test_secrets", json!({ "action": "delete", "key": "mykey" }))
         .await
         .expect("secret delete");
-    assert!(
-        extract_content(&r).contains("deleted"),
-        "delete should confirm"
-    );
+    assert!(extract_content(&r).contains("deleted"), "delete should confirm");
 
     // Verify deleted
     let r = env
@@ -287,12 +231,9 @@ async fn test_persistent_store_roundtrip() {
     let env = PluginTestEnv::new().await.expect("setup");
 
     // Set a value
-    env.call_tool(
-        "test_store",
-        json!({ "action": "set", "key": "cursor", "value": "abc123" }),
-    )
-    .await
-    .expect("store set");
+    env.call_tool("test_store", json!({ "action": "set", "key": "cursor", "value": "abc123" }))
+        .await
+        .expect("store set");
 
     // Get the value
     let r = env
@@ -306,23 +247,13 @@ async fn test_persistent_store_roundtrip() {
     );
 
     // List keys
-    let r = env
-        .call_tool("test_store", json!({ "action": "keys" }))
-        .await
-        .expect("store keys");
-    assert!(
-        extract_content(&r).contains("cursor"),
-        "keys should include 'cursor', got: {:?}",
-        r
-    );
+    let r = env.call_tool("test_store", json!({ "action": "keys" })).await.expect("store keys");
+    assert!(extract_content(&r).contains("cursor"), "keys should include 'cursor', got: {:?}", r);
 
     // Delete
-    env.call_tool(
-        "test_store",
-        json!({ "action": "delete", "key": "cursor" }),
-    )
-    .await
-    .expect("store delete");
+    env.call_tool("test_store", json!({ "action": "delete", "key": "cursor" }))
+        .await
+        .expect("store delete");
 
     // Verify deleted
     let r = env
@@ -359,12 +290,7 @@ async fn test_emit_message_from_tool() {
 
     let msg = &msgs[0];
     assert_eq!(msg["channel"].as_str().unwrap_or(""), "test-channel");
-    assert!(
-        msg["content"]
-            .as_str()
-            .unwrap_or("")
-            .contains("Hello from tool")
-    );
+    assert!(msg["content"].as_str().unwrap_or("").contains("Hello from tool"));
 
     env.shutdown().await.unwrap();
 }
@@ -474,10 +400,7 @@ async fn test_notification() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let notifs = env.notifications.lock();
-    assert!(
-        !notifs.is_empty(),
-        "should have captured at least 1 notification"
-    );
+    assert!(!notifs.is_empty(), "should have captured at least 1 notification");
 
     let n = &notifs[0];
     assert_eq!(n["title"].as_str().unwrap_or(""), "Test Alert");
@@ -493,23 +416,14 @@ async fn test_notification() {
 async fn test_host_info() {
     let env = PluginTestEnv::new().await.expect("setup");
 
-    let result = env
-        .call_tool("get_host_info", json!({}))
-        .await
-        .expect("get host info");
+    let result = env.call_tool("get_host_info", json!({})).await.expect("get host info");
 
     // Result should contain version, platform, capabilities
     let content = &result;
-    let obj = content
-        .get("content")
-        .or(Some(content))
-        .unwrap();
+    let obj = content.get("content").or(Some(content)).unwrap();
 
     // Platform should match the OS we're running on
-    let platform = obj
-        .get("platform")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
+    let platform = obj.get("platform").and_then(|v| v.as_str()).unwrap_or_default();
     assert!(
         ["windows", "macos", "linux"].contains(&platform),
         "platform should be windows/macos/linux, got: {}",
@@ -530,11 +444,7 @@ async fn test_loop_start_and_messages() {
 
     // Wait for at least 2 tick messages (give 5s for 2 ticks at 1s interval)
     let msgs = env.wait_for_messages(2, Duration::from_secs(5)).await;
-    assert!(
-        msgs.len() >= 2,
-        "should have at least 2 loop messages, got {}",
-        msgs.len()
-    );
+    assert!(msgs.len() >= 2, "should have at least 2 loop messages, got {}", msgs.len());
 
     // Verify messages are on the expected channel
     for msg in &msgs {
@@ -544,11 +454,7 @@ async fn test_loop_start_and_messages() {
 
     // Verify events were also emitted
     let events = env.wait_for_events(2, Duration::from_secs(2)).await;
-    assert!(
-        events.len() >= 2,
-        "should have at least 2 loop events, got {}",
-        events.len()
-    );
+    assert!(events.len() >= 2, "should have at least 2 loop events, got {}", events.len());
     for (event_type, _) in &events {
         assert_eq!(event_type, "test.loop_tick");
     }
@@ -559,11 +465,7 @@ async fn test_loop_start_and_messages() {
         .await
         .expect("get loopTick");
     let content = extract_content(&r);
-    assert!(
-        !content.contains("null"),
-        "loopTick should be set in store, got: {}",
-        content
-    );
+    assert!(!content.contains("null"), "loopTick should be set in store, got: {}", content);
 
     env.stop_loop().await.expect("stop loop");
     env.shutdown().await.unwrap();
@@ -618,10 +520,7 @@ async fn test_loop_restart_resilience() {
     // Start loop again
     env.start_loop().await.expect("restart loop");
     let msgs = env.wait_for_messages(1, Duration::from_secs(5)).await;
-    assert!(
-        !msgs.is_empty(),
-        "loop should produce messages after restart"
-    );
+    assert!(!msgs.is_empty(), "loop should produce messages after restart");
 
     env.stop_loop().await.expect("stop loop");
     env.shutdown().await.unwrap();
@@ -635,20 +534,12 @@ async fn test_plugin_bridge_tools() {
 
     // Test that tools can be listed and called through the host —
     // this is the same code path PluginBridgeTool.execute() uses.
-    let tools = env
-        .host
-        .list_tools(&env.plugin_id)
-        .await
-        .expect("list tools for bridge");
+    let tools = env.host.list_tools(&env.plugin_id).await.expect("list tools for bridge");
 
     // Verify tools can be mapped to PluginBridgeTool format
     for tool in &tools {
         assert!(!tool.name.is_empty(), "tool name must not be empty");
-        assert!(
-            tool.input_schema.is_object(),
-            "tool {} must have input_schema",
-            tool.name
-        );
+        assert!(tool.input_schema.is_object(), "tool {} must have input_schema", tool.name);
     }
 
     // Execute through the host (same path as PluginBridgeTool)
@@ -675,10 +566,7 @@ async fn test_tool_with_invalid_params() {
         Err(e) => {
             // Good — error propagated
             let msg = e.to_string();
-            assert!(
-                !msg.is_empty(),
-                "error should have a message"
-            );
+            assert!(!msg.is_empty(), "error should have a message");
         }
         Ok(val) => {
             // Plugin might handle gracefully — check for isError flag
@@ -696,14 +584,9 @@ async fn test_tool_with_invalid_params() {
 async fn test_call_nonexistent_tool() {
     let env = PluginTestEnv::new().await.expect("setup");
 
-    let result = env
-        .call_tool("nonexistent_tool_that_doesnt_exist", json!({}))
-        .await;
+    let result = env.call_tool("nonexistent_tool_that_doesnt_exist", json!({})).await;
 
-    assert!(
-        result.is_err(),
-        "calling nonexistent tool should return error"
-    );
+    assert!(result.is_err(), "calling nonexistent tool should return error");
 
     env.shutdown().await.unwrap();
 }
@@ -716,19 +599,13 @@ async fn test_concurrent_tool_calls() {
     let mut results = vec![];
     for i in 0..5 {
         let msg = format!("concurrent-{}", i);
-        let r = env
-            .call_tool("echo", json!({ "message": msg }))
-            .await;
+        let r = env.call_tool("echo", json!({ "message": msg })).await;
         results.push(r);
     }
 
     // All should succeed
     let successes = results.iter().filter(|r| r.is_ok()).count();
-    assert!(
-        successes >= 4,
-        "at least 4 of 5 concurrent calls should succeed, got {}",
-        successes
-    );
+    assert!(successes >= 4, "at least 4 of 5 concurrent calls should succeed, got {}", successes);
 
     env.shutdown().await.unwrap();
 }
@@ -739,10 +616,8 @@ async fn test_large_payload() {
 
     // 100KB message
     let large_msg = "x".repeat(100_000);
-    let result = env
-        .call_tool("echo", json!({ "message": large_msg }))
-        .await
-        .expect("large payload");
+    let result =
+        env.call_tool("echo", json!({ "message": large_msg })).await.expect("large payload");
 
     let content = extract_content(&result);
     assert!(

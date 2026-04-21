@@ -11,8 +11,8 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::time::timeout;
 
-use hive_core::{EventBus, EventLog, QueuedSubscriber};
 use helpers::PluginTestEnv;
+use hive_core::{EventBus, EventLog, QueuedSubscriber};
 
 /// Spawn the forwarding task that bridges PluginHost events into the EventBus.
 /// Replicates the pattern from `hive-api/src/lib.rs`.
@@ -103,20 +103,14 @@ async fn test_plugin_event_stored_in_eventlog() {
     // Query the EventLog.
     let results = event_log.query_events(Some("plugin.event"), None, None, None, Some(100));
 
-    assert!(
-        !results.is_empty(),
-        "EventLog should contain at least one plugin event"
-    );
+    assert!(!results.is_empty(), "EventLog should contain at least one plugin event");
 
     let stored = results
         .iter()
         .find(|e| e.topic == "plugin.event.test.stored")
         .expect("should find event with topic plugin.event.test.stored");
 
-    assert!(
-        stored.source.starts_with("plugin:"),
-        "source should start with 'plugin:'",
-    );
+    assert!(stored.source.starts_with("plugin:"), "source should start with 'plugin:'",);
     assert_eq!(stored.payload["stored"], true);
 
     env.shutdown().await.expect("shutdown");
@@ -143,10 +137,7 @@ async fn test_plugin_loop_events_reach_eventbus() {
         .expect("channel closed");
 
     assert_eq!(envelope.topic, "plugin.event.test.loop_tick");
-    assert!(
-        envelope.source.starts_with("plugin:"),
-        "source should start with 'plugin:'"
-    );
+    assert!(envelope.source.starts_with("plugin:"), "source should start with 'plugin:'");
     // The loop tick payload should have a tick count.
     assert!(
         envelope.payload.get("tick").is_some(),
@@ -190,10 +181,7 @@ async fn test_multiple_plugin_events_ordered() {
     while received.len() < 5 {
         let remaining = deadline.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            panic!(
-                "timeout: only received {}/5 events",
-                received.len()
-            );
+            panic!("timeout: only received {}/5 events", received.len());
         }
         match timeout(remaining, rx.recv()).await {
             Ok(Some(env)) => received.push(env),

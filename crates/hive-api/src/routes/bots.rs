@@ -168,7 +168,11 @@ pub(crate) async fn api_bot_workspace_files(
     Path(agent_id): Path<String>,
     Query(query): Query<WorkspaceListQuery>,
 ) -> Result<Json<Vec<WorkspaceEntry>>, (StatusCode, String)> {
-    state.chat.list_bot_workspace_files(&agent_id, query.path.as_deref()).map(Json).map_err(chat_error)
+    state
+        .chat
+        .list_bot_workspace_files(&agent_id, query.path.as_deref())
+        .map(Json)
+        .map_err(chat_error)
 }
 
 pub(crate) async fn api_bot_workspace_file(

@@ -2,8 +2,8 @@
 //! into the host's connector pipeline.
 
 use crate::protocol::IncomingMessage;
-use std::collections::HashSet;
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use tracing::info;
 
 /// Routes messages from plugins into the connector service pipeline.
@@ -16,10 +16,7 @@ pub struct PluginMessageRouter {
 
 impl PluginMessageRouter {
     pub fn new() -> Self {
-        Self {
-            seen_sources: Mutex::new(HashSet::new()),
-            max_tracked: 100_000,
-        }
+        Self { seen_sources: Mutex::new(HashSet::new()), max_tracked: 100_000 }
     }
 
     /// Process an incoming message from a plugin.

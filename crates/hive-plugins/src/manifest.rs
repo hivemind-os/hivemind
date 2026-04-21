@@ -59,34 +59,20 @@ impl PluginManifest {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'name' field"))?
             .to_string();
-        let version = raw["version"]
-            .as_str()
-            .unwrap_or("0.0.0")
-            .to_string();
-        let main = raw["main"]
-            .as_str()
-            .unwrap_or("dist/index.js")
-            .to_string();
+        let version = raw["version"].as_str().unwrap_or("0.0.0").to_string();
+        let main = raw["main"].as_str().unwrap_or("dist/index.js").to_string();
 
         let hivemind_val = raw
             .get("hivemind")
             .ok_or_else(|| anyhow::anyhow!("Missing 'hivemind' field in package.json"))?;
         let hivemind: HivemindMeta = serde_json::from_value(hivemind_val.clone())?;
 
-        Ok(Self {
-            name,
-            version,
-            main,
-            hivemind,
-        })
+        Ok(Self { name, version, main, hivemind })
     }
 
     /// Generate a stable plugin ID from the package name.
     pub fn plugin_id(&self) -> String {
-        self.name
-            .trim_start_matches('@')
-            .replace('/', ".")
-            .replace(' ', "-")
+        self.name.trim_start_matches('@').replace('/', ".").replace(' ', "-")
     }
 }
 

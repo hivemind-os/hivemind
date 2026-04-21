@@ -63,10 +63,7 @@ pub(crate) async fn api_get_config_schema(
             Json(json!({ "error": format!("No config schema available: {}", e) })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
             .into_response(),
     }
 }
@@ -93,7 +90,9 @@ pub(crate) async fn api_save_config(
                         // Stop existing process
                         let _ = host.stop(&pid).await;
                         // Re-spawn with new config
-                        if let Ok(_) = host.spawn(&pid, &path, &entry, new_config.clone(), Some(&meta)).await {
+                        if let Ok(_) =
+                            host.spawn(&pid, &path, &entry, new_config.clone(), Some(&meta)).await
+                        {
                             let _ = host.activate(&pid, Some(new_config)).await;
                             if has_loop {
                                 let _ = host.start_loop(&pid).await;
@@ -104,11 +103,7 @@ pub(crate) async fn api_save_config(
             }
             StatusCode::NO_CONTENT.into_response()
         }
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
     }
 }
 
@@ -124,11 +119,7 @@ pub(crate) async fn api_set_personas(
         .unwrap_or_default();
     match state.plugin_registry.set_allowed_personas(&plugin_id, personas) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
     }
 }
 
@@ -138,10 +129,7 @@ pub(crate) async fn api_set_enabled(
     Path(plugin_id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let enabled = body
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
     match state.plugin_registry.set_enabled(&plugin_id, enabled) {
         Ok(()) => {
             if enabled {
@@ -155,7 +143,9 @@ pub(crate) async fn api_set_enabled(
                     let meta = plugin.manifest.hivemind.clone();
                     let has_loop = meta.permissions.iter().any(|p| p == "loop:background");
                     tokio::spawn(async move {
-                        if let Ok(_) = host.spawn(&pid, &path, &entry, config.clone(), Some(&meta)).await {
+                        if let Ok(_) =
+                            host.spawn(&pid, &path, &entry, config.clone(), Some(&meta)).await
+                        {
                             let _ = host.activate(&pid, Some(config)).await;
                             if has_loop {
                                 let _ = host.start_loop(&pid).await;
@@ -167,15 +157,13 @@ pub(crate) async fn api_set_enabled(
                 // Stop the plugin process
                 let host = state.plugin_host.clone();
                 let pid = plugin_id.clone();
-                tokio::spawn(async move { let _ = host.stop(&pid).await; });
+                tokio::spawn(async move {
+                    let _ = host.stop(&pid).await;
+                });
             }
             StatusCode::NO_CONTENT.into_response()
         }
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
     }
 }
 
@@ -192,10 +180,7 @@ pub(crate) async fn api_uninstall(
     state.service_registry.deregister(&format!("plugin:{plugin_id}"));
     match state.plugin_registry.uninstall(&plugin_id) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
             .into_response(),
     }
 }
@@ -229,11 +214,9 @@ pub(crate) async fn api_link_local(
             }
             Json(json!({ "plugin_id": plugin_id })).into_response()
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response()
+        }
     }
 }
 
@@ -266,10 +249,7 @@ pub(crate) async fn api_install_npm(
             }
             Json(json!({ "plugin_id": plugin_id })).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
             .into_response(),
     }
 }

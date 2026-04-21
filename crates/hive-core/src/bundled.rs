@@ -48,10 +48,7 @@ static BUNDLED_PERSONA_YAMLS: &[(&str, &str)] = &[
         "system/3d-print/print-advisor",
         include_str!("../bundled-personas/3dprint-print-advisor.yaml"),
     ),
-    (
-        "system/finance/tax-advisor",
-        include_str!("../bundled-personas/finance-tax-advisor.yaml"),
-    ),
+    ("system/finance/tax-advisor", include_str!("../bundled-personas/finance-tax-advisor.yaml")),
     ("system/research", include_str!("../bundled-personas/research.yaml")),
 ];
 

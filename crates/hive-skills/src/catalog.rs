@@ -185,10 +185,7 @@ pub struct ActivationResult {
 /// removed first to avoid stale files.
 ///
 /// Returns the list of staged relative paths on success.
-pub fn stage_skill_resources(
-    source_dir: &Path,
-    target_dir: &Path,
-) -> std::io::Result<Vec<String>> {
+pub fn stage_skill_resources(source_dir: &Path, target_dir: &Path) -> std::io::Result<Vec<String>> {
     let canonical_source = source_dir.canonicalize()?;
 
     // Clean slate — remove any previous staging for this skill.
@@ -233,10 +230,7 @@ fn copy_dir_recursive(
         }
 
         let entry_path = entry.path();
-        let rel = entry_path
-            .strip_prefix(source_root)
-            .unwrap_or(&entry_path)
-            .to_path_buf();
+        let rel = entry_path.strip_prefix(source_root).unwrap_or(&entry_path).to_path_buf();
         let dest = target_base.join(&rel);
 
         if file_type.is_dir() {

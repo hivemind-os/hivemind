@@ -31,7 +31,9 @@ fn main() {
             );
             eprintln!("  run-daemon [--release]         Build, codesign, and run hive-daemon");
             eprintln!("  check-version                  Assert Cargo.toml and tauri.conf.json versions match");
-            eprintln!("  bump-version <X.Y.Z>           Update version in Cargo.toml and tauri.conf.json");
+            eprintln!(
+                "  bump-version <X.Y.Z>           Update version in Cargo.toml and tauri.conf.json"
+            );
             eprintln!();
             eprintln!("Targets:");
             eprintln!("  macos-aarch64    macOS Apple Silicon PKG");
@@ -327,10 +329,8 @@ fn read_cargo_version(root: &Path) -> String {
 }
 
 fn read_tauri_version(root: &Path) -> String {
-    let text = fs::read_to_string(
-        root.join("apps/hivemind-desktop/src-tauri/tauri.conf.json"),
-    )
-    .expect("read tauri.conf.json");
+    let text = fs::read_to_string(root.join("apps/hivemind-desktop/src-tauri/tauri.conf.json"))
+        .expect("read tauri.conf.json");
     for line in text.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("\"version\": \"") {
@@ -389,8 +389,7 @@ fn bump_version(args: &[String]) {
     fs::write(&cargo_path, new_cargo).expect("write Cargo.toml");
 
     // Update tauri.conf.json
-    let tauri_path =
-        root.join("apps/hivemind-desktop/src-tauri/tauri.conf.json");
+    let tauri_path = root.join("apps/hivemind-desktop/src-tauri/tauri.conf.json");
     let tauri_text = fs::read_to_string(&tauri_path).expect("read tauri.conf.json");
     let new_tauri = tauri_text.replacen(
         &format!("\"version\": \"{old_tauri_ver}\""),

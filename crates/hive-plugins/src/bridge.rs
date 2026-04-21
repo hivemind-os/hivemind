@@ -82,11 +82,7 @@ pub async fn create_bridge_tools(
             open_world_hint: None,
         };
 
-        let approval = if has_side_effects {
-            ToolApproval::Ask
-        } else {
-            ToolApproval::Auto
-        };
+        let approval = if has_side_effects { ToolApproval::Ask } else { ToolApproval::Auto };
 
         let definition = ToolDefinition {
             id: tool_id.clone(),

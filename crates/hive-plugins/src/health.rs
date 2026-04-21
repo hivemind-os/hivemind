@@ -66,10 +66,7 @@ pub struct HealthMonitor {
 
 impl HealthMonitor {
     pub fn new(config: HealthConfig) -> Self {
-        Self {
-            config,
-            states: parking_lot::RwLock::new(HashMap::new()),
-        }
+        Self { config, states: parking_lot::RwLock::new(HashMap::new()) }
     }
 
     /// Register a plugin for health monitoring.
@@ -95,16 +92,14 @@ impl HealthMonitor {
     /// Report that a plugin has crashed.
     pub fn report_crash(&self, plugin_id: &str, exit_code: Option<i32>) -> RestartDecision {
         let mut states = self.states.write();
-        let health = states
-            .entry(plugin_id.to_string())
-            .or_insert_with(|| PluginHealth {
-                plugin_id: plugin_id.to_string(),
-                state: HealthState::Healthy,
-                consecutive_crashes: 0,
-                last_crash: None,
-                last_healthy: None,
-                total_restarts: 0,
-            });
+        let health = states.entry(plugin_id.to_string()).or_insert_with(|| PluginHealth {
+            plugin_id: plugin_id.to_string(),
+            state: HealthState::Healthy,
+            consecutive_crashes: 0,
+            last_crash: None,
+            last_healthy: None,
+            total_restarts: 0,
+        });
 
         let now = Instant::now();
 
@@ -131,16 +126,11 @@ impl HealthMonitor {
 
         // Calculate backoff delay
         let backoff_secs = self.config.initial_backoff.as_secs_f64()
-            * self
-                .config
-                .backoff_multiplier
-                .powi((health.consecutive_crashes - 1) as i32);
+            * self.config.backoff_multiplier.powi((health.consecutive_crashes - 1) as i32);
         let backoff =
             Duration::from_secs_f64(backoff_secs.min(self.config.max_backoff.as_secs_f64()));
 
-        health.state = HealthState::Backoff {
-            until: now + backoff,
-        };
+        health.state = HealthState::Backoff { until: now + backoff };
         health.total_restarts += 1;
 
         warn!(
@@ -259,10 +249,7 @@ mod tests {
 
     #[test]
     fn test_max_crashes_disables() {
-        let config = HealthConfig {
-            max_consecutive_crashes: 3,
-            ..Default::default()
-        };
+        let config = HealthConfig { max_consecutive_crashes: 3, ..Default::default() };
         let monitor = HealthMonitor::new(config);
         monitor.register("test-plugin");
 
@@ -276,10 +263,7 @@ mod tests {
 
     #[test]
     fn test_manual_reset() {
-        let config = HealthConfig {
-            max_consecutive_crashes: 1,
-            ..Default::default()
-        };
+        let config = HealthConfig { max_consecutive_crashes: 1, ..Default::default() };
         let monitor = HealthMonitor::new(config);
         monitor.register("test-plugin");
 
@@ -298,10 +282,8 @@ mod tests {
 
     #[test]
     fn test_should_restart() {
-        let config = HealthConfig {
-            initial_backoff: Duration::from_millis(10),
-            ..Default::default()
-        };
+        let config =
+            HealthConfig { initial_backoff: Duration::from_millis(10), ..Default::default() };
         let monitor = HealthMonitor::new(config);
         monitor.register("test-plugin");
 

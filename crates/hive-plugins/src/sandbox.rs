@@ -103,10 +103,7 @@ struct RateCounter {
 
 impl Default for RateCounter {
     fn default() -> Self {
-        Self {
-            window: Duration::from_secs(60),
-            timestamps: Vec::new(),
-        }
+        Self { window: Duration::from_secs(60), timestamps: Vec::new() }
     }
 }
 
@@ -123,18 +120,13 @@ impl RateCounter {
     }
 
     fn prune(&mut self, now: Instant) {
-        self.timestamps
-            .retain(|t| now.duration_since(*t) < self.window);
+        self.timestamps.retain(|t| now.duration_since(*t) < self.window);
     }
 }
 
 impl PluginSandbox {
     pub fn new(plugin_id: String, manifest: &HivemindMeta) -> Self {
-        let permissions = manifest
-            .permissions
-            .iter()
-            .map(|s| Permission::parse(s))
-            .collect();
+        let permissions = manifest.permissions.iter().map(|s| Permission::parse(s)).collect();
 
         Self {
             plugin_id,
@@ -183,10 +175,7 @@ impl PluginSandbox {
             _ => {}
         }
 
-        PermissionCheckResult {
-            allowed: true,
-            reason: None,
-        }
+        PermissionCheckResult { allowed: true, reason: None }
     }
 
     /// Check if the plugin can start a background loop.
@@ -279,14 +268,8 @@ mod tests {
         );
         assert_eq!(Permission::parse("secrets:read"), Permission::SecretsRead);
         assert_eq!(Permission::parse("secrets:write"), Permission::SecretsWrite);
-        assert_eq!(
-            Permission::parse("loop:background"),
-            Permission::LoopBackground
-        );
-        assert_eq!(
-            Permission::parse("unknown:thing"),
-            Permission::Unknown("unknown:thing".into())
-        );
+        assert_eq!(Permission::parse("loop:background"), Permission::LoopBackground);
+        assert_eq!(Permission::parse("unknown:thing"), Permission::Unknown("unknown:thing".into()));
     }
 
     #[test]
@@ -295,15 +278,12 @@ mod tests {
         let sandbox = PluginSandbox::new("test".into(), &manifest);
 
         // Read is allowed
-        let result =
-            sandbox.check_host_call("host/secretGet", &serde_json::json!({"key": "test"}));
+        let result = sandbox.check_host_call("host/secretGet", &serde_json::json!({"key": "test"}));
         assert!(result.allowed);
 
         // Write is denied
-        let result = sandbox.check_host_call(
-            "host/secretSet",
-            &serde_json::json!({"key": "test", "value": "val"}),
-        );
+        let result = sandbox
+            .check_host_call("host/secretSet", &serde_json::json!({"key": "test", "value": "val"}));
         assert!(!result.allowed);
         assert!(result.reason.unwrap().contains("secrets:write"));
     }
@@ -322,10 +302,7 @@ mod tests {
     #[test]
     fn test_message_rate_limit() {
         let manifest = make_manifest(vec![]);
-        let limits = ResourceLimits {
-            max_messages_per_minute: 5,
-            ..Default::default()
-        };
+        let limits = ResourceLimits { max_messages_per_minute: 5, ..Default::default() };
         let sandbox = PluginSandbox::new("test".into(), &manifest).with_limits(limits);
 
         for _ in 0..5 {
@@ -340,10 +317,7 @@ mod tests {
     #[test]
     fn test_payload_size_limit() {
         let manifest = make_manifest(vec![]);
-        let limits = ResourceLimits {
-            max_payload_bytes: 1024,
-            ..Default::default()
-        };
+        let limits = ResourceLimits { max_payload_bytes: 1024, ..Default::default() };
         let sandbox = PluginSandbox::new("test".into(), &manifest).with_limits(limits);
 
         assert!(sandbox.check_payload_size(512).is_ok());

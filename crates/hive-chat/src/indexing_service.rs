@@ -82,8 +82,7 @@ impl IndexingService {
 
                         match runtime.embed(&model_id, &text) {
                             Ok(embedding) => {
-                                if let Err(e) =
-                                    guard.set_embedding(node_id, &embedding, &model_id)
+                                if let Err(e) = guard.set_embedding(node_id, &embedding, &model_id)
                                 {
                                     tracing::warn!(
                                         node_id,

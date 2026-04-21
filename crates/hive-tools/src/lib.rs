@@ -306,9 +306,7 @@ impl ToolRegistry {
                     || id.starts_with("mcp.")
                     || allowed_ids.iter().any(|pattern| {
                         if pattern.contains('*') || pattern.contains('?') {
-                            glob::Pattern::new(pattern)
-                                .map(|p| p.matches(id))
-                                .unwrap_or(false)
+                            glob::Pattern::new(pattern).map(|p| p.matches(id)).unwrap_or(false)
                         } else {
                             pattern == id.as_str()
                         }
@@ -4036,7 +4034,10 @@ mod tests {
         let ids: Vec<_> = filtered.list_definitions().iter().map(|d| d.id.clone()).collect();
 
         // math.calculate should match "math.*"
-        assert!(ids.contains(&"math.calculate".to_string()), "math.calculate should match 'math.*'");
+        assert!(
+            ids.contains(&"math.calculate".to_string()),
+            "math.calculate should match 'math.*'"
+        );
         // core.ask_user is auto-allowed
         assert!(ids.contains(&"core.ask_user".to_string()), "core.* should be auto-allowed");
         // datetime.now should be filtered out

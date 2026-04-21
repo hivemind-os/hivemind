@@ -160,8 +160,7 @@ impl WorkflowEventEmitter for ChatInjectingEmitter {
                 ..
             } => {
                 let answer = response_text.as_deref().unwrap_or("(answered)");
-                self.try_mark_question_answered(*instance_id, request_id, answer)
-                    .await;
+                self.try_mark_question_answered(*instance_id, request_id, answer).await;
             }
             _ => {}
         }
@@ -196,12 +195,7 @@ impl ChatInjectingEmitter {
     }
 
     /// Mark the chat question message as answered when a feedback gate is resolved.
-    async fn try_mark_question_answered(
-        &self,
-        instance_id: i64,
-        request_id: &str,
-        answer: &str,
-    ) {
+    async fn try_mark_question_answered(&self, instance_id: i64, request_id: &str, answer: &str) {
         let instance = match self.store.get_instance(instance_id) {
             Ok(Some(inst)) => inst,
             _ => return,
@@ -1634,10 +1628,8 @@ impl StepExecutor for ServiceStepExecutor {
                 .map(|inst| inst.definition.mode == types::WorkflowMode::Chat)
                 .unwrap_or(false);
             if is_chat_mode {
-                let workflow_name = instance
-                    .as_ref()
-                    .map(|inst| inst.definition.name.as_str())
-                    .unwrap_or("");
+                let workflow_name =
+                    instance.as_ref().map(|inst| inst.definition.name.as_str()).unwrap_or("");
                 if let Err(e) = runner
                     .inject_session_question(
                         &ctx.parent_session_id,

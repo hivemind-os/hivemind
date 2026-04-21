@@ -58,11 +58,7 @@ async fn test_plugin_event_pattern_trigger_fires() {
     tm.set_workflow_service(Arc::clone(&svc)).await;
 
     // Save and register a workflow triggered by plugin.event.test.hello
-    let yaml = plugin_event_trigger_yaml(
-        "user/plugin-hello-wf",
-        "1.0",
-        "plugin.event.test.hello",
-    );
+    let yaml = plugin_event_trigger_yaml("user/plugin-hello-wf", "1.0", "plugin.event.test.hello");
     svc.save_definition(&yaml).await.unwrap();
     let (def, _) = svc.get_definition("user/plugin-hello-wf", "1.0").await.unwrap();
     tm.register_definition(&def).await;
@@ -107,11 +103,7 @@ async fn test_plugin_event_wildcard_trigger() {
     tm.set_workflow_service(Arc::clone(&svc)).await;
 
     // Wildcard trigger: matches any event under plugin.event.test.*
-    let yaml = plugin_event_trigger_yaml(
-        "user/plugin-wildcard-wf",
-        "1.0",
-        "plugin.event.test.*",
-    );
+    let yaml = plugin_event_trigger_yaml("user/plugin-wildcard-wf", "1.0", "plugin.event.test.*");
     svc.save_definition(&yaml).await.unwrap();
     let (def, _) = svc.get_definition("user/plugin-wildcard-wf", "1.0").await.unwrap();
     tm.register_definition(&def).await;
@@ -121,12 +113,8 @@ async fn test_plugin_event_wildcard_trigger() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     // Publish event that should match the wildcard
-    bus.publish(
-        "plugin.event.test.hello",
-        "plugin:test-plugin",
-        json!({"action": "greet"}),
-    )
-    .unwrap();
+    bus.publish("plugin.event.test.hello", "plugin:test-plugin", json!({"action": "greet"}))
+        .unwrap();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
@@ -155,11 +143,8 @@ async fn test_plugin_event_no_match_no_trigger() {
     tm.set_workflow_service(Arc::clone(&svc)).await;
 
     // Trigger listens for orders.created — NOT test.hello
-    let yaml = plugin_event_trigger_yaml(
-        "user/plugin-orders-wf",
-        "1.0",
-        "plugin.event.orders.created",
-    );
+    let yaml =
+        plugin_event_trigger_yaml("user/plugin-orders-wf", "1.0", "plugin.event.orders.created");
     svc.save_definition(&yaml).await.unwrap();
     let (def, _) = svc.get_definition("user/plugin-orders-wf", "1.0").await.unwrap();
     tm.register_definition(&def).await;
@@ -169,20 +154,12 @@ async fn test_plugin_event_no_match_no_trigger() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     // Publish a non-matching event
-    bus.publish(
-        "plugin.event.test.hello",
-        "plugin:test-plugin",
-        json!({"key": "value"}),
-    )
-    .unwrap();
+    bus.publish("plugin.event.test.hello", "plugin:test-plugin", json!({"key": "value"})).unwrap();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let result = svc.list_instances(&InstanceFilter::default()).await.unwrap();
-    assert_eq!(
-        result.total, 0,
-        "non-matching plugin event should NOT trigger any workflow"
-    );
+    assert_eq!(result.total, 0, "non-matching plugin event should NOT trigger any workflow");
 
     tm.stop().await;
 }
@@ -201,11 +178,7 @@ async fn test_plugin_event_broad_wildcard_trigger() {
     let svc = Arc::new(WorkflowService::in_memory().unwrap());
     tm.set_workflow_service(Arc::clone(&svc)).await;
 
-    let yaml = plugin_event_trigger_yaml(
-        "user/plugin-broad-wf",
-        "1.0",
-        "plugin.event.*",
-    );
+    let yaml = plugin_event_trigger_yaml("user/plugin-broad-wf", "1.0", "plugin.event.*");
     svc.save_definition(&yaml).await.unwrap();
     let (def, _) = svc.get_definition("user/plugin-broad-wf", "1.0").await.unwrap();
     tm.register_definition(&def).await;
@@ -213,12 +186,7 @@ async fn test_plugin_event_broad_wildcard_trigger() {
     tm.start().await;
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    bus.publish(
-        "plugin.event.test.hello",
-        "plugin:test-plugin",
-        json!({"broad": true}),
-    )
-    .unwrap();
+    bus.publish("plugin.event.test.hello", "plugin:test-plugin", json!({"broad": true})).unwrap();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
@@ -246,20 +214,14 @@ async fn test_plugin_event_multiple_triggers_selective() {
     tm.set_workflow_service(Arc::clone(&svc)).await;
 
     // Register two different plugin-triggered workflows
-    let yaml_a = plugin_event_trigger_yaml(
-        "user/plugin-alpha-wf",
-        "1.0",
-        "plugin.event.alpha.action",
-    );
+    let yaml_a =
+        plugin_event_trigger_yaml("user/plugin-alpha-wf", "1.0", "plugin.event.alpha.action");
     svc.save_definition(&yaml_a).await.unwrap();
     let (def_a, _) = svc.get_definition("user/plugin-alpha-wf", "1.0").await.unwrap();
     tm.register_definition(&def_a).await;
 
-    let yaml_b = plugin_event_trigger_yaml(
-        "user/plugin-beta-wf",
-        "1.0",
-        "plugin.event.beta.action",
-    );
+    let yaml_b =
+        plugin_event_trigger_yaml("user/plugin-beta-wf", "1.0", "plugin.event.beta.action");
     svc.save_definition(&yaml_b).await.unwrap();
     let (def_b, _) = svc.get_definition("user/plugin-beta-wf", "1.0").await.unwrap();
     tm.register_definition(&def_b).await;
@@ -268,12 +230,8 @@ async fn test_plugin_event_multiple_triggers_selective() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     // Only publish alpha event
-    bus.publish(
-        "plugin.event.alpha.action",
-        "plugin:alpha-plugin",
-        json!({"source": "alpha"}),
-    )
-    .unwrap();
+    bus.publish("plugin.event.alpha.action", "plugin:alpha-plugin", json!({"source": "alpha"}))
+        .unwrap();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 

@@ -22,15 +22,10 @@ pub(crate) async fn list_tools(
 
     // Resolve which MCP server IDs belong to the requested persona.
     // When no persona is specified, include all enabled servers.
-    let persona_mcp_ids: Option<std::collections::HashSet<String>> =
-        query.persona_id.as_deref().map(|pid| {
-            state
-                .chat
-                .mcp_configs_for_persona(pid)
-                .into_iter()
-                .map(|c| c.id)
-                .collect()
-        });
+    let persona_mcp_ids: Option<std::collections::HashSet<String>> = query
+        .persona_id
+        .as_deref()
+        .map(|pid| state.chat.mcp_configs_for_persona(pid).into_iter().map(|c| c.id).collect());
 
     // Include MCP tools from the catalog (enabled servers only).
     // The catalog holds tools discovered during startup / config refresh,

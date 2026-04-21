@@ -9,7 +9,7 @@ pub mod local_dir_source;
 pub mod parser;
 pub mod scan;
 
-pub use catalog::{SkillCatalog, stage_skill_resources};
+pub use catalog::{stage_skill_resources, SkillCatalog};
 pub use github_source::GitHubRepoSource;
 pub use index::{SkillIndex, SkillIndexStore, SqliteSkillIndex};
 pub use local_dir_source::LocalDirSource;

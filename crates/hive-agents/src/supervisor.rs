@@ -1493,10 +1493,14 @@ mod tests {
     async fn get_descendant_ids_returns_self_and_children() {
         let sup = test_supervisor();
         let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
-        let child1 =
-            sup.spawn_agent(test_spec("child1"), Some(root.clone()), None, None, None).await.unwrap();
-        let child2 =
-            sup.spawn_agent(test_spec("child2"), Some(root.clone()), None, None, None).await.unwrap();
+        let child1 = sup
+            .spawn_agent(test_spec("child1"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let child2 = sup
+            .spawn_agent(test_spec("child2"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
         let grandchild =
             sup.spawn_agent(test_spec("gc"), Some(child1.clone()), None, None, None).await.unwrap();
 
@@ -1515,10 +1519,14 @@ mod tests {
     async fn kill_agent_removes_descendants_from_supervisor() {
         let sup = test_supervisor();
         let root = sup.spawn_agent(test_spec("root"), None, None, None, None).await.unwrap();
-        let _child =
-            sup.spawn_agent(test_spec("child"), Some(root.clone()), None, None, None).await.unwrap();
-        let _grandchild =
-            sup.spawn_agent(test_spec("gc"), Some("child".to_string()), None, None, None).await.unwrap();
+        let _child = sup
+            .spawn_agent(test_spec("child"), Some(root.clone()), None, None, None)
+            .await
+            .unwrap();
+        let _grandchild = sup
+            .spawn_agent(test_spec("gc"), Some("child".to_string()), None, None, None)
+            .await
+            .unwrap();
 
         assert_eq!(sup.agent_count(), 3);
         sup.kill_agent(&root).await.unwrap();
@@ -1627,9 +1635,8 @@ mod tests {
         // Manually set parent to Terminating (simulates kill in progress)
         sup.agents.get_mut(&parent).unwrap().status = AgentStatus::Terminating;
 
-        let result = sup
-            .spawn_agent(test_spec("child"), Some(parent.clone()), None, None, None)
-            .await;
+        let result =
+            sup.spawn_agent(test_spec("child"), Some(parent.clone()), None, None, None).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             AgentError::TopologyError(msg) => {
@@ -1647,10 +1654,8 @@ mod tests {
             .spawn_agent(test_spec("child"), Some(root.clone()), None, None, None)
             .await
             .unwrap();
-        let gc = sup
-            .spawn_agent(test_spec("gc"), Some(child.clone()), None, None, None)
-            .await
-            .unwrap();
+        let gc =
+            sup.spawn_agent(test_spec("gc"), Some(child.clone()), None, None, None).await.unwrap();
 
         // Verify all start as Spawning
         assert_eq!(sup.agents.get(&root).unwrap().status, AgentStatus::Spawning);
