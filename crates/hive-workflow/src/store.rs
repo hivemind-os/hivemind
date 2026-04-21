@@ -253,6 +253,26 @@ impl ConnectionPool {
              PRAGMA busy_timeout = 5000;
              PRAGMA synchronous = NORMAL;",
         )?;
+        // Register a deterministic scalar function that converts a dot-separated
+        // version string (e.g. "1.10.3") into a single sortable i64 weight.
+        // Supports up to 4 numeric segments, each 0–9999.
+        conn.create_scalar_function(
+            "version_weight",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC
+                | rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            |ctx| {
+                let version: String = ctx.get(0)?;
+                let mut weight: i64 = 0;
+                let multipliers = [1_000_000_000_000i64, 100_000_000, 10_000, 1];
+                for (i, part) in version.split('.').take(4).enumerate() {
+                    if let Ok(n) = part.parse::<i64>() {
+                        weight += n * multipliers[i];
+                    }
+                }
+                Ok(weight)
+            },
+        )?;
         Ok(conn)
     }
 }
@@ -739,12 +759,22 @@ impl WorkflowPersistence for SqliteWorkflowStore {
 
     fn list_definitions(&self) -> Result<Vec<WorkflowDefinitionSummary>, WorkflowError> {
         let conn = self.conn()?;
+        // Only return the latest version per definition.  We pick the "latest"
+        // by doing a semantic numeric comparison on up to three dot-separated
+        // segments of the version string (major.minor.patch), falling back to
+        // the rowid as a final tie-breaker.
         let mut stmt = conn.prepare(
             "SELECT d.external_id, d.name, v.version, v.description, v.definition_json,
                     v.created_at_ms, v.updated_at_ms, d.bundled, v.archived, v.triggers_paused
              FROM workflow_definition_versions v
              JOIN workflow_definitions d ON d.id = v.definition_id
-             ORDER BY d.name, v.version",
+             WHERE v.id = (
+                 SELECT v2.id FROM workflow_definition_versions v2
+                 WHERE v2.definition_id = v.definition_id
+                 ORDER BY version_weight(v2.version) DESC, v2.id DESC
+                 LIMIT 1
+             )
+             ORDER BY d.name",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -1920,29 +1950,37 @@ mod tests {
 
         fn list_definitions(&self) -> Result<Vec<WorkflowDefinitionSummary>, WorkflowError> {
             let inner = self.inner.lock().unwrap();
-            let mut defs: Vec<WorkflowDefinitionSummary> = inner
-                .definitions
-                .values()
-                .map(|(def, _yaml)| {
-                    let trigger_types: Vec<String> =
-                        def.trigger_defs().map(|t| trigger_type_name(&t.trigger_type)).collect();
-                    WorkflowDefinitionSummary {
-                        id: def.id.clone(),
-                        name: def.name.clone(),
-                        version: def.version.clone(),
-                        description: def.description.clone(),
-                        mode: def.mode,
-                        trigger_types,
-                        step_count: def.steps.len(),
-                        created_at_ms: 0,
-                        updated_at_ms: 0,
-                        bundled: def.bundled,
-                        archived: def.archived,
-                        triggers_paused: def.triggers_paused,
+            // Build summaries grouped by definition name, keeping only the latest version.
+            let mut latest_by_name: std::collections::HashMap<String, WorkflowDefinitionSummary> =
+                std::collections::HashMap::new();
+            for (def, _yaml) in inner.definitions.values() {
+                let trigger_types: Vec<String> =
+                    def.trigger_defs().map(|t| trigger_type_name(&t.trigger_type)).collect();
+                let summary = WorkflowDefinitionSummary {
+                    id: def.id.clone(),
+                    name: def.name.clone(),
+                    version: def.version.clone(),
+                    description: def.description.clone(),
+                    mode: def.mode,
+                    trigger_types,
+                    step_count: def.steps.len(),
+                    created_at_ms: 0,
+                    updated_at_ms: 0,
+                    bundled: def.bundled,
+                    archived: def.archived,
+                    triggers_paused: def.triggers_paused,
+                };
+                match latest_by_name.get(&def.name) {
+                    Some(existing)
+                        if cmp_version_strings(&existing.version, &def.version)
+                            != std::cmp::Ordering::Less => {}
+                    _ => {
+                        latest_by_name.insert(def.name.clone(), summary);
                     }
-                })
-                .collect();
-            defs.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
+                }
+            }
+            let mut defs: Vec<WorkflowDefinitionSummary> = latest_by_name.into_values().collect();
+            defs.sort_by(|a, b| a.name.cmp(&b.name));
             Ok(defs)
         }
 
@@ -2633,5 +2671,148 @@ mod tests {
 
         store.set_event_replay_cursor(5678).unwrap();
         assert_eq!(store.get_event_replay_cursor().unwrap(), Some(5678));
+    }
+
+    // -----------------------------------------------------------------------
+    // list_definitions: latest-version-only tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a definition with a given name and version.
+    fn def_with_name_version(name: &str, version: &str) -> WorkflowDefinition {
+        let mut def = sample_definition();
+        def.name = name.into();
+        def.version = version.into();
+        def.id = generate_workflow_id();
+        def
+    }
+
+    #[test]
+    fn test_list_definitions_returns_latest_version_only() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        let def_v1 = def_with_name_version("wf-a", "1.0");
+        store.save_definition(&serde_yaml::to_string(&def_v1).unwrap(), &def_v1).unwrap();
+
+        let mut def_v2 = def_with_name_version("wf-a", "2.0");
+        def_v2.id = def_v1.id.clone(); // same workflow identity
+        store.save_definition(&serde_yaml::to_string(&def_v2).unwrap(), &def_v2).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1, "should return only one entry per workflow");
+        assert_eq!(list[0].version, "2.0");
+    }
+
+    #[test]
+    fn test_list_definitions_multiple_workflows_latest_only() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        // Workflow A: versions 1.0 and 2.0
+        let a_v1 = def_with_name_version("wf-a", "1.0");
+        store.save_definition(&serde_yaml::to_string(&a_v1).unwrap(), &a_v1).unwrap();
+        let mut a_v2 = def_with_name_version("wf-a", "2.0");
+        a_v2.id = a_v1.id.clone();
+        store.save_definition(&serde_yaml::to_string(&a_v2).unwrap(), &a_v2).unwrap();
+
+        // Workflow B: versions 1.0 and 3.0
+        let b_v1 = def_with_name_version("wf-b", "1.0");
+        store.save_definition(&serde_yaml::to_string(&b_v1).unwrap(), &b_v1).unwrap();
+        let mut b_v3 = def_with_name_version("wf-b", "3.0");
+        b_v3.id = b_v1.id.clone();
+        store.save_definition(&serde_yaml::to_string(&b_v3).unwrap(), &b_v3).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "wf-a");
+        assert_eq!(list[0].version, "2.0");
+        assert_eq!(list[1].name, "wf-b");
+        assert_eq!(list[1].version, "3.0");
+    }
+
+    #[test]
+    fn test_list_definitions_semver_ordering() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        // Save versions out of order: "1.0", "10.0", "2.0"
+        // Lexicographic would pick "2.0"; correct answer is "10.0".
+        let v1 = def_with_name_version("wf-semver", "1.0");
+        store.save_definition(&serde_yaml::to_string(&v1).unwrap(), &v1).unwrap();
+        let mut v10 = def_with_name_version("wf-semver", "10.0");
+        v10.id = v1.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v10).unwrap(), &v10).unwrap();
+        let mut v2 = def_with_name_version("wf-semver", "2.0");
+        v2.id = v1.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v2).unwrap(), &v2).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].version, "10.0", "should pick 10.0, not 2.0 (lexicographic)");
+    }
+
+    #[test]
+    fn test_list_definitions_multi_digit_minor() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        // "1.9" < "1.10" < "1.100" numerically
+        let v9 = def_with_name_version("wf-minor", "1.9");
+        store.save_definition(&serde_yaml::to_string(&v9).unwrap(), &v9).unwrap();
+        let mut v10 = def_with_name_version("wf-minor", "1.10");
+        v10.id = v9.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v10).unwrap(), &v10).unwrap();
+        let mut v100 = def_with_name_version("wf-minor", "1.100");
+        v100.id = v9.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v100).unwrap(), &v100).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].version, "1.100", "should pick 1.100 (numeric, not lexicographic)");
+    }
+
+    #[test]
+    fn test_list_definitions_three_part_versions() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        let v100 = def_with_name_version("wf-3part", "1.0.0");
+        store.save_definition(&serde_yaml::to_string(&v100).unwrap(), &v100).unwrap();
+        let mut v110 = def_with_name_version("wf-3part", "1.1.0");
+        v110.id = v100.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v110).unwrap(), &v110).unwrap();
+        let mut v101 = def_with_name_version("wf-3part", "1.0.1");
+        v101.id = v100.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v101).unwrap(), &v101).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].version, "1.1.0", "1.1.0 > 1.0.1 > 1.0.0");
+    }
+
+    #[test]
+    fn test_list_definitions_single_version() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        let def = def_with_name_version("wf-single", "1.0");
+        store.save_definition(&serde_yaml::to_string(&def).unwrap(), &def).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "wf-single");
+        assert_eq!(list[0].version, "1.0");
+    }
+
+    #[test]
+    fn test_list_definitions_archived_latest() {
+        let store = WorkflowStore::in_memory().unwrap();
+
+        let v1 = def_with_name_version("wf-arch", "1.0");
+        store.save_definition(&serde_yaml::to_string(&v1).unwrap(), &v1).unwrap();
+
+        let mut v2 = def_with_name_version("wf-arch", "2.0");
+        v2.id = v1.id.clone();
+        store.save_definition(&serde_yaml::to_string(&v2).unwrap(), &v2).unwrap();
+        store.set_archived("wf-arch", "2.0", true).unwrap();
+
+        let list = store.list_definitions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].version, "2.0");
+        assert!(list[0].archived, "latest version should report archived=true");
     }
 }
