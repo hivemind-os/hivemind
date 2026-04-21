@@ -30,7 +30,7 @@
       "pluginType": "connector",
       "services": ["issues", "notifications"],
       "permissions": ["secrets:read", "secrets:write", "loop:background"],
-      "minHostVersion": "0.2.0"
+      "minHostVersion": "0.1.0"
     }
   ]
 }

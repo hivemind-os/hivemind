@@ -21,13 +21,19 @@ jobs:
         run: cd packages/plugin-sdk && npm ci && npm run build
 
       - name: Run SDK tests
-        run: cd packages/plugin-sdk && npm test || true
+        run: cd packages/plugin-sdk && npm test
 
       - name: Install and build test-plugin
         run: cd packages/test-plugin && npm ci && npm run build
 
       - name: Run test-plugin tests
         run: cd packages/test-plugin && npm test
+
+      - name: Install and build sample plugin
+        run: cd packages/sample-plugins/github-issues && npm ci && npm run build
+
+      - name: Run sample plugin tests
+        run: cd packages/sample-plugins/github-issues && npm test
 
   rust-e2e:
     runs-on: ubuntu-latest

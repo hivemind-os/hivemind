@@ -1,0 +1,51 @@
+name: Publish Plugins
+
+on:
+  push:
+    tags:
+      - "plugin-github-issues-v*"
+      - "test-plugin-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_dir: packages/sample-plugins/github-issues
+            tag_prefix: plugin-github-issues
+          - package_dir: packages/test-plugin
+            tag_prefix: test-plugin
+    if: startsWith(github.ref_name, format('{0}-v', matrix.tag_prefix))
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install and build SDK
+        run: cd packages/plugin-sdk && npm ci && npm run build
+
+      - name: Install package dependencies
+        run: cd ${{ matrix.package_dir }} && npm ci
+
+      - name: Build and test package
+        run: |
+          cd ${{ matrix.package_dir }}
+          npm run build
+          npm test
+
+      - name: Dry-run publish package
+        run: node scripts/publish-plugin-package.mjs ${{ matrix.package_dir }} --tag-prefix ${{ matrix.tag_prefix }} --dry-run
+
+      - name: Publish package
+        run: node scripts/publish-plugin-package.mjs ${{ matrix.package_dir }} --tag-prefix ${{ matrix.tag_prefix }} --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -5,6 +5,10 @@ on:
     tags:
       - "sdk-v*"
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -19,13 +23,26 @@ jobs:
       - name: Install dependencies
         run: cd packages/plugin-sdk && npm ci
 
+      - name: Verify tag matches package version
+        run: |
+          cd packages/plugin-sdk
+          VERSION=$(node -p "require('./package.json').version")
+          EXPECTED_TAG="sdk-v${VERSION}"
+          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Ref ${GITHUB_REF_NAME} does not match ${EXPECTED_TAG}"
+            exit 1
+          fi
+
       - name: Build
         run: cd packages/plugin-sdk && npm run build
 
       - name: Run tests
-        run: cd packages/plugin-sdk && npm test || true
+        run: cd packages/plugin-sdk && npm test
+
+      - name: Dry-run pack
+        run: cd packages/plugin-sdk && npm pack --dry-run
 
       - name: Publish
-        run: cd packages/plugin-sdk && npm publish --access public
+        run: cd packages/plugin-sdk && npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -94,6 +94,16 @@ Follow [semver](https://semver.org/):
 
 Users see update notifications in the connector browser.
 
+## Publishing first-party packages from this repo
+
+The packages in this monorepo keep a local SDK dependency for development and CI. For releases, use the repo's GitHub Actions workflows instead of publishing them by hand from a working copy:
+
+- `sdk-v<version>` → publishes `packages/plugin-sdk`
+- `plugin-github-issues-v<version>` → publishes `packages/sample-plugins/github-issues`
+- `test-plugin-v<version>` → publishes `packages/test-plugin`
+
+Those workflows validate the tag, build and test the package, and stage a clean npm publish directory with the SDK dependency rewritten to the released semver version.
+
 ## Best Practices
 
 1. **Write tests** — use the SDK test harness

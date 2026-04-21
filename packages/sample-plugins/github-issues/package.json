@@ -4,10 +4,16 @@
   "description": "Hivemind connector plugin for GitHub Issues — reference implementation for plugin developers",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc && node ../../plugin-sdk/dist/extract-schema.js",
+    "build": "tsc && hivemind-extract-schema",
     "dev": "tsc --watch",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@hivemind-os/plugin-sdk": "file:../../plugin-sdk"
@@ -21,7 +27,6 @@
     "type": "connector",
     "displayName": "GitHub Issues",
     "description": "Connect to GitHub for issue tracking, creation, and notifications",
-    "icon": "assets/icon.svg",
     "categories": ["project-management", "issue-tracking", "developer-tools"],
     "services": ["issues", "notifications"],
     "permissions": [
@@ -39,5 +44,17 @@
     "github",
     "issues"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "hivemind-os",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hivemind-os/hivemind.git",
+    "directory": "packages/sample-plugins/github-issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
