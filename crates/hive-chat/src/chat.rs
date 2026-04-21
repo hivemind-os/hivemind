@@ -684,16 +684,22 @@ impl ChatEmbeddingCallback {
                     }
                 }
 
-                // Write the batch on a blocking thread using the pool
+                // Write the batch on a blocking thread using the pool's write guard
                 let pool = Arc::clone(&kg_pool);
                 let items = std::mem::take(&mut batch);
                 let ok_ctr = Arc::clone(&success_counter);
                 let fail_ctr = Arc::clone(&failure_counter);
+                let guard = match pool.write().await {
+                    Ok(g) => g,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to acquire KG write guard");
+                        continue;
+                    }
+                };
                 let result = tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
-                    let graph = pool.get().map_err(|e| anyhow::anyhow!("{e}"))?;
                     let mut written = 0;
                     for req in &items {
-                        match graph.set_embedding(req.node_id, &req.embedding, &req.model_id) {
+                        match guard.set_embedding(req.node_id, &req.embedding, &req.model_id) {
                             Ok(()) => {
                                 tracing::debug!(
                                     node_id = req.node_id,
@@ -979,6 +985,8 @@ pub struct ChatService {
     event_bus: EventBus,
     hivemind_home: Arc<PathBuf>,
     knowledge_graph_path: Arc<PathBuf>,
+    /// Shared connection pool for knowledge graph writes.
+    kg_pool: Arc<KgPool>,
     risk_service: RiskService,
     /// Models that have completed at least one generation — skip the loading
     /// indicator for these because they are already resident in memory.
@@ -1497,6 +1505,7 @@ impl ChatService {
         let bot_workspace = hivemind_home.join("bots");
         let runtime_manager = Arc::new(Mutex::new(None));
         let kg_path_arc = Arc::new(knowledge_graph_path);
+        let shared_kg_pool = Arc::new(KgPool::new(&*kg_path_arc));
         let workspace_indexer = Arc::new({
             let rules: Vec<(String, String)> = embedding_config
                 .rules
@@ -1517,7 +1526,7 @@ impl ChatService {
                 infer_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
                 writer_spawned: std::sync::Once::new(),
                 writer_rx: Mutex::new(Some(embed_rx)),
-                kg_pool: Arc::new(KgPool::new(&*kg_path_arc)),
+                kg_pool: Arc::clone(&shared_kg_pool),
                 embed_success: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 embed_failure: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             }));
@@ -1568,6 +1577,7 @@ impl ChatService {
             workspace_classifications: Arc::clone(&workspace_classifications),
             file_audits: Arc::clone(&file_audits),
             knowledge_graph_path: Arc::clone(&kg_path_arc),
+            kg_pool: Arc::clone(&shared_kg_pool),
         };
 
         Self {
@@ -1583,6 +1593,7 @@ impl ChatService {
             event_bus,
             hivemind_home: Arc::new(hivemind_home),
             knowledge_graph_path: kg_path_arc,
+            kg_pool: shared_kg_pool,
             risk_service,
             loaded_models: Arc::new(Mutex::new(HashSet::new())),
             embed_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -7537,7 +7548,7 @@ impl ChatService {
     /// will be picked up by a future reindex.
     fn embed_node_async(&self, node_id: i64, text: String) {
         let runtime = self.indexing_service.runtime_manager.lock().clone();
-        let graph_path = Arc::clone(&self.knowledge_graph_path);
+        let pool = Arc::clone(&self.kg_pool);
         let semaphore = Arc::clone(&self.embed_semaphore);
         tokio::task::spawn(async move {
             let Some(rt) = runtime else {
@@ -7547,13 +7558,20 @@ impl ChatService {
                 Ok(p) => p,
                 Err(_) => return,
             };
+            // Acquire write guard to serialize KG writes
+            let guard = match pool.write().await {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::debug!(node_id, error = %e, "failed to acquire KG write guard");
+                    return;
+                }
+            };
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
                 let _permit = permit;
                 let embedding = rt
                     .embed(hive_inference::defaults::DEFAULT_EMBEDDING_MODEL_ID, &text)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
-                let graph = open_graph(&graph_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-                graph.set_embedding(
+                guard.set_embedding(
                     node_id,
                     &embedding,
                     hive_inference::defaults::DEFAULT_EMBEDDING_MODEL_ID,
