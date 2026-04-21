@@ -322,7 +322,20 @@ impl WfAuthorListConnectorsTool {
                                     "has_communication": { "type": "boolean" },
                                     "has_calendar": { "type": "boolean" },
                                     "has_drive": { "type": "boolean" },
-                                    "has_contacts": { "type": "boolean" }
+                                    "has_contacts": { "type": "boolean" },
+                                    "channels": {
+                                        "type": "array",
+                                        "description": "Available channels/folders for communication connectors",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": { "type": "string" },
+                                                "name": { "type": "string" },
+                                                "channel_type": { "type": "string" },
+                                                "group_name": { "type": "string" }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -352,22 +365,51 @@ impl Tool for WfAuthorListConnectorsTool {
     fn execute(&self, _input: Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
         Box::pin(async move {
             let connectors: Vec<Value> = if let Some(ref registry) = self.registry {
-                registry
-                    .list()
-                    .into_iter()
-                    .map(|c| {
-                        json!({
-                            "id": c.id(),
-                            "display_name": c.display_name(),
-                            "provider": format!("{:?}", c.provider()),
-                            "status": serde_json::to_value(c.status()).unwrap_or(json!("unknown")),
-                            "has_communication": c.communication().is_some(),
-                            "has_calendar": c.calendar().is_some(),
-                            "has_drive": c.drive().is_some(),
-                            "has_contacts": c.contacts().is_some()
-                        })
-                    })
-                    .collect()
+                let mut results = Vec::new();
+                for c in registry.list() {
+                    let mut entry = json!({
+                        "id": c.id(),
+                        "display_name": c.display_name(),
+                        "provider": format!("{:?}", c.provider()),
+                        "status": serde_json::to_value(c.status()).unwrap_or(json!("unknown")),
+                        "has_communication": c.communication().is_some(),
+                        "has_calendar": c.calendar().is_some(),
+                        "has_drive": c.drive().is_some(),
+                        "has_contacts": c.contacts().is_some()
+                    });
+                    // Include channel details for communication-capable connectors
+                    if let Some(comm) = c.communication() {
+                        if let Ok(Ok(channels)) = tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            comm.list_channels(),
+                        )
+                        .await
+                        {
+                            let channel_list: Vec<Value> = channels
+                                .iter()
+                                .take(30)
+                                .map(|ch| {
+                                    let mut v = json!({
+                                        "id": ch.id,
+                                        "name": ch.name,
+                                    });
+                                    if let Some(ref t) = ch.channel_type {
+                                        v["channel_type"] = json!(t);
+                                    }
+                                    if let Some(ref g) = ch.group_name {
+                                        v["group_name"] = json!(g);
+                                    }
+                                    v
+                                })
+                                .collect();
+                            if !channel_list.is_empty() {
+                                entry["channels"] = json!(channel_list);
+                            }
+                        }
+                    }
+                    results.push(entry);
+                }
+                results
             } else {
                 vec![]
             };

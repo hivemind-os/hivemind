@@ -12,6 +12,7 @@ use hive_skills::SkillCatalog;
 use hive_skills_service::SkillsService;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -414,11 +415,79 @@ impl BotService {
             )
         };
 
+        // Pre-fetch connector context so the AI already knows what's configured
+        let connector_context = {
+            let connectors = self.connector_registry.list();
+            if connectors.is_empty() {
+                String::new()
+            } else {
+                let mut ctx = String::from(
+                    "## Available Connectors\n\n\
+                     The following connectors are already configured. Use their IDs directly in \
+                     workflow steps — do NOT ask the user for connection details.\n\n",
+                );
+                for c in &connectors {
+                    let _ = write!(
+                        ctx,
+                        "- **{}** (ID: `{}`): provider={:?}, status={:?}",
+                        c.display_name(),
+                        c.id(),
+                        c.provider(),
+                        c.status()
+                    );
+                    let caps: Vec<&str> = [
+                        c.communication().is_some().then_some("communication"),
+                        c.calendar().is_some().then_some("calendar"),
+                        c.drive().is_some().then_some("drive"),
+                        c.contacts().is_some().then_some("contacts"),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    if !caps.is_empty() {
+                        let _ = write!(ctx, " [{}]", caps.join(", "));
+                    }
+                    ctx.push('\n');
+                    // Include channel details for communication-capable connectors
+                    if let Some(comm) = c.communication() {
+                        if let Ok(channels) = tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            comm.list_channels(),
+                        )
+                        .await
+                        {
+                            if let Ok(channels) = channels {
+                                for ch in channels.iter().take(20) {
+                                    let _ = write!(ctx, "  - Channel: `{}` ({})", ch.id, ch.name);
+                                    if let Some(ref t) = ch.channel_type {
+                                        let _ = write!(ctx, " [{}]", t);
+                                    }
+                                    if let Some(ref g) = ch.group_name {
+                                        let _ = write!(ctx, " in {}", g);
+                                    }
+                                    ctx.push('\n');
+                                }
+                                if channels.len() > 20 {
+                                    let _ = writeln!(
+                                        ctx,
+                                        "  - ... and {} more channels",
+                                        channels.len() - 20
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                ctx
+            }
+        };
+
         let system_prompt = format!(
             "You are an expert workflow authoring assistant. Your job is to help users create and modify \
              workflow definitions in YAML format. You produce production-quality workflows with proper \
              error handling, typed variables, and clear step naming.\n\n\
              {authoring_guide}\n\n\
+             {connector_context}\n\
              ## Current Workflow\n\n\
              {yaml_section}\n\n\
              ## Instructions\n\n\
@@ -433,7 +502,9 @@ impl BotService {
                 - Use `workflow_author.list_available_tools` with a filter to find relevant tools \
                   (don't list all tools — filter by keyword)\n\
                 - Use `workflow_author.get_tool_details` to get input/output schemas before using a tool\n\
-                - Check `workflow_author.list_connectors` if messaging is involved\n\
+                - Refer to the **Available Connectors** section above for already-configured connectors — \
+                  use their IDs directly without asking the user for connection details. \
+                  Call `workflow_author.list_connectors` only if you need to refresh this information.\n\
                 - Check `workflow_author.list_personas` if agent steps are needed\n\
                 - Check `workflow_author.list_event_topics` if event triggers/gates are needed\n\
              4. **Design the workflow graph**: Plan the step sequence. Consider:\n\
