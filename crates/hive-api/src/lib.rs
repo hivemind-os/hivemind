@@ -1334,6 +1334,7 @@ impl AppState {
             Arc::new(services::PythonEnvDaemonService::new(
                 Arc::clone(&self.python_env),
                 Arc::clone(&self.shell_env),
+                self.event_bus.clone(),
             ));
         {
             let svc = Arc::clone(&python_svc);
@@ -1350,6 +1351,7 @@ impl AppState {
             Arc::new(services::NodeEnvDaemonService::new(
                 Arc::clone(&self.node_env),
                 Arc::clone(&self.shell_env),
+                self.event_bus.clone(),
             ));
         {
             let svc = Arc::clone(&node_svc);
@@ -1404,6 +1406,28 @@ impl AppState {
                             "MCP catalog: server discovered"
                         );
                     }
+                    Err(hive_mcp::McpServiceError::RuntimeNotInstalled {
+                        can_auto_install: true,
+                        ref runtime,
+                        ..
+                    }) => {
+                        // Track for deferred re-discovery once the runtime is ready.
+                        if let Some(cmd) = &cfg.command {
+                            let rt = hive_mcp::runtime::detect_runtime(cmd);
+                            if matches!(
+                                rt,
+                                hive_mcp::runtime::McpRuntime::Node
+                                    | hive_mcp::runtime::McpRuntime::Python
+                            ) {
+                                mcp.record_pending_runtime_server(cfg.id.clone(), rt);
+                            }
+                        }
+                        tracing::warn!(
+                            server_id = %cfg.id,
+                            runtime = %runtime,
+                            "MCP catalog: discovery deferred (runtime not ready)"
+                        );
+                    }
                     Err(e) => {
                         tracing::warn!(
                             server_id = %cfg.id,
@@ -1428,6 +1452,110 @@ impl AppState {
             sched_tool_exec.refresh().await;
             tracing::info!("scheduler tool executor refreshed with MCP tools");
         });
+
+        // Deferred MCP re-discovery: when managed runtimes become ready,
+        // re-discover servers that failed due to missing Node.js / Python.
+        {
+            let mcp = Arc::clone(&self.mcp);
+            let mcp_catalog = self.mcp_catalog.clone();
+            let sched_tool_exec = Arc::clone(&self.scheduler_tool_executor);
+            let rediscovery_bus = self.event_bus.clone();
+            let mut sub = self.event_bus.subscribe_topic("runtime.ready");
+            tokio::spawn(async move {
+                let mut pending_node = false;
+                let mut pending_python = false;
+                loop {
+                    // Wait for the first runtime-ready event.
+                    let envelope = match sub.recv().await {
+                        Ok(e) => e,
+                        Err(_) => break,
+                    };
+                    match envelope.topic.as_str() {
+                        "runtime.ready.node" => pending_node = true,
+                        "runtime.ready.python" => pending_python = true,
+                        _ => continue,
+                    }
+
+                    // Debounce: collect additional events for 2 seconds.
+                    let deadline = tokio::time::sleep(std::time::Duration::from_secs(2));
+                    tokio::pin!(deadline);
+                    loop {
+                        tokio::select! {
+                            _ = &mut deadline => break,
+                            result = sub.recv() => {
+                                match result {
+                                    Ok(e) if e.topic == "runtime.ready.node" => pending_node = true,
+                                    Ok(e) if e.topic == "runtime.ready.python" => pending_python = true,
+                                    Err(_) => break,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    // Collect server IDs to re-discover.
+                    let mut server_ids = Vec::new();
+                    if pending_node {
+                        server_ids.extend(
+                            mcp.take_pending_servers_for_runtime(hive_mcp::runtime::McpRuntime::Node),
+                        );
+                    }
+                    if pending_python {
+                        server_ids.extend(
+                            mcp.take_pending_servers_for_runtime(hive_mcp::runtime::McpRuntime::Python),
+                        );
+                    }
+                    pending_node = false;
+                    pending_python = false;
+
+                    if server_ids.is_empty() {
+                        continue;
+                    }
+
+                    tracing::info!(
+                        servers = ?server_ids,
+                        "deferred MCP catalog re-discovery triggered by runtime readiness"
+                    );
+
+                    let mut discovered = 0usize;
+                    for sid in &server_ids {
+                        match mcp.discover_and_catalog(sid, &mcp_catalog).await {
+                            Ok(entry) => {
+                                tracing::info!(
+                                    server_id = %sid,
+                                    tools = entry.tools.len(),
+                                    "MCP catalog: deferred server discovered"
+                                );
+                                discovered += 1;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    server_id = %sid,
+                                    error = %e,
+                                    "MCP catalog: deferred discovery failed"
+                                );
+                            }
+                        }
+                    }
+
+                    if discovered > 0 {
+                        let all_tools = mcp_catalog.all_cataloged_tools().await;
+                        if let Err(e) = rediscovery_bus.publish(
+                            "mcp.catalog.refreshed",
+                            "hive-mcp",
+                            serde_json::json!({ "toolCount": all_tools.len() }),
+                        ) {
+                            tracing::debug!(error = %e, "failed to publish mcp.catalog.refreshed");
+                        }
+                        sched_tool_exec.refresh().await;
+                        tracing::info!(
+                            discovered,
+                            "deferred MCP re-discovery complete, scheduler tools refreshed"
+                        );
+                    }
+                }
+            });
+        }
 
         // ── Register all services with the service registry ─────────────
 

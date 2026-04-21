@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hive_contracts::{DaemonService, ServiceCategory, ServiceSnapshot, ServiceStatus};
 use parking_lot::Mutex;
+use serde_json::json;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -763,6 +764,7 @@ impl DaemonService for InferenceDaemonService {
 pub struct PythonEnvDaemonService {
     inner: Arc<hive_python_env::PythonEnvManager>,
     shell_env: Arc<parking_lot::RwLock<std::collections::HashMap<String, String>>>,
+    event_bus: hive_core::EventBus,
     last_error: Mutex<Option<String>>,
 }
 
@@ -770,8 +772,9 @@ impl PythonEnvDaemonService {
     pub fn new(
         inner: Arc<hive_python_env::PythonEnvManager>,
         shell_env: Arc<parking_lot::RwLock<std::collections::HashMap<String, String>>>,
+        event_bus: hive_core::EventBus,
     ) -> Self {
-        Self { inner, shell_env, last_error: Mutex::new(None) }
+        Self { inner, shell_env, event_bus, last_error: Mutex::new(None) }
     }
 }
 
@@ -813,6 +816,13 @@ impl DaemonService for PythonEnvDaemonService {
                 *self.last_error.lock() = None;
                 let _span = tracing::info_span!("service", service = "python-env").entered();
                 info!(venv = %env_info.venv_path.display(), "Python environment ready");
+                if let Err(e) = self.event_bus.publish(
+                    "runtime.ready.python",
+                    "python-env",
+                    json!({}),
+                ) {
+                    tracing::debug!(error = %e, "failed to publish runtime.ready.python event");
+                }
                 Ok(())
             }
             Err(hive_python_env::PythonEnvError::Disabled) => {
@@ -847,6 +857,7 @@ impl DaemonService for PythonEnvDaemonService {
 pub struct NodeEnvDaemonService {
     inner: Arc<hive_node_env::NodeEnvManager>,
     shell_env: Arc<parking_lot::RwLock<std::collections::HashMap<String, String>>>,
+    event_bus: hive_core::EventBus,
     last_error: Mutex<Option<String>>,
 }
 
@@ -854,8 +865,9 @@ impl NodeEnvDaemonService {
     pub fn new(
         inner: Arc<hive_node_env::NodeEnvManager>,
         shell_env: Arc<parking_lot::RwLock<std::collections::HashMap<String, String>>>,
+        event_bus: hive_core::EventBus,
     ) -> Self {
-        Self { inner, shell_env, last_error: Mutex::new(None) }
+        Self { inner, shell_env, event_bus, last_error: Mutex::new(None) }
     }
 }
 
@@ -899,6 +911,13 @@ impl DaemonService for NodeEnvDaemonService {
             let _span = tracing::info_span!("service", service = "node-env").entered();
             info!("Node.js environment already installed");
             *self.last_error.lock() = None;
+            if let Err(e) = self.event_bus.publish(
+                "runtime.ready.node",
+                "node-env",
+                json!({}),
+            ) {
+                tracing::debug!(error = %e, "failed to publish runtime.ready.node event");
+            }
             return Ok(());
         }
 
@@ -911,6 +930,13 @@ impl DaemonService for NodeEnvDaemonService {
                 *self.last_error.lock() = None;
                 let _span = tracing::info_span!("service", service = "node-env").entered();
                 info!(path = %dist_dir.display(), "Node.js environment ready");
+                if let Err(e) = self.event_bus.publish(
+                    "runtime.ready.node",
+                    "node-env",
+                    json!({}),
+                ) {
+                    tracing::debug!(error = %e, "failed to publish runtime.ready.node event");
+                }
                 Ok(())
             }
             Err(hive_node_env::NodeEnvError::Disabled) => {
