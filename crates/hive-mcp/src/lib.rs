@@ -1,8 +1,8 @@
 pub use hive_contracts::{
     ChannelClass, McpAppResource, McpCallToolResult, McpCatalog, McpCatalogEntry, McpConnectedTool,
     McpConnectionStatus, McpNotificationEvent, McpNotificationKind, McpPromptArgumentInfo,
-    McpPromptInfo, McpResourceInfo, McpSandboxStatus, McpServerLog, McpServerSnapshot, McpToolInfo,
-    McpToolUiMeta, McpTransportConfig,
+    McpPromptInfo, McpReadResourceResult, McpResourceContent, McpResourceInfo, McpSandboxStatus,
+    McpServerLog, McpServerSnapshot, McpToolInfo, McpToolUiMeta, McpTransportConfig,
 };
 use hive_core::{EventBus, McpServerConfig};
 use rmcp::model::{
@@ -1044,6 +1044,7 @@ impl McpService {
             .await
             .map_err(|error| map_request_error(server_id, error))?;
 
+        // Flatten text content for backward-compat display
         let content = result
             .content
             .iter()
@@ -1054,7 +1055,14 @@ impl McpService {
             .collect::<Vec<_>>()
             .join("\n");
 
-        Ok(McpCallToolResult { content, is_error: result.is_error.unwrap_or(false) })
+        // Serialize the full result as raw JSON for MCP Apps
+        let raw = serde_json::to_value(&result).ok();
+
+        Ok(McpCallToolResult {
+            content,
+            is_error: result.is_error.unwrap_or(false),
+            raw,
+        })
     }
 
     /// Return every tool from every *connected* server, together with the
@@ -1132,7 +1140,7 @@ impl McpService {
         &self,
         server_id: &str,
         uri: &str,
-    ) -> Result<String, McpServiceError> {
+    ) -> Result<McpReadResourceResult, McpServiceError> {
         let peer = self.peer_for(server_id).await?;
         let result = peer
             .read_resource(ReadResourceRequestParam { uri: uri.to_string() })
@@ -1140,18 +1148,53 @@ impl McpService {
             .map_err(|error| map_request_error(server_id, error))?;
 
         use rmcp::model::ResourceContents;
-        let content = result
+        let contents: Vec<McpResourceContent> = result
+            .contents
+            .into_iter()
+            .map(|c| match c {
+                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                    McpResourceContent {
+                        uri: uri.to_string(),
+                        mime_type,
+                        text: Some(text),
+                        blob: None,
+                    }
+                }
+                ResourceContents::BlobResourceContents { uri, mime_type, blob, .. } => {
+                    McpResourceContent {
+                        uri: uri.to_string(),
+                        mime_type,
+                        text: None,
+                        blob: Some(blob),
+                    }
+                }
+            })
+            .collect();
+        Ok(McpReadResourceResult { contents })
+    }
+
+    /// Read a resource as plain text (convenience wrapper for backward compat).
+    pub async fn read_resource_text(
+        &self,
+        server_id: &str,
+        uri: &str,
+    ) -> Result<String, McpServiceError> {
+        let result = self.read_resource(server_id, uri).await?;
+        let text = result
             .contents
             .iter()
-            .map(|c| match c {
-                ResourceContents::TextResourceContents { text, .. } => text.clone(),
-                ResourceContents::BlobResourceContents { blob, .. } => {
-                    format!("[binary resource, base64 ({} chars)]\n{}", blob.len(), blob)
+            .map(|c| {
+                if let Some(t) = &c.text {
+                    t.clone()
+                } else if let Some(b) = &c.blob {
+                    format!("[binary resource, base64 ({} chars)]\n{}", b.len(), b)
+                } else {
+                    String::new()
                 }
             })
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(content)
+        Ok(text)
     }
 
     /// Subscribe to change notifications for a resource URI.
@@ -1170,11 +1213,14 @@ impl McpService {
     /// Fetch an MCP App UI resource (`ui://` scheme) and return structured content.
     /// Results are cached per (server_id, uri); cache is invalidated on
     /// `notifications/resources/list_changed`.
+    ///
+    /// CSP/permissions metadata is extracted from the resource content's `_meta.ui`
+    /// (per spec), not from the tool-level `_meta.ui`.
     pub async fn fetch_ui_resource(
         &self,
         server_id: &str,
         resource_uri: &str,
-        ui_meta: Option<&McpToolUiMeta>,
+        _ui_meta: Option<&McpToolUiMeta>,
     ) -> Result<McpAppResource, McpServiceError> {
         // Check cache first
         let cache_key = (server_id.to_string(), resource_uri.to_string());
@@ -1185,12 +1231,19 @@ impl McpService {
             }
         }
 
-        // Fetch from server
-        let html = self.read_resource(server_id, resource_uri).await?;
+        // Fetch from server using structured read_resource
+        let result = self.read_resource(server_id, resource_uri).await?;
+        let html = result
+            .contents
+            .iter()
+            .filter_map(|c| c.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
         let resource = McpAppResource {
             uri: resource_uri.to_string(),
             html,
-            ui_meta: ui_meta.cloned(),
+            ui_meta: _ui_meta.cloned(),
         };
 
         // Cache the result
@@ -1894,12 +1947,28 @@ pub(crate) fn now_ms() -> u128 {
 }
 
 fn tool_to_info(tool: Tool) -> McpToolInfo {
-    // Extract _meta.ui for MCP Apps support
-    let ui_meta = tool
+    // Extract _meta.ui for MCP Apps support (standard format)
+    let mut ui_meta = tool
         .meta
         .as_ref()
         .and_then(|m| m.get("ui"))
         .and_then(|ui| serde_json::from_value::<McpToolUiMeta>(ui.clone()).ok());
+
+    // Fallback: deprecated flat key format _meta["ui/resourceUri"]
+    if ui_meta.as_ref().and_then(|m| m.resource_uri.as_ref()).is_none() {
+        if let Some(meta) = tool.meta.as_ref() {
+            if let Some(uri) = meta.get("ui/resourceUri").and_then(|v| v.as_str()) {
+                let m = ui_meta.get_or_insert_with(|| McpToolUiMeta {
+                    resource_uri: None,
+                    visibility: None,
+                    csp: None,
+                    permissions: None,
+                    prefers_border: None,
+                });
+                m.resource_uri = Some(uri.to_string());
+            }
+        }
+    }
 
     McpToolInfo {
         name: tool.name.to_string(),

@@ -2931,6 +2931,14 @@ pub async fn register_mcp_tools(
         if !enabled_server_ids.contains(&ct.server_id.to_string()) {
             continue;
         }
+        // MCP Apps visibility: skip tools that are only for apps (not for the model/LLM)
+        if let Some(ref ui_meta) = ct.tool.ui_meta {
+            if let Some(ref vis) = ui_meta.visibility {
+                if !vis.is_empty() && !vis.iter().any(|v| v == "model") {
+                    continue;
+                }
+            }
+        }
         let server_id = ct.server_id;
         let tool_name = ct.tool.name;
         let description = if ct.tool.description.trim().is_empty() {

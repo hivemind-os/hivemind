@@ -902,10 +902,24 @@ const ChatView = (props: ChatViewProps) => {
                                       toolInput={tc.input}
                                       toolOutput={tc.output}
                                       toolIsError={tc.isError}
+                                      toolInputSchema={mcpTool()?.input_schema as Record<string, unknown> | undefined}
+                                      toolVisibility={mcpTool()?.ui_meta?.visibility ?? undefined}
                                       sessionId={props.selectedSessionId() ?? ''}
                                       daemonUrl={props.daemonUrl?.() ?? ''}
                                       uiMeta={mcpTool()?.ui_meta}
                                       theme="dark"
+                                      displayMode="inline"
+                                      onPopout={() => {
+                                        setPopupToolCall({
+                                          tool_id: tc.tool_id,
+                                          label: tc.label,
+                                          input: tc.input,
+                                          output: tc.output,
+                                          isError: tc.isError,
+                                          startedAt: tc.startedAt,
+                                          completedAt: tc.completedAt,
+                                        });
+                                      }}
                                     />
                                   )}
                                 </Show>
@@ -1705,7 +1719,7 @@ const ChatView = (props: ChatViewProps) => {
       open={!!popupToolCall()}
       onOpenChange={(open) => { if (!open) setPopupToolCall(null); }}
     >
-      <DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto" style="overflow-x:hidden;">
+      <DialogContent class="max-w-4xl max-h-[85vh] overflow-y-auto" style="overflow-x:hidden;">
       <Show when={popupToolCall()}>
         {(tc) => {
             // Parse MCP tool ID: "mcp.{serverId}.{toolName}"
@@ -1714,11 +1728,11 @@ const ChatView = (props: ChatViewProps) => {
             const toolName = () => mcpMatch()?.[2];
 
             // Check if this tool has an MCP App UI
-            const toolUiMeta = () => {
+            const mcpToolEntry = () => {
               if (!props.mcpAppTools || !serverId() || !toolName()) return undefined;
-              const entry = props.mcpAppTools().get(`${serverId()}::${toolName()}`);
-              return entry?.ui_meta;
+              return props.mcpAppTools().get(`${serverId()}::${toolName()}`);
             };
+            const toolUiMeta = () => mcpToolEntry()?.ui_meta;
             const uiResourceUri = () => toolUiMeta()?.resource_uri;
 
             // Fetch the UI resource HTML when the popup opens
@@ -1755,7 +1769,7 @@ const ChatView = (props: ChatViewProps) => {
               <Button variant="ghost" size="icon" class="size-8" onClick={() => setPopupToolCall(null)} aria-label="Close">✕</Button>
             </header>
 
-            {/* MCP App view (when available) */}
+            {/* MCP App view (when available) — popout mode with larger container */}
             <Show when={appHtml() && serverId()}>
               {(html) => (
                 <McpAppView
@@ -1765,10 +1779,13 @@ const ChatView = (props: ChatViewProps) => {
                   toolInput={tc().input}
                   toolOutput={tc().output}
                   toolIsError={tc().isError}
+                  toolInputSchema={mcpToolEntry()?.input_schema as Record<string, unknown> | undefined}
+                  toolVisibility={toolUiMeta()?.visibility ?? undefined}
                   sessionId={props.selectedSessionId() ?? ''}
                   daemonUrl={props.daemonUrl?.() ?? ''}
                   uiMeta={toolUiMeta()}
                   theme="dark"
+                  displayMode="popout"
                 />
               )}
             </Show>

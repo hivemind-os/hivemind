@@ -498,7 +498,7 @@ async fn service_read_resource_content() {
     let mock = MockServer::new().with_resource("file:///test.txt", "test.txt");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
 
-    let content = service.read_resource("srv1", "file:///test.txt").await.unwrap();
+    let content = service.read_resource_text("srv1", "file:///test.txt").await.unwrap();
     assert!(content.contains("content of file:///test.txt"));
 }
 

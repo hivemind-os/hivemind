@@ -43,12 +43,27 @@ export interface McpAppBridgeConfig {
   toolInput?: string;
   toolOutput?: string;
   toolIsError?: boolean;
+  /** Raw tool result JSON from the MCP server (full CallToolResult shape) */
+  toolResultRaw?: unknown;
+  /** Tool input schema (JSON Schema) for hostContext.toolInfo */
+  toolInputSchema?: Record<string, unknown>;
   sessionId: string;
   daemonUrl: string;
   theme: 'light' | 'dark';
+  /** Current display mode */
+  displayMode?: 'inline' | 'popout';
+  /** Available display modes */
+  availableDisplayModes?: string[];
+  /** Container dimensions (width × height in px) */
+  containerWidth?: number;
+  containerHeight?: number;
+  /** Tool visibility list (e.g. ["model","app"]) */
+  toolVisibility?: string[];
   onSizeChanged?: (width: number, height: number) => void;
   onMessage?: (content: string) => void;
   onOpenLink?: (url: string) => void;
+  onModelContextUpdate?: (context: Record<string, unknown>) => void;
+  onPopout?: () => void;
 }
 
 // ── Bridge implementation ───────────────────────────────────────────
@@ -73,13 +88,12 @@ export class McpAppBridge {
 
   /** Clean up event listeners. Call before removing the iframe. */
   destroy(): void {
-    // Send teardown notification before disconnecting
-    this.sendNotification('ui/resource-teardown', {});
+    // Send teardown as a request (spec: has id, expects response)
+    this.sendRequest('ui/resource-teardown', {}).catch(() => {});
     if (this.messageHandler) {
       window.removeEventListener('message', this.messageHandler);
       this.messageHandler = null;
     }
-    // Reject pending requests
     for (const [, pending] of this.pendingRequests) {
       pending.reject(new Error('Bridge destroyed'));
     }
@@ -95,9 +109,14 @@ export class McpAppBridge {
     });
   }
 
-  /** Send tool result to the app. */
-  sendToolResult(output: string, isError?: boolean): void {
-    // Per spec, tool-result params follow CallToolResult shape
+  /** Send tool result to the app (full CallToolResult shape). */
+  sendToolResult(output: string, isError?: boolean, rawResult?: unknown): void {
+    // If we have the raw MCP result, forward it as-is (preserves structuredContent, _meta, multi-block content)
+    if (rawResult && typeof rawResult === 'object') {
+      this.sendNotification('ui/notifications/tool-result', rawResult);
+      return;
+    }
+    // Fallback: reconstruct from plain text
     const parsed = tryParseJson(output);
     const content = parsed != null
       ? [{ type: 'text', text: typeof parsed === 'string' ? parsed : JSON.stringify(parsed) }]
@@ -108,15 +127,38 @@ export class McpAppBridge {
     });
   }
 
-  /** Notify the app of a theme or context change. */
+  /** Notify the app of tool cancellation. */
+  sendToolCancelled(reason?: string): void {
+    this.sendNotification('ui/notifications/tool-cancelled', {
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  /** Notify the app of a theme or context change. Params are the partial HostContext directly. */
   sendHostContextChanged(context: Record<string, unknown>): void {
-    this.sendNotification('ui/notifications/host-context-changed', { hostContext: context });
+    this.sendNotification('ui/notifications/host-context-changed', context);
+  }
+
+  /** Update container dimensions (e.g. on resize or popout). */
+  updateContainerDimensions(width: number, height: number): void {
+    this.config.containerWidth = width;
+    this.config.containerHeight = height;
+    if (this.initialized) {
+      this.sendHostContextChanged({ containerDimensions: { width, height } });
+    }
+  }
+
+  /** Update display mode (e.g. inline → popout). */
+  updateDisplayMode(mode: string): void {
+    this.config.displayMode = mode as 'inline' | 'popout';
+    if (this.initialized) {
+      this.sendHostContextChanged({ displayMode: mode });
+    }
   }
 
   // ── Inbound: App → Host ───────────────────────────────────────
 
   private handleMessage(event: MessageEvent): void {
-    // Only accept messages from our iframe
     if (event.source !== this.iframe.contentWindow) return;
 
     const msg = event.data as JsonRpcMessage;
@@ -151,7 +193,7 @@ export class McpAppBridge {
       const result = await this.dispatchRequest(msg.method, msg.params);
       this.sendResponse(msg.id, result);
     } catch (err: any) {
-      this.sendErrorResponse(msg.id, -32603, err.message ?? 'Internal error');
+      this.sendErrorResponse(msg.id, err.code ?? -32603, err.message ?? 'Internal error');
     }
   }
 
@@ -173,12 +215,10 @@ export class McpAppBridge {
         return this.handleUiMessage(params as { role: string; content: Array<{ type: string; text?: string }> });
 
       case 'ui/update-model-context':
-        // Acknowledge context updates (we don't use them currently)
-        return {};
+        return this.handleUpdateModelContext(params as Record<string, unknown>);
 
       case 'ui/request-display-mode':
-        // Acknowledge but only inline is supported in v1
-        return { mode: 'inline' };
+        return { mode: this.config.displayMode ?? 'inline' };
 
       case 'ping':
         return {};
@@ -192,12 +232,11 @@ export class McpAppBridge {
     switch (msg.method) {
       case 'ui/notifications/initialized':
         this.initialized = true;
-        // Now send tool input and result
         if (this.config.toolInput) {
           this.sendToolInput(this.config.toolInput);
         }
         if (this.config.toolOutput != null) {
-          this.sendToolResult(this.config.toolOutput, this.config.toolIsError);
+          this.sendToolResult(this.config.toolOutput, this.config.toolIsError, this.config.toolResultRaw);
         }
         break;
 
@@ -210,15 +249,15 @@ export class McpAppBridge {
       }
 
       case 'ui/notifications/request-teardown':
-        // App requested teardown — ignore for now (inline view stays)
         break;
 
-      case 'notifications/message':
-        // Log message from app (logging notification)
+      case 'notifications/message': {
+        const logParams = msg.params as { level?: string; data?: unknown } | undefined;
+        console.log(`[MCP App:${this.config.toolName}]`, logParams?.level ?? 'info', logParams?.data ?? '');
         break;
+      }
 
       case 'notifications/tools/list_changed':
-        // App's tools changed — not used currently
         break;
 
       default:
@@ -228,7 +267,11 @@ export class McpAppBridge {
 
   // ── Request handlers ──────────────────────────────────────────
 
-  private handleInitialize(_params: unknown): Record<string, unknown> {
+  private handleInitialize(params: unknown): Record<string, unknown> {
+    // Store app info/capabilities for future use
+    const p = params as { appInfo?: unknown; appCapabilities?: unknown; protocolVersion?: string } | undefined;
+    void p; // reserved for future use
+
     return {
       protocolVersion: '2026-01-26',
       hostInfo: {
@@ -241,12 +284,21 @@ export class McpAppBridge {
         serverResources: {},
         logging: {},
         message: { text: {} },
+        updateModelContext: {},
+        sandbox: {},
       },
       hostContext: this.buildHostContext(),
     };
   }
 
   private async handleToolsCall(params: { name: string; arguments?: Record<string, unknown> }): Promise<unknown> {
+    // Visibility check: reject if the target tool doesn't have "app" visibility
+    // (Default visibility is ["model","app"] so most tools are allowed)
+    const toolVisibility = this.config.toolVisibility;
+    if (toolVisibility && !toolVisibility.includes('app')) {
+      throw { code: -32600, message: `Tool "${params.name}" is not accessible from apps` };
+    }
+
     const resp = await authFetch(
       `${this.config.daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(this.config.serverId)}/call-tool`,
       {
@@ -256,11 +308,8 @@ export class McpAppBridge {
       },
     );
     if (!resp.ok) throw new Error(`Tool call failed: ${resp.status}`);
-    const result = await resp.json() as { content: string; is_error: boolean };
-    return {
-      content: [{ type: 'text', text: result.content }],
-      isError: result.is_error,
-    };
+    // The backend now returns the full CallToolResult-shaped JSON
+    return await resp.json();
   }
 
   private async handleResourcesRead(params: { uri: string }): Promise<unknown> {
@@ -273,15 +322,11 @@ export class McpAppBridge {
       },
     );
     if (!resp.ok) throw new Error(`Resource read failed: ${resp.status}`);
-    const content = await resp.json() as string;
-    return {
-      contents: [{ uri: params.uri, text: content }],
-    };
+    return await resp.json();
   }
 
   private async handleOpenLink(params: { url: string }): Promise<unknown> {
     const url = params.url;
-    // Only allow http/https links
     if (url.startsWith('http://') || url.startsWith('https://')) {
       if (this.config.onOpenLink) {
         this.config.onOpenLink(url);
@@ -294,7 +339,6 @@ export class McpAppBridge {
 
   private handleUiMessage(params: { role: string; content: Array<{ type: string; text?: string }> }): Record<string, unknown> {
     if (this.config.onMessage) {
-      // Extract text from content blocks
       const text = params.content
         ?.filter((b) => b.type === 'text' && b.text)
         .map((b) => b.text)
@@ -304,19 +348,68 @@ export class McpAppBridge {
     return {};
   }
 
+  private handleUpdateModelContext(params: Record<string, unknown>): Record<string, unknown> {
+    if (this.config.onModelContextUpdate) {
+      this.config.onModelContextUpdate(params);
+    }
+    return {};
+  }
+
   // ── Helpers ───────────────────────────────────────────────────
 
   private buildHostContext(): Record<string, unknown> {
-    return {
+    const ctx: Record<string, unknown> = {
       theme: this.config.theme,
       platform: 'desktop',
       locale: navigator.language,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      userAgent: 'hivemind-desktop',
+      displayMode: this.config.displayMode ?? 'inline',
+      availableDisplayModes: this.config.availableDisplayModes ?? ['inline'],
     };
+
+    // toolInfo: apps need to know which tool was called and its schema
+    if (this.config.toolName) {
+      ctx.toolInfo = {
+        name: this.config.toolName,
+        ...(this.config.toolInputSchema ? { inputSchema: this.config.toolInputSchema } : {}),
+      };
+    }
+
+    // Container dimensions
+    if (this.config.containerWidth != null && this.config.containerHeight != null) {
+      ctx.containerDimensions = {
+        width: this.config.containerWidth,
+        height: this.config.containerHeight,
+      };
+    }
+
+    // Theme CSS variables (map from Hivemind's design tokens)
+    ctx.styles = {
+      variables: getThemeVariables(),
+    };
+
+    return ctx;
   }
 
   private sendNotification(method: string, params: unknown): void {
     this.postToApp({ jsonrpc: '2.0', method, params });
+  }
+
+  /** Send a JSON-RPC request and return a promise for the response. */
+  private sendRequest(method: string, params: unknown): Promise<unknown> {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject });
+      this.postToApp({ jsonrpc: '2.0', id, method, params });
+      // Timeout after 5s
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`Request ${method} timed out`));
+        }
+      }, 5000);
+    });
   }
 
   private sendResponse(id: string | number, result: unknown): void {
@@ -329,6 +422,37 @@ export class McpAppBridge {
 
   private postToApp(msg: JsonRpcMessage): void {
     this.iframe.contentWindow?.postMessage(msg, '*');
+  }
+}
+
+/** Read theme CSS variables from the document for the MCP Apps styles.variables spec. */
+function getThemeVariables(): Record<string, string> {
+  try {
+    const styles = getComputedStyle(document.documentElement);
+    const vars: Record<string, string> = {};
+    // Map standard MCP Apps variable names to Hivemind CSS custom properties
+    const mapping: Record<string, string> = {
+      '--mcp-background': '--background',
+      '--mcp-foreground': '--foreground',
+      '--mcp-primary': '--primary',
+      '--mcp-primary-foreground': '--primary-foreground',
+      '--mcp-secondary': '--secondary',
+      '--mcp-secondary-foreground': '--secondary-foreground',
+      '--mcp-muted': '--muted',
+      '--mcp-muted-foreground': '--muted-foreground',
+      '--mcp-accent': '--accent',
+      '--mcp-accent-foreground': '--accent-foreground',
+      '--mcp-destructive': '--destructive',
+      '--mcp-border': '--border',
+      '--mcp-radius': '--radius',
+    };
+    for (const [mcpVar, cssVar] of Object.entries(mapping)) {
+      const val = styles.getPropertyValue(cssVar).trim();
+      if (val) vars[mcpVar] = val;
+    }
+    return vars;
+  } catch {
+    return {};
   }
 }
 

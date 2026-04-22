@@ -102,7 +102,7 @@ impl SessionMcpManager {
         uri: &str,
     ) -> Result<String, McpServiceError> {
         self.lazy_connect(server_id).await?;
-        self.inner.read_resource(server_id, uri).await
+        self.inner.read_resource_text(server_id, uri).await
     }
 
     /// Subscribe to a resource, lazily connecting if needed.

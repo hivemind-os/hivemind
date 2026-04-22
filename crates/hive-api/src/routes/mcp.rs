@@ -334,6 +334,9 @@ pub(crate) struct CallToolRequest {
 pub(crate) struct CallToolResponse {
     pub content: String,
     pub is_error: bool,
+    /// Full raw MCP CallToolResult (for MCP Apps — preserves structuredContent, _meta, multi-block content)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 pub(crate) async fn call_mcp_tool(
@@ -354,6 +357,7 @@ pub(crate) async fn call_mcp_tool(
     Ok(Json(CallToolResponse {
         content: result.content,
         is_error: result.is_error,
+        raw: result.raw,
     }))
 }
 
@@ -369,13 +373,13 @@ pub(crate) async fn read_mcp_resource(
     State(state): State<AppState>,
     Path(server_id): Path<String>,
     Json(req): Json<ReadResourceRequest>,
-) -> Result<Json<String>, (StatusCode, String)> {
-    let content = state
+) -> Result<Json<hive_mcp::McpReadResourceResult>, (StatusCode, String)> {
+    let result = state
         .mcp
         .read_resource(&server_id, &req.uri)
         .await
         .map_err(mcp_error)?;
-    Ok(Json(content))
+    Ok(Json(result))
 }
 
 /// POST /api/v1/mcp/servers/{server_id}/fetch-ui-resource

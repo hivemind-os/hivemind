@@ -149,6 +149,9 @@ pub struct McpCallToolResult {
     pub content: String,
     #[serde(alias = "isError")]
     pub is_error: bool,
+    /// Full raw MCP CallToolResult JSON (for MCP Apps structured forwarding).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +161,24 @@ pub struct McpConnectedTool {
     #[serde(alias = "channelClass")]
     pub channel_class: ChannelClass,
     pub tool: McpToolInfo,
+}
+
+/// Result of reading an MCP resource, with structured content items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpReadResourceResult {
+    pub contents: Vec<McpResourceContent>,
+}
+
+/// A single content item from an MCP resource read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResourceContent {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "mimeType")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
