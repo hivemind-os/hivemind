@@ -18,6 +18,9 @@ pub struct Tool {
     pub description: Cow<'static, str>,
     /// A JSON Schema object defining the expected parameters for the tool
     pub input_schema: Arc<JsonObject>,
+    /// Optional metadata including UI extension info
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 impl Tool {
@@ -32,6 +35,7 @@ impl Tool {
             name: name.into(),
             description: description.into(),
             input_schema: input_schema.into(),
+            meta: None,
         }
     }
 

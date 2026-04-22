@@ -318,3 +318,86 @@ pub(crate) async fn install_mcp_runtime(
     let snapshot = state.mcp.connect(&server_id).await.map_err(mcp_error)?;
     Ok(Json(snapshot))
 }
+
+// ── MCP App endpoints ───────────────────────────────────────────────
+
+/// POST /api/v1/mcp/servers/{server_id}/call-tool
+///
+/// Call a tool on an MCP server. Used by MCP Apps to proxy tool calls.
+#[derive(Deserialize)]
+pub(crate) struct CallToolRequest {
+    pub name: String,
+    pub arguments: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct CallToolResponse {
+    pub content: String,
+    pub is_error: bool,
+}
+
+pub(crate) async fn call_mcp_tool(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<CallToolRequest>,
+) -> Result<Json<CallToolResponse>, (StatusCode, String)> {
+    let args: serde_json::Map<String, serde_json::Value> = match req.arguments {
+        Some(serde_json::Value::Object(map)) => map,
+        Some(_) => return Err((StatusCode::BAD_REQUEST, "arguments must be an object".into())),
+        None => serde_json::Map::new(),
+    };
+    let result = state
+        .mcp
+        .call_tool(&server_id, &req.name, args)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(CallToolResponse {
+        content: result.content,
+        is_error: result.is_error,
+    }))
+}
+
+/// POST /api/v1/mcp/servers/{server_id}/read-resource
+///
+/// Read a resource from an MCP server. Used by MCP Apps to proxy resource reads.
+#[derive(Deserialize)]
+pub(crate) struct ReadResourceRequest {
+    pub uri: String,
+}
+
+pub(crate) async fn read_mcp_resource(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<ReadResourceRequest>,
+) -> Result<Json<String>, (StatusCode, String)> {
+    let content = state
+        .mcp
+        .read_resource(&server_id, &req.uri)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(content))
+}
+
+/// POST /api/v1/mcp/servers/{server_id}/fetch-ui-resource
+///
+/// Fetch an MCP App UI resource (ui:// scheme) with caching.
+#[derive(Deserialize)]
+pub(crate) struct FetchUiResourceRequest {
+    pub uri: String,
+}
+
+pub(crate) async fn fetch_mcp_ui_resource(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<FetchUiResourceRequest>,
+) -> Result<Json<hive_mcp::McpAppResource>, (StatusCode, String)> {
+    // Ensure the server is connected — UI resources require a live session
+    // because they're fetched via the MCP resources/read protocol call.
+    state.mcp.ensure_connected(&server_id).await.map_err(mcp_error)?;
+    let resource = state
+        .mcp
+        .fetch_ui_resource(&server_id, &req.uri, None)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(resource))
+}

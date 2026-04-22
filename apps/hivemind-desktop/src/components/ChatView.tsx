@@ -1,6 +1,7 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, createResource } from 'solid-js';
 import type { Accessor, Setter } from 'solid-js';
 import { useTimerCleanup } from '~/lib/useTimerCleanup';
+import { authFetch } from '~/lib/authFetch';
 import SpatialCanvas from '../SpatialCanvas';
 import type { ActivityItem } from '../stores/streamingStore';
 import type {
@@ -13,6 +14,7 @@ import type {
   InstalledSkill,
   WorkflowDefinitionSummary,
   WorkflowInstanceSummary,
+  McpToolInfo,
 } from '../types';
 import { formatTime, renderMarkdown, riskClass, statusClass } from '../utils';
 import { CheckCircle, XCircle, Radio, Brain, Lock, Wrench, Tag, Target, MessageCircle, Shield, ClipboardList, MessageSquare, Pause, Square, Play, Hourglass, RefreshCw, Settings, Paperclip, Zap, BarChart3, ChevronDown, ChevronRight, GitBranch, BookOpen, Info, FileText } from 'lucide-solid';
@@ -23,6 +25,7 @@ import { Dialog, DialogBody, DialogContent, DialogFooter, Button, Badge, Card, C
 import { Popover, PopoverTrigger, PopoverContent } from '~/ui/popover';
 import WorkflowLauncher, { extractManualTriggers } from './shared/WorkflowLauncher';
 import PromptParameterDialog from './shared/PromptParameterDialog';
+import McpAppView from './McpAppView';
 
 export interface ChatWorkflowEvent {
   topic: string;
@@ -106,6 +109,9 @@ export interface ChatViewProps {
   fetchParsedWorkflow: (name: string) => Promise<{ definition: any } | null>;
   // @-mention workspace file references
   workspaceFiles?: Accessor<any[]>;
+  // MCP App integration: map of "serverId::toolName" → McpToolInfo for tools with UI
+  mcpAppTools?: Accessor<Map<string, import('../types').McpToolInfo & { server_id: string }>>;
+  daemonUrl?: Accessor<string | undefined>;
 }
 
 const ChatView = (props: ChatViewProps) => {
@@ -849,6 +855,63 @@ const ChatView = (props: ChatViewProps) => {
                               )}
                             </For>
                           </ul>
+                        </Show>
+
+                        {/* Inline MCP App views — auto-rendered for tools with UI resources */}
+                        <Show when={props.mcpAppTools && props.daemonUrl}>
+                          <For each={(props.toolCallHistory()[message.id] ?? []).filter(tc => {
+                            const match = tc.tool_id.match(/^mcp\.(.+?)\.(.+)$/);
+                            if (!match) return false;
+                            return props.mcpAppTools!().has(`${match[1]}::${match[2]}`);
+                          })}>
+                            {(tc) => {
+                              const match = tc.tool_id.match(/^mcp\.(.+?)\.(.+)$/)!;
+                              const serverId = match[1];
+                              const toolName = match[2];
+                              const mcpTool = () => props.mcpAppTools!().get(`${serverId}::${toolName}`);
+                              const [appHtml, setAppHtml] = createSignal<string | null>(null);
+
+                              createEffect(() => {
+                                const uri = mcpTool()?.ui_meta?.resource_uri;
+                                const daemonUrl = props.daemonUrl?.();
+                                if (!uri || !daemonUrl) return;
+                                void (async () => {
+                                  try {
+                                    const resp = await authFetch(`${daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(serverId)}/fetch-ui-resource`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ uri }),
+                                    });
+                                    if (resp.ok) {
+                                      const resource = await resp.json() as { html: string; uri: string };
+                                      setAppHtml(resource.html);
+                                    }
+                                  } catch (e) {
+                                    console.warn('[MCP App] Failed to fetch UI resource:', e);
+                                  }
+                                })();
+                              });
+
+                              return (
+                                <Show when={appHtml()}>
+                                  {(html) => (
+                                    <McpAppView
+                                      html={html()}
+                                      serverId={serverId}
+                                      toolName={toolName}
+                                      toolInput={tc.input}
+                                      toolOutput={tc.output}
+                                      toolIsError={tc.isError}
+                                      sessionId={props.selectedSessionId() ?? ''}
+                                      daemonUrl={props.daemonUrl?.() ?? ''}
+                                      uiMeta={mcpTool()?.ui_meta}
+                                      theme="dark"
+                                    />
+                                  )}
+                                </Show>
+                              );
+                            }}
+                          </For>
                         </Show>
                       </Show>
 
@@ -1644,7 +1707,45 @@ const ChatView = (props: ChatViewProps) => {
     >
       <DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto" style="overflow-x:hidden;">
       <Show when={popupToolCall()}>
-        {(tc) => (<>
+        {(tc) => {
+            // Parse MCP tool ID: "mcp.{serverId}.{toolName}"
+            const mcpMatch = () => tc().tool_id.match(/^mcp\.(.+?)\.(.+)$/);
+            const serverId = () => mcpMatch()?.[1];
+            const toolName = () => mcpMatch()?.[2];
+
+            // Check if this tool has an MCP App UI
+            const toolUiMeta = () => {
+              if (!props.mcpAppTools || !serverId() || !toolName()) return undefined;
+              const entry = props.mcpAppTools().get(`${serverId()}::${toolName()}`);
+              return entry?.ui_meta;
+            };
+            const uiResourceUri = () => toolUiMeta()?.resource_uri;
+
+            // Fetch the UI resource HTML when the popup opens
+            const [appHtml, setAppHtml] = createSignal<string | null>(null);
+            createEffect(() => {
+              const uri = uiResourceUri();
+              const sid = serverId();
+              const daemonUrl = props.daemonUrl?.();
+              if (!uri || !sid || !daemonUrl) return;
+              void (async () => {
+                try {
+                  const resp = await authFetch(`${daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(sid)}/fetch-ui-resource`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uri }),
+                  });
+                  if (resp.ok) {
+                    const resource = await resp.json() as { html: string };
+                    setAppHtml(resource.html);
+                  }
+                } catch (e) {
+                  console.warn('[MCP App] Failed to fetch UI resource:', e);
+                }
+              })();
+            });
+
+            return (<>
             <header class="mb-3 flex items-center gap-2">
               <span class={`text-lg ${tc().isError ? 'text-destructive' : 'text-green-400'}`}>{tc().isError ? '✗' : '✓'}</span>
               <h3 class="flex-1 text-sm font-semibold text-foreground">{tc().label}</h3>
@@ -1653,23 +1754,45 @@ const ChatView = (props: ChatViewProps) => {
               </Show>
               <Button variant="ghost" size="icon" class="size-8" onClick={() => setPopupToolCall(null)} aria-label="Close">✕</Button>
             </header>
-            <div class="space-y-3" style="min-width:0;overflow:hidden;">
-              <Show when={tc().input}>
-                <div style="min-width:0;">
-                  <span class="mb-1 block text-xs font-medium text-muted-foreground">Input</span>
-                  <pre class="rounded border border-border bg-muted/30 p-2 text-xs" style="overflow-x:auto;overflow-y:auto;max-height:35vh;white-space:pre;word-break:normal;" innerHTML={highlightYaml(tc().input!)} />
-                </div>
-              </Show>
-              <Show when={tc().output}>
-                <div style="min-width:0;">
-                  <span class="mb-1 block text-xs font-medium text-muted-foreground">Output</span>
-                  <pre class="rounded border border-border bg-muted/30 p-2 text-xs" style="overflow-x:auto;overflow-y:auto;max-height:35vh;white-space:pre;word-break:normal;" innerHTML={highlightYaml(
-                    tc().output!.length > 4000 ? tc().output!.slice(0, 4000) + '\n… (truncated)' : tc().output!
-                  )} />
-                </div>
-              </Show>
-            </div>
-        </>)}
+
+            {/* MCP App view (when available) */}
+            <Show when={appHtml() && serverId()}>
+              {(html) => (
+                <McpAppView
+                  html={appHtml()!}
+                  serverId={serverId()!}
+                  toolName={toolName()!}
+                  toolInput={tc().input}
+                  toolOutput={tc().output}
+                  toolIsError={tc().isError}
+                  sessionId={props.selectedSessionId() ?? ''}
+                  daemonUrl={props.daemonUrl?.() ?? ''}
+                  uiMeta={toolUiMeta()}
+                  theme="dark"
+                />
+              )}
+            </Show>
+
+            {/* Standard tool I/O (shown when no app, or as fallback) */}
+            <Show when={!appHtml()}>
+              <div class="space-y-3" style="min-width:0;overflow:hidden;">
+                <Show when={tc().input}>
+                  <div style="min-width:0;">
+                    <span class="mb-1 block text-xs font-medium text-muted-foreground">Input</span>
+                    <pre class="rounded border border-border bg-muted/30 p-2 text-xs" style="overflow-x:auto;overflow-y:auto;max-height:35vh;white-space:pre;word-break:normal;" innerHTML={highlightYaml(tc().input!)} />
+                  </div>
+                </Show>
+                <Show when={tc().output}>
+                  <div style="min-width:0;">
+                    <span class="mb-1 block text-xs font-medium text-muted-foreground">Output</span>
+                    <pre class="rounded border border-border bg-muted/30 p-2 text-xs" style="overflow-x:auto;overflow-y:auto;max-height:35vh;white-space:pre;word-break:normal;" innerHTML={highlightYaml(
+                      tc().output!.length > 4000 ? tc().output!.slice(0, 4000) + '\n… (truncated)' : tc().output!
+                    )} />
+                  </div>
+                </Show>
+              </div>
+            </Show>
+        </>);}}
       </Show>
       </DialogContent>
     </Dialog>

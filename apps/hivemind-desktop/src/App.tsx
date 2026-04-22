@@ -122,6 +122,9 @@ const App = () => {
   const [mcpTools, setMcpTools] = createSignal<McpToolInfo[]>([]);
   const [mcpResources, setMcpResources] = createSignal<McpResourceInfo[]>([]);
   const [mcpPrompts, setMcpPrompts] = createSignal<McpPromptInfo[]>([]);
+  // Aggregated MCP App tools from all connected servers (for inline rendering).
+  // Maps "serverId::toolName" → McpToolInfo for tools that have ui_meta.
+  const [mcpAppTools, setMcpAppTools] = createSignal<Map<string, McpToolInfo & { server_id: string }>>(new Map());
   const [mcpNotifications, setMcpNotifications] = createSignal<McpNotificationEvent[]>([]);
   const [mcpServerLogs, setMcpServerLogs] = createSignal<McpServerLog[]>([]);
   const [mcpLogsServerId, setMcpLogsServerId] = createSignal<string | null>(null);
@@ -948,9 +951,41 @@ const App = () => {
   const loadMcpServers = async () => {
     if (!daemonOnline()) {
       setMcpServers([]);
+      setMcpAppTools(new Map());
       return;
     }
-    setMcpServers(await invoke<McpServerSnapshot[]>('mcp_list_servers'));
+    const servers = await invoke<McpServerSnapshot[]>('mcp_list_servers');
+    setMcpServers(servers);
+    // Load MCP App tools from all connected servers for inline rendering
+    try {
+      await loadMcpAppTools(servers);
+    } catch (e) {
+      console.error('[MCP App] loadMcpAppTools crashed:', e);
+    }
+  };
+
+  /** Fetch tools from all enabled MCP servers and index those with ui_meta.
+   *  Uses the API which falls back to the catalog cache for disconnected servers. */
+  const loadMcpAppTools = async (servers: McpServerSnapshot[]) => {
+    const eligible = servers.filter(s => s.enabled);
+    if (eligible.length === 0) { setMcpAppTools(new Map()); return; }
+    const results = await Promise.allSettled(
+      eligible.map(s => invoke<McpToolInfo[]>('mcp_list_tools', { server_id: s.id }).then(tools => ({ server_id: s.id, tools }))),
+    );
+    const map = new Map<string, McpToolInfo & { server_id: string }>();
+    for (const r of results) {
+      if (r.status !== 'fulfilled') {
+        console.warn('[MCP App] failed:', (r as PromiseRejectedResult).reason);
+        continue;
+      }
+      console.log(`[MCP App] "${r.value.server_id}":`, r.value.tools.filter(t => t.ui_meta).length, 'tools with UI');
+      for (const tool of r.value.tools) {
+        if (tool.ui_meta?.resource_uri) {
+          map.set(`${r.value.server_id}::${tool.name}`, { ...tool, server_id: r.value.server_id });
+        }
+      }
+    }
+    setMcpAppTools(map);
   };
 
   const loadMcpNotifications = async () => {
@@ -3354,6 +3389,8 @@ const App = () => {
                   onKillChatWorkflow={killChatWorkflow}
                   onRespondWorkflowGate={respondWorkflowGate}
                   fetchParsedWorkflow={(name) => workflowStore.getDefinitionParsed(name)}
+                  mcpAppTools={mcpAppTools}
+                  daemonUrl={() => context()?.daemon_url}
                 />
               </div>
 
