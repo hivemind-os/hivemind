@@ -52,10 +52,10 @@ export interface McpAppBridgeConfig {
   sessionId: string;
   daemonUrl: string;
   theme: 'light' | 'dark';
-  /** Current display mode */
-  displayMode?: 'inline' | 'popout';
+  /** Current display mode (spec: inline | fullscreen | pip) */
+  displayMode?: 'inline' | 'fullscreen' | 'pip';
   /** Available display modes */
-  availableDisplayModes?: string[];
+  availableDisplayModes?: ('inline' | 'fullscreen' | 'pip')[];
   /** Container dimensions (width × height in px) */
   containerWidth?: number;
   containerHeight?: number;
@@ -150,9 +150,9 @@ export class McpAppBridge {
     }
   }
 
-  /** Update display mode (e.g. inline → popout). */
-  updateDisplayMode(mode: string): void {
-    this.config.displayMode = mode as 'inline' | 'popout';
+  /** Update display mode (e.g. inline → fullscreen). */
+  updateDisplayMode(mode: 'inline' | 'fullscreen' | 'pip'): void {
+    this.config.displayMode = mode;
     if (this.initialized) {
       this.sendHostContextChanged({ displayMode: mode });
     }

@@ -37,7 +37,7 @@ export interface McpAppViewProps {
   /** Current theme */
   theme?: 'light' | 'dark';
   /** Display mode for this view */
-  displayMode?: 'inline' | 'popout';
+  displayMode?: 'inline' | 'fullscreen' | 'pip';
   /** Tool visibility list */
   toolVisibility?: string[];
   /** Callback when app requests to inject a message */

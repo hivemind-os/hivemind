@@ -1807,7 +1807,7 @@ const ChatView = (props: ChatViewProps) => {
                   daemonUrl={props.daemonUrl?.() ?? ''}
                   uiMeta={toolUiMeta()}
                   theme="dark"
-                  displayMode="popout"
+                  displayMode="fullscreen"
                 />
               )}
             </Show>
