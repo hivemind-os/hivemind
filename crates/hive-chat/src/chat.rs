@@ -3697,6 +3697,7 @@ impl ChatService {
             .get_mut(session_id)
             .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
         record.app_tools.insert(app_instance_id.to_string(), tools);
+        record.supervisor = None;
         Ok(())
     }
 
@@ -3709,6 +3710,7 @@ impl ChatService {
         let mut sessions = self.sessions.write().await;
         if let Some(record) = sessions.get_mut(session_id) {
             record.app_tools.remove(app_instance_id);
+            record.supervisor = None;
         }
         Ok(())
     }

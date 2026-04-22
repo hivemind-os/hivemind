@@ -2442,11 +2442,13 @@ const App = () => {
                   const argsSoFar = inner.arguments_so_far ?? '';
                   if (deltaToolName && argsSoFar) {
                     for (const bridge of appBridgeRegistry.values()) {
-                      // Match: delta tool name contains the bridge's tool name
-                      // (provider sanitizes names, e.g. "get-time" → "get-time")
+                      // Match on the full sanitized tool ID pattern:
+                      // MCP server tools: mcp_{serverId}_{toolName}
+                      // App-registered tools: app.{instanceId}.{toolName}
+                      const mcpPrefix = `mcp_${bridge.serverId}_${bridge.toolName}`;
                       if (deltaToolName === bridge.toolName ||
-                          deltaToolName.includes(bridge.toolName) ||
-                          deltaToolName.includes(bridge.serverId)) {
+                          deltaToolName === mcpPrefix ||
+                          deltaToolName.startsWith(mcpPrefix + '_')) {
                         bridge.sendToolInputPartial(argsSoFar);
                       }
                     }

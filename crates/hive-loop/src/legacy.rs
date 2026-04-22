@@ -1059,7 +1059,7 @@ impl LoopStrategy for ReActStrategy {
                                 // tools like core_ask_user avoids flooding the event log.
                                 for d in &chunk.tool_call_arg_deltas {
                                     let is_mcp_tool = d.name.as_deref()
-                                        .map(|n| n.starts_with("mcp_") || n.starts_with("mcp."))
+                                        .map(|n| n.starts_with("mcp_") || n.starts_with("mcp.") || n.starts_with("app."))
                                         .unwrap_or(false);
                                     if is_mcp_tool {
                                         let _ = tx.try_send(LoopEvent::ToolCallArgDelta {

@@ -10,6 +10,18 @@
 import { authFetch } from '~/lib/authFetch';
 import { openExternal } from '../utils';
 
+/** Sanitize a filename from an untrusted URI to prevent directory traversal. */
+function sanitizeDownloadFilename(raw: string): string {
+  // Decode any URL-encoded characters first
+  let name: string;
+  try { name = decodeURIComponent(raw); } catch { name = raw; }
+  // Strip path separators and traversal components
+  name = name.replace(/[/\\]/g, '_').replace(/\.\./g, '_');
+  // Remove leading dots (hidden files) and trim whitespace
+  name = name.replace(/^\.+/, '').trim();
+  return name || 'download';
+}
+
 // ── JSON-RPC types ──────────────────────────────────────────────────
 
 interface JsonRpcRequest {
@@ -473,7 +485,7 @@ export class McpAppBridge {
         if (item.type === 'resource' && item.resource && typeof item.resource === 'object') {
           const res = item.resource as Record<string, unknown>;
           const uri = (res.uri as string) ?? 'download';
-          const filename = uri.split('/').pop() ?? 'download';
+          const filename = sanitizeDownloadFilename(uri.split('/').pop() ?? 'download');
 
           const path = `downloads/${filename}`;
           if (typeof res.blob === 'string') {
@@ -488,7 +500,7 @@ export class McpAppBridge {
         // ResourceLink: has a uri to fetch
         else if (item.type === 'resource_link' && typeof item.uri === 'string') {
           const uri = item.uri as string;
-          const filename = uri.split('/').pop() ?? 'download';
+          const filename = sanitizeDownloadFilename(uri.split('/').pop() ?? 'download');
           try {
             const resp = await authFetch(
               `${this.config.daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(this.config.serverId)}/read-resource`,

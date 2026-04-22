@@ -56,25 +56,50 @@ export interface McpAppViewProps {
   onDestroy?: (appInstanceId: string) => void;
 }
 
+/** Sanitize a CSP domain value — only allow valid hostnames, schemes, and CSP keywords. */
+function sanitizeCspValue(value: string): string | null {
+  const trimmed = value.trim();
+  // Allow CSP keywords like 'self', 'none', 'unsafe-inline', 'unsafe-eval'
+  if (/^'[a-z-]+'$/.test(trimmed)) return trimmed;
+  // Allow wildcard
+  if (trimmed === '*') return trimmed;
+  // Allow scheme + host patterns (e.g., https://example.com, http://localhost:*, *.example.com)
+  if (/^[a-z][a-z0-9+.-]*:\/\/[a-z0-9.*:-]+$/i.test(trimmed)) return trimmed;
+  // Allow bare hostnames/wildcards (e.g., example.com, *.cdn.net)
+  if (/^[a-z0-9*][a-z0-9.*:-]*$/i.test(trimmed)) return trimmed;
+  // Reject anything else (quotes, angle brackets, semicolons, etc.)
+  return null;
+}
+
+/** Sanitize an array of CSP domain values, dropping invalid entries. */
+function sanitizeCspDomains(domains: string[] | undefined): string[] {
+  if (!domains?.length) return [];
+  return domains.map(sanitizeCspValue).filter((v): v is string => v !== null);
+}
+
 /** Default restrictive CSP for MCP Apps with no declared CSP. */
 function buildCspMeta(uiMeta?: McpToolUiMeta): string {
   if (!uiMeta?.csp) {
     return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; connect-src 'none';">`;
   }
   const csp = uiMeta.csp;
+  const connectDomains = sanitizeCspDomains(csp.connect_domains);
+  const resourceDomains = sanitizeCspDomains(csp.resource_domains);
+  const frameDomains = sanitizeCspDomains(csp.frame_domains);
+  const baseUriDomains = sanitizeCspDomains(csp.base_uri_domains);
+
   const parts: string[] = ["default-src 'none'", "object-src 'none'"];
-  const connectSrc = csp.connect_domains?.length ? csp.connect_domains.join(' ') : "'none'";
-  parts.push(`connect-src ${connectSrc}`);
-  parts.push("script-src 'self' 'unsafe-inline' 'unsafe-eval'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("style-src 'self' 'unsafe-inline'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("img-src 'self' data: blob:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("media-src 'self' data: blob:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("font-src 'self' data:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  if (csp.frame_domains?.length) {
-    parts.push(`frame-src ${csp.frame_domains.join(' ')}`);
+  parts.push(`connect-src ${connectDomains.length ? connectDomains.join(' ') : "'none'"}`);
+  parts.push("script-src 'self' 'unsafe-inline' 'unsafe-eval'" + (resourceDomains.length ? ' ' + resourceDomains.join(' ') : ''));
+  parts.push("style-src 'self' 'unsafe-inline'" + (resourceDomains.length ? ' ' + resourceDomains.join(' ') : ''));
+  parts.push("img-src 'self' data: blob:" + (resourceDomains.length ? ' ' + resourceDomains.join(' ') : ''));
+  parts.push("media-src 'self' data: blob:" + (resourceDomains.length ? ' ' + resourceDomains.join(' ') : ''));
+  parts.push("font-src 'self' data:" + (resourceDomains.length ? ' ' + resourceDomains.join(' ') : ''));
+  if (frameDomains.length) {
+    parts.push(`frame-src ${frameDomains.join(' ')}`);
   }
-  if (csp.base_uri_domains?.length) {
-    parts.push(`base-uri ${csp.base_uri_domains.join(' ')}`);
+  if (baseUriDomains.length) {
+    parts.push(`base-uri ${baseUriDomains.join(' ')}`);
   }
   return `<meta http-equiv="Content-Security-Policy" content="${parts.join('; ')}">`;
 }
