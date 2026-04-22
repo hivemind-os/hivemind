@@ -17,6 +17,12 @@ Every piece of data flowing through HiveMind OS carries a label:
 
 Data gets classified automatically — regex patterns catch API keys, GitHub tokens, private keys, and email addresses at ingestion. Source-based rules apply too (anything from `~/.ssh/` is automatically 🔴 RESTRICTED). You can also tag content manually.
 
+## Workspace Files and Manual Overrides
+
+In the **Workspace** panel, you can right-click any file or folder and set its classification override to `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, or `RESTRICTED`. If you change your mind later, use **Clear Override** to fall back to automatic/source-based classification.
+
+That label is not just cosmetic. When an agent reads that file, the classification travels with the content through the rest of the system — memory extraction, tool calls, MCP requests, messaging connectors, and other outbound actions all respect the file's effective classification. If a tool would send that content to a lower-trust channel, HiveMind OS will block it, prompt you, or redact it based on your override policy.
+
 ## Channel Classification
 
 Every outbound channel — an MCP server, a messaging connector, a peer connection — has its own classification level:

@@ -33,6 +33,17 @@ mcp_servers:
 
 Data inherits its classification from its source — clipboard from a password manager is `RESTRICTED`, a public web page is `PUBLIC`. The knowledge graph propagates the **highest** ancestor classification to child nodes. You can also manually tag any snippet or node.
 
+### Changing a workspace file's classification
+
+You can also set a classification directly from the desktop app:
+
+1. Open the **Workspace** browser for your session
+2. Right-click a file or folder
+3. Under **Classification**, choose `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, or `RESTRICTED`
+4. Use **Clear Override** if you want to remove the manual setting
+
+This is useful when a file is more sensitive than its path or contents make obvious. Once set, that classification flows with the file content anywhere HiveMind OS uses it. If an agent reads a `RESTRICTED` document and then tries to pass part of it to a public MCP server, webhook, or connector, the classification gate applies your configured policy (`block`, `prompt`, `allow`, or `redact-and-send`) before the tool call is allowed to continue.
+
 ## Configuring Override Policies
 
 When data would cross a classification boundary, the `override_policy` controls what happens:

@@ -71,7 +71,7 @@ Every knowledge node inherits the **data classification** of the conversation it
 This means a fact learned in a `RESTRICTED` session will never leak to a `PUBLIC` provider — classification travels with the knowledge automatically.
 
 ::: warning
-If a workspace is classified as `RESTRICTED`, all facts remembered inside it inherit that classification. Review workspace classification in **Settings → Workspace → Classification**.
+If a workspace is classified as `RESTRICTED`, all facts remembered inside it inherit that classification. Review workspace classification in **Settings → Workspace → Classification**, or right-click specific files/folders in the **Workspace** browser to set a manual classification override.
 :::
 
 ## Agent Kits
