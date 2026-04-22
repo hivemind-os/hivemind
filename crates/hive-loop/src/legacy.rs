@@ -941,6 +941,12 @@ impl LoopStrategy for ReActStrategy {
             // Adaptive tool-call budget
             let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
 
+            // Track consecutive rounds where the only tool call is core.ask_user.
+            // After a threshold, inject a hint telling the LLM to produce a final
+            // text response instead of asking yet another question.
+            let mut consecutive_question_only_rounds: usize = 0;
+            const MAX_CONSECUTIVE_QUESTION_ROUNDS: usize = 3;
+
             loop {
                 let mut request = CompletionRequest {
                     prompt: prompt.clone(),
@@ -1195,6 +1201,26 @@ impl LoopStrategy for ReActStrategy {
                     // limit reflects actual work done. Exempt polling/status tools.
                     tool_iterations +=
                         detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
+
+                    // Track consecutive question-only rounds to prevent infinite
+                    // ask_user loops where the LLM keeps asking questions without
+                    // producing a meaningful response.
+                    let all_questions = detected_calls
+                        .iter()
+                        .all(|c| c.tool_id == "core.ask_user");
+                    if all_questions {
+                        consecutive_question_only_rounds += 1;
+                    } else {
+                        consecutive_question_only_rounds = 0;
+                    }
+                    if consecutive_question_only_rounds >= MAX_CONSECUTIVE_QUESTION_ROUNDS {
+                        prompt = format!(
+                            "{prompt}\n\n[System: You have asked the user {} consecutive questions. \
+                             Please produce a final text response now instead of asking another question. \
+                             Summarize what you know and offer to help further.]",
+                            consecutive_question_only_rounds,
+                        );
+                    }
 
                     if let Some(ref journal) = context.conversation.conversation_journal {
                         let mut j = journal.lock();
