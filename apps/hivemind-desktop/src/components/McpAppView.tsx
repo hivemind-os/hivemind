@@ -18,6 +18,8 @@ export interface McpAppViewProps {
   toolName: string;
   /** Tool input JSON */
   toolInput?: string;
+  /** Partial/streaming tool input JSON (before final input arrives) */
+  toolInputPartial?: string;
   /** Tool output text */
   toolOutput?: string;
   /** Whether tool result was an error */
@@ -155,6 +157,14 @@ export default function McpAppView(props: McpAppViewProps) {
         setLoading(false);
       },
     });
+  });
+
+  // Send partial tool input as it streams in (without recreating the bridge)
+  createEffect(() => {
+    const partial = props.toolInputPartial;
+    if (partial && bridge) {
+      bridge.sendToolInputPartial(partial);
+    }
   });
 
   onCleanup(() => {

@@ -113,6 +113,13 @@ export class McpAppBridge {
     });
   }
 
+  /** Send partial/streaming tool input before the final tool-input. */
+  sendToolInputPartial(partialInput: string): void {
+    this.sendNotification('ui/notifications/tool-input-partial', {
+      arguments: tryParseJson(partialInput) ?? {},
+    });
+  }
+
   /** Send tool result to the app (full CallToolResult shape). */
   sendToolResult(output: string, isError?: boolean, rawResult?: unknown): void {
     // If we have the raw MCP result, forward it as-is (preserves structuredContent, _meta, multi-block content)
@@ -212,8 +219,14 @@ export class McpAppBridge {
       case 'resources/read':
         return this.handleResourcesRead(params as { uri: string });
 
+      case 'resources/list':
+        return this.handleResourcesList();
+
       case 'ui/open-link':
         return this.handleOpenLink(params as { url: string });
+
+      case 'ui/download-file':
+        return this.handleDownloadFile(params as { contents: Array<Record<string, unknown>> });
 
       case 'ui/message':
         return this.handleUiMessage(params as { role: string; content: Array<{ type: string; text?: string }> });
@@ -285,6 +298,7 @@ export class McpAppBridge {
       },
       hostCapabilities: {
         openLinks: {},
+        downloadFile: {},
         serverTools: {},
         serverResources: {},
         logging: {},
@@ -336,6 +350,100 @@ export class McpAppBridge {
     );
     if (!resp.ok) throw new Error(`Resource read failed: ${resp.status}`);
     return await resp.json();
+  }
+
+  private async handleResourcesList(): Promise<unknown> {
+    const resp = await authFetch(
+      `${this.config.daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(this.config.serverId)}/resources`,
+    );
+    if (!resp.ok) throw new Error(`Resource list failed: ${resp.status}`);
+    const resources = await resp.json();
+    // Daemon returns an array; MCP spec expects { resources: [...] }
+    return { resources: Array.isArray(resources) ? resources : [] };
+  }
+
+  private async handleDownloadFile(params: { contents: Array<Record<string, unknown>> }): Promise<Record<string, unknown>> {
+    try {
+      for (const item of params.contents ?? []) {
+        // EmbeddedResource: has blob (base64) or text content inline
+        if (item.type === 'resource' && item.resource && typeof item.resource === 'object') {
+          const res = item.resource as Record<string, unknown>;
+          const uri = (res.uri as string) ?? 'download';
+          const filename = uri.split('/').pop() ?? 'download';
+          const mimeType = (res.mimeType as string) ?? 'application/octet-stream';
+
+          let blob: Blob;
+          if (typeof res.blob === 'string') {
+            // Base64-encoded binary data
+            const binary = atob(res.blob as string);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            blob = new Blob([bytes], { type: mimeType });
+          } else if (typeof res.text === 'string') {
+            blob = new Blob([res.text as string], { type: mimeType });
+          } else {
+            continue;
+          }
+
+          // Trigger download via temporary anchor in the main window
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        // ResourceLink: has a uri to fetch
+        else if (item.type === 'resource_link' && typeof item.uri === 'string') {
+          const uri = item.uri as string;
+          const filename = uri.split('/').pop() ?? 'download';
+          // Fetch via MCP server resource read
+          try {
+            const resp = await authFetch(
+              `${this.config.daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(this.config.serverId)}/read-resource`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uri }),
+              },
+            );
+            if (resp.ok) {
+              const data = await resp.json() as { contents?: Array<{ text?: string; blob?: string; mimeType?: string }> };
+              const content = data.contents?.[0];
+              if (content) {
+                const mimeType = content.mimeType ?? 'application/octet-stream';
+                let blob: Blob;
+                if (content.blob) {
+                  const binary = atob(content.blob);
+                  const bytes = new Uint8Array(binary.length);
+                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                  blob = new Blob([bytes], { type: mimeType });
+                } else if (content.text) {
+                  blob = new Blob([content.text], { type: mimeType });
+                } else {
+                  continue;
+                }
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }
+            }
+          } catch {
+            // Skip failed resource links
+          }
+        }
+      }
+      return {};
+    } catch (e: any) {
+      return { isError: true };
+    }
   }
 
   private async handleOpenLink(params: { url: string }): Promise<unknown> {
