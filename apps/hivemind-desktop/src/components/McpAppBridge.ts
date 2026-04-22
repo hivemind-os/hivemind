@@ -133,8 +133,12 @@ export class McpAppBridge {
 
   /** Send partial/streaming tool input before the final tool-input. */
   sendToolInputPartial(partialInput: string): void {
+    // partialInput is the accumulated argument string so far.
+    // Attempt to parse as JSON; if it fails (common during streaming),
+    // send the raw string so the app can do partial-JSON reconstruction.
+    const parsed = tryParseJson(partialInput);
     this.sendNotification('ui/notifications/tool-input-partial', {
-      arguments: tryParseJson(partialInput) ?? {},
+      arguments: parsed ?? partialInput,
     });
   }
 

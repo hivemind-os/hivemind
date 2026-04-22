@@ -124,6 +124,15 @@ pub enum ReasoningEvent {
         http_status: Option<u16>,
         backoff_ms: u64,
     },
+    /// Partial tool-call argument snapshot during LLM streaming.
+    ToolCallArgDelta {
+        index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
+        arguments_so_far: String,
+    },
 }
 
 /// Defines how a modality stores conversation data and assembles context.

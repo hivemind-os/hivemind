@@ -757,6 +757,13 @@ pub enum LoopEvent {
     StallWarning { tool_name: String, repeated_count: usize },
     /// The loop is yielding early because a new user message was enqueued.
     Preempted,
+    /// Partial tool-call argument snapshot during streaming.
+    ToolCallArgDelta {
+        index: usize,
+        call_id: Option<String>,
+        tool_name: Option<String>,
+        arguments_so_far: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -1045,6 +1052,15 @@ impl LoopStrategy for ReActStrategy {
                                     if !visible.is_empty() {
                                         let _ = tx.try_send(LoopEvent::Token { delta: visible });
                                     }
+                                }
+                                // Emit partial tool-call argument snapshots
+                                for d in &chunk.tool_call_arg_deltas {
+                                    let _ = tx.try_send(LoopEvent::ToolCallArgDelta {
+                                        index: d.index,
+                                        call_id: d.call_id.clone(),
+                                        tool_name: d.name.clone(),
+                                        arguments_so_far: d.arguments_so_far.clone(),
+                                    });
                                 }
                                 if !chunk.tool_calls.is_empty() {
                                     streamed_tool_calls.extend(chunk.tool_calls);

@@ -125,12 +125,8 @@ impl ModelProvider for ScriptProvider {
             delta: response.content,
             finish_reason: Some(finish_reason),
             tool_calls: response.tool_calls,
-        };
-        Ok(Box::pin(tokio_stream::once(Ok(chunk))))
-    }
-}
-
-// ── TestOrchestrator ────────────────────────────────────────────────────────
+            tool_call_arg_deltas: vec![],
+        };// ── TestOrchestrator ────────────────────────────────────────────────────────
 // Routes messages through the supervisor's send handle, mimicking the real
 // chat.rs orchestrator for inter-agent communication in tests.
 

@@ -9264,6 +9264,14 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 reason: "Turn preempted: a new user message is waiting".to_string(),
             }
         }
+        LoopEvent::ToolCallArgDelta { index, call_id, tool_name, arguments_so_far } => {
+            ReasoningEvent::ToolCallArgDelta {
+                index: *index,
+                call_id: call_id.clone(),
+                tool_name: tool_name.clone(),
+                arguments_so_far: arguments_so_far.clone(),
+            }
+        }
     }
 }
 

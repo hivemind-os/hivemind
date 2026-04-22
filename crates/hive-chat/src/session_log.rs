@@ -140,6 +140,9 @@ impl SessionLogger {
             LoopEvent::Preempted => {
                 self.log_loop("PREEMPTED turn yielded for new user message");
             }
+            LoopEvent::ToolCallArgDelta { .. } => {
+                // High-frequency streaming event — not logged.
+            }
         }
     }
 
@@ -357,9 +360,12 @@ fn format_reasoning_event(event: &ReasoningEvent) -> String {
                 "MODEL_RETRY provider={provider_id} model={model} attempt={attempt}/{max_attempts} kind={error_kind}{status_str} backoff={backoff_ms}ms"
             )
         }
+        ReasoningEvent::ToolCallArgDelta { .. } => {
+            // High-frequency streaming event — not logged to session summary.
+            return String::new();
+        }
     }
 }
-
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.replace('\n', "\\n")

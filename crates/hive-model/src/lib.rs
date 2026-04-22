@@ -215,6 +215,32 @@ pub struct CompletionChunk {
     /// is `ToolCalls`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallResponse>,
+    /// Partial tool-call argument snapshots emitted during streaming.
+    /// Each entry contains the accumulated arguments so far (not just the
+    /// latest fragment), so dropped messages are self-healing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_arg_deltas: Vec<ToolCallArgDelta>,
+}
+
+/// A snapshot of partially-streamed tool-call arguments.
+///
+/// Emitted during SSE streaming so downstream consumers can observe
+/// tool arguments as they are generated.  `arguments_so_far` contains
+/// the full accumulated argument string (not just the latest fragment)
+/// so that dropped messages don't corrupt the receiver's state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallArgDelta {
+    /// Tool-call index within the current response (stable for OpenAI;
+    /// positional for Anthropic).
+    pub index: usize,
+    /// Provider-assigned call ID (e.g. `call_abc123`), if known yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    /// Tool name, if known yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Full accumulated argument string so far (self-healing snapshot).
+    pub arguments_so_far: String,
 }
 
 /// Why the model stopped generating.
@@ -252,6 +278,7 @@ pub trait ModelProvider: Send + Sync {
             delta: response.content,
             finish_reason: Some(FinishReason::Stop),
             tool_calls: vec![],
+            tool_call_arg_deltas: vec![],
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }
@@ -1869,7 +1896,7 @@ fn parse_openai_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult
     let chunk = if delta_text.is_empty() && finish_reason.is_none() && tool_call_deltas.is_empty() {
         None
     } else {
-        Some(CompletionChunk { delta: delta_text, finish_reason, tool_calls: vec![] })
+        Some(CompletionChunk { delta: delta_text, finish_reason, tool_calls: vec![], tool_call_arg_deltas: vec![] })
     };
 
     Ok(SseParseResult { chunk, tool_call_deltas })
@@ -1932,6 +1959,7 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                     delta: delta_text.to_string(),
                     finish_reason: None,
                     tool_calls: vec![],
+                    tool_call_arg_deltas: vec![],
                 }),
                 tool_call_deltas: vec![],
             })
@@ -1954,6 +1982,7 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                         delta: String::new(),
                         finish_reason,
                         tool_calls: vec![],
+                        tool_call_arg_deltas: vec![],
                     }),
                     tool_call_deltas: vec![],
                 })
@@ -3588,6 +3617,7 @@ mod tests {
             delta: "Hello".to_string(),
             finish_reason: None,
             tool_calls: vec![],
+            tool_call_arg_deltas: vec![],
         };
         let json = serde_json::to_string(&chunk).unwrap();
         assert!(!json.contains("tool_calls"), "empty tool_calls should be skipped");
@@ -3605,6 +3635,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 arguments: serde_json::json!({"city": "London"}),
             }],
+            tool_call_arg_deltas: vec![],
         };
         let json = serde_json::to_string(&chunk).unwrap();
         let parsed: CompletionChunk = serde_json::from_str(&json).unwrap();

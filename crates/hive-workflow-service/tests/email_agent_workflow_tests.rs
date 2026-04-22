@@ -121,6 +121,7 @@ impl ModelProvider for ScriptProvider {
             delta: response.content,
             finish_reason: Some(FinishReason::Stop),
             tool_calls: response.tool_calls,
+            tool_call_arg_deltas: vec![],
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }

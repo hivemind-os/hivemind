@@ -2434,6 +2434,17 @@ const App = () => {
                     });
                   }
                   break;
+                case 'tool_call_arg_delta': {
+                  // Forward partial tool-call arguments to all active MCP app bridges.
+                  // Each bridge's sendToolInputPartial sends the snapshot to the iframe.
+                  const argsSoFar = inner.arguments_so_far ?? '';
+                  if (argsSoFar) {
+                    for (const bridge of appBridgeRegistry.values()) {
+                      bridge.sendToolInputPartial(argsSoFar);
+                    }
+                  }
+                  break;
+                }
               }
               break;
             }

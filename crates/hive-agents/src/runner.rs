@@ -896,6 +896,14 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 reason: "Turn preempted: a new user message is waiting".to_string(),
             }
         }
+        LoopEvent::ToolCallArgDelta { index, call_id, tool_name, arguments_so_far } => {
+            ReasoningEvent::ToolCallArgDelta {
+                index,
+                call_id,
+                tool_name,
+                arguments_so_far,
+            }
+        }
     }
 }
 
