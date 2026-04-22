@@ -780,6 +780,12 @@ pub struct CallToolResult {
     pub content: Vec<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
+    /// Structured data optimized for UI rendering (MCP Apps extension).
+    #[serde(rename = "structuredContent", skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<serde_json::Value>,
+    /// Additional metadata.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl CallToolResult {
@@ -787,12 +793,16 @@ impl CallToolResult {
         CallToolResult {
             content,
             is_error: Some(false),
+            structured_content: None,
+            meta: None,
         }
     }
     pub fn error(content: Vec<Content>) -> Self {
         CallToolResult {
             content,
             is_error: Some(true),
+            structured_content: None,
+            meta: None,
         }
     }
 }
