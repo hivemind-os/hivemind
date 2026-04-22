@@ -170,7 +170,7 @@ export default function McpAppView(props: McpAppViewProps) {
   return (
     <div
       ref={containerRef}
-      class="mcp-app-container relative mt-2 overflow-hidden rounded-lg"
+      class={`mcp-app-container relative mt-2 rounded-lg ${isFullscreen() ? 'overflow-auto' : 'overflow-hidden'}`}
       classList={{
         'border border-border': border(),
         'flex flex-col': isFullscreen(),
@@ -199,7 +199,7 @@ export default function McpAppView(props: McpAppViewProps) {
           </button>
         </Show>
       </div>
-      <div class="relative" style={isFullscreen() ? { flex: '1', 'min-height': '0', display: 'flex', 'flex-direction': 'column' } : undefined}>
+      <div class="relative" style={isFullscreen() ? { flex: '1', 'min-height': '0', display: 'flex', 'flex-direction': 'column', overflow: 'auto' } : undefined}>
         <Show when={loading()}>
           <div class="absolute inset-0 z-10 flex items-center justify-center bg-background/60 pointer-events-none">
             <div class="flex flex-col items-center gap-2">

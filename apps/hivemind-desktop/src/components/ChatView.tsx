@@ -1732,7 +1732,7 @@ const ChatView = (props: ChatViewProps) => {
       open={!!popupToolCall()}
       onOpenChange={(open) => { if (!open) setPopupToolCall(null); }}
     >
-      <DialogContent class="max-w-4xl max-h-[85vh] flex flex-col overflow-hidden" style="overflow-x:hidden;">
+      <DialogContent class="max-w-4xl max-h-[85vh] flex flex-col" style="overflow-x:hidden;overflow-y:auto;">
       <Show when={popupToolCall()}>
         {(tc) => {
             // Parse MCP tool ID: "mcp.{serverId}.{toolName}"
