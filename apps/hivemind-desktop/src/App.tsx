@@ -2435,12 +2435,20 @@ const App = () => {
                   }
                   break;
                 case 'tool_call_arg_delta': {
-                  // Forward partial tool-call arguments to all active MCP app bridges.
-                  // Each bridge's sendToolInputPartial sends the snapshot to the iframe.
+                  // Forward partial tool-call arguments only to the MCP app bridge
+                  // that matches this tool — NOT to all bridges (which would spam
+                  // unrelated apps with e.g. core_ask_user deltas).
+                  const deltaToolName = inner.tool_name ?? '';
                   const argsSoFar = inner.arguments_so_far ?? '';
-                  if (argsSoFar) {
+                  if (deltaToolName && argsSoFar) {
                     for (const bridge of appBridgeRegistry.values()) {
-                      bridge.sendToolInputPartial(argsSoFar);
+                      // Match: delta tool name contains the bridge's tool name
+                      // (provider sanitizes names, e.g. "get-time" → "get-time")
+                      if (deltaToolName === bridge.toolName ||
+                          deltaToolName.includes(bridge.toolName) ||
+                          deltaToolName.includes(bridge.serverId)) {
+                        bridge.sendToolInputPartial(argsSoFar);
+                      }
                     }
                   }
                   break;

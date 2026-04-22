@@ -110,6 +110,16 @@ export class McpAppBridge {
     return this.config.appInstanceId;
   }
 
+  /** The MCP tool name this bridge is bound to. */
+  get toolName(): string {
+    return this.config.toolName;
+  }
+
+  /** The MCP server ID this bridge is bound to. */
+  get serverId(): string {
+    return this.config.serverId;
+  }
+
   /** Clean up event listeners. Call before removing the iframe.
    *  Returns a promise that resolves after the app acknowledges teardown (or timeout). */
   async destroy(): Promise<void> {
