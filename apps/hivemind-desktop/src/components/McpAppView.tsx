@@ -149,13 +149,17 @@ export default function McpAppView(props: McpAppViewProps) {
   const border = () => props.uiMeta?.prefers_border !== false;
   const allowAttr = () => buildAllow(props.uiMeta);
 
+  const isFullscreen = () => props.displayMode === 'fullscreen';
+
   return (
     <div
       ref={containerRef}
       class="mcp-app-container mt-2 overflow-hidden rounded-lg"
       classList={{
         'border border-border': border(),
+        'flex flex-col': isFullscreen(),
       }}
+      style={isFullscreen() ? { height: 'calc(85vh - 80px)', 'min-height': '400px' } : undefined}
     >
       <div class="flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
         <span class="font-medium">⚡ {props.toolName}</span>
@@ -183,9 +187,10 @@ export default function McpAppView(props: McpAppViewProps) {
         allow={allowAttr()}
         style={{
           width: '100%',
-          height: `${iframeHeight()}px`,
+          height: isFullscreen() ? '100%' : `${iframeHeight()}px`,
           border: 'none',
           'background-color': 'transparent',
+          ...(isFullscreen() ? { flex: '1', 'min-height': '0' } : {}),
         }}
         title={`MCP App: ${props.toolName}`}
       />
