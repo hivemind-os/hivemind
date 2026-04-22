@@ -303,7 +303,11 @@ pub struct WorkspaceFileContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveFileRequest {
+    #[serde(default)]
     pub content: String,
+    /// Optional base64-encoded binary content. If present, takes precedence over `content`.
+    #[serde(default)]
+    pub content_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

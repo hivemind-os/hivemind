@@ -421,6 +421,7 @@ export class McpAppBridge {
   }
 
   private async handleDownloadFile(params: { contents: Array<Record<string, unknown>> }): Promise<Record<string, unknown>> {
+    const savedPaths: string[] = [];
     try {
       for (const item of params.contents ?? []) {
         // EmbeddedResource: has blob (base64) or text content inline
@@ -428,36 +429,21 @@ export class McpAppBridge {
           const res = item.resource as Record<string, unknown>;
           const uri = (res.uri as string) ?? 'download';
           const filename = uri.split('/').pop() ?? 'download';
-          const mimeType = (res.mimeType as string) ?? 'application/octet-stream';
 
-          let blob: Blob;
+          const path = `downloads/${filename}`;
           if (typeof res.blob === 'string') {
-            // Base64-encoded binary data
-            const binary = atob(res.blob as string);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            blob = new Blob([bytes], { type: mimeType });
+            await this.saveToWorkspace(path, undefined, res.blob as string);
           } else if (typeof res.text === 'string') {
-            blob = new Blob([res.text as string], { type: mimeType });
+            await this.saveToWorkspace(path, res.text as string, undefined);
           } else {
             continue;
           }
-
-          // Trigger download via temporary anchor in the main window
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+          savedPaths.push(path);
         }
         // ResourceLink: has a uri to fetch
         else if (item.type === 'resource_link' && typeof item.uri === 'string') {
           const uri = item.uri as string;
           const filename = uri.split('/').pop() ?? 'download';
-          // Fetch via MCP server resource read
           try {
             const resp = await authFetch(
               `${this.config.daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(this.config.serverId)}/read-resource`,
@@ -471,26 +457,15 @@ export class McpAppBridge {
               const data = await resp.json() as { contents?: Array<{ text?: string; blob?: string; mimeType?: string }> };
               const content = data.contents?.[0];
               if (content) {
-                const mimeType = content.mimeType ?? 'application/octet-stream';
-                let blob: Blob;
+                const path = `downloads/${filename}`;
                 if (content.blob) {
-                  const binary = atob(content.blob);
-                  const bytes = new Uint8Array(binary.length);
-                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                  blob = new Blob([bytes], { type: mimeType });
+                  await this.saveToWorkspace(path, undefined, content.blob);
                 } else if (content.text) {
-                  blob = new Blob([content.text], { type: mimeType });
+                  await this.saveToWorkspace(path, content.text, undefined);
                 } else {
                   continue;
                 }
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                savedPaths.push(path);
               }
             }
           } catch {
@@ -498,9 +473,31 @@ export class McpAppBridge {
           }
         }
       }
-      return {};
+      return { saved: savedPaths };
     } catch (e: any) {
       return { isError: true };
+    }
+  }
+
+  /** Save content to the session workspace via the daemon API. */
+  private async saveToWorkspace(path: string, text?: string, base64?: string): Promise<void> {
+    const body: Record<string, string> = {};
+    if (base64 != null) {
+      body.content_base64 = base64;
+    } else if (text != null) {
+      body.content = text;
+    }
+    const encodedPath = encodeURIComponent(path);
+    const resp = await authFetch(
+      `${this.config.daemonUrl}/api/v1/chat/sessions/${encodeURIComponent(this.config.sessionId)}/workspace/file?path=${encodedPath}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`Workspace save failed: ${resp.status}`);
     }
   }
 

@@ -3269,6 +3269,58 @@ impl ChatService {
         Ok(())
     }
 
+    /// Save binary content (base64-encoded) to a workspace file.
+    pub async fn save_workspace_file_binary(
+        &self,
+        session_id: &str,
+        file_path: &str,
+        content_base64: &str,
+    ) -> Result<(), ChatServiceError> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(content_base64)
+            .map_err(|e| ChatServiceError::Internal { detail: format!("invalid base64: {e}") })?;
+
+        let workspace = self.get_workspace_path(session_id).await?;
+        let full_path = workspace.join(normalize_workspace_relative_path(file_path)?);
+
+        let canonical_workspace = workspace
+            .canonicalize()
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        }
+        let canonical_parent = full_path
+            .parent()
+            .unwrap_or(workspace.as_path())
+            .canonicalize()
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        if !canonical_parent.starts_with(&canonical_workspace) {
+            return Err(ChatServiceError::Internal {
+                detail: "Path traversal not allowed".to_string(),
+            });
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(&full_path) {
+            if metadata.file_type().is_symlink() {
+                return Err(ChatServiceError::Internal {
+                    detail: "Path traversal not allowed".to_string(),
+                });
+            }
+            if let Ok(canonical_path) = full_path.canonicalize() {
+                if !canonical_path.starts_with(&canonical_workspace) {
+                    return Err(ChatServiceError::Internal {
+                        detail: "Path traversal not allowed".to_string(),
+                    });
+                }
+            }
+        }
+
+        std::fs::write(&full_path, &bytes)
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        Ok(())
+    }
+
     pub async fn create_workspace_directory(
         &self,
         session_id: &str,
