@@ -94,6 +94,7 @@ export default function McpAppView(props: McpAppViewProps) {
   let iframeRef: HTMLIFrameElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let bridge: McpAppBridge | undefined;
+  let loadingTimeout: ReturnType<typeof setTimeout> | undefined;
 
   // Inject CSP meta tag into the app HTML
   const preparedHtml = () => {
@@ -112,7 +113,11 @@ export default function McpAppView(props: McpAppViewProps) {
 
     // Destroy previous bridge before creating a new one (avoid listener leaks)
     bridge?.destroy();
+    if (loadingTimeout) clearTimeout(loadingTimeout);
     setLoading(true);
+
+    // Safety timeout: hide spinner after 4s even if initialized never fires
+    loadingTimeout = setTimeout(() => setLoading(false), 4000);
 
     // Measure container for containerDimensions
     const containerWidth = containerRef?.clientWidth ?? 600;
@@ -141,12 +146,16 @@ export default function McpAppView(props: McpAppViewProps) {
       },
       onMessage: props.onMessage,
       onModelContextUpdate: props.onModelContextUpdate,
-      onInitialized: () => setLoading(false),
+      onInitialized: () => {
+        if (loadingTimeout) clearTimeout(loadingTimeout);
+        setLoading(false);
+      },
     });
   });
 
   onCleanup(() => {
     bridge?.destroy();
+    if (loadingTimeout) clearTimeout(loadingTimeout);
   });
 
   const border = () => props.uiMeta?.prefers_border !== false;
@@ -188,7 +197,7 @@ export default function McpAppView(props: McpAppViewProps) {
       </div>
       <div class="relative" style={isFullscreen() ? { flex: '1', 'min-height': '0', display: 'flex', 'flex-direction': 'column' } : undefined}>
         <Show when={loading()}>
-          <div class="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+          <div class="absolute inset-0 z-10 flex items-center justify-center bg-background/60 pointer-events-none">
             <div class="flex flex-col items-center gap-2">
               <span class="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               <span class="text-xs text-muted-foreground">Loading MCP App…</span>
