@@ -1047,7 +1047,7 @@ fn reject_hivemind_config_path(path: &Path) -> Result<(), ToolError> {
 }
 
 pub(crate) fn resolve_existing_path(root: &Path, path: &str) -> Result<PathBuf, ToolError> {
-    if Path::new(path).is_absolute() {
+    if Path::new(path).is_absolute() || path.starts_with('/') {
         return Err(ToolError::InvalidInput("absolute paths are not allowed".to_string()));
     }
     let root = root
@@ -1065,7 +1065,7 @@ pub(crate) fn resolve_existing_path(root: &Path, path: &str) -> Result<PathBuf, 
 }
 
 pub(crate) fn resolve_relative_path(root: &Path, path: &str) -> Result<PathBuf, ToolError> {
-    if Path::new(path).is_absolute() {
+    if Path::new(path).is_absolute() || path.starts_with('/') {
         return Err(ToolError::InvalidInput("absolute paths are not allowed".to_string()));
     }
     if Path::new(path).components().any(|component| matches!(component, Component::ParentDir)) {
