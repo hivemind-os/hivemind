@@ -90,6 +90,7 @@ function buildAllow(uiMeta?: McpToolUiMeta): string | undefined {
 
 export default function McpAppView(props: McpAppViewProps) {
   const [iframeHeight, setIframeHeight] = createSignal(300);
+  const [loading, setLoading] = createSignal(true);
   let iframeRef: HTMLIFrameElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let bridge: McpAppBridge | undefined;
@@ -111,6 +112,7 @@ export default function McpAppView(props: McpAppViewProps) {
 
     // Destroy previous bridge before creating a new one (avoid listener leaks)
     bridge?.destroy();
+    setLoading(true);
 
     // Measure container for containerDimensions
     const containerWidth = containerRef?.clientWidth ?? 600;
@@ -139,6 +141,7 @@ export default function McpAppView(props: McpAppViewProps) {
       },
       onMessage: props.onMessage,
       onModelContextUpdate: props.onModelContextUpdate,
+      onInitialized: () => setLoading(false),
     });
   });
 
@@ -154,7 +157,7 @@ export default function McpAppView(props: McpAppViewProps) {
   return (
     <div
       ref={containerRef}
-      class="mcp-app-container mt-2 overflow-hidden rounded-lg"
+      class="mcp-app-container relative mt-2 overflow-hidden rounded-lg"
       classList={{
         'border border-border': border(),
         'flex flex-col': isFullscreen(),
@@ -164,6 +167,9 @@ export default function McpAppView(props: McpAppViewProps) {
       <div class="flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
         <span class="font-medium">⚡ {props.toolName}</span>
         <span class="opacity-60">MCP App</span>
+        <Show when={loading()}>
+          <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+        </Show>
         <div class="flex-1" />
         <Show when={props.onPopout}>
           <button
@@ -180,20 +186,30 @@ export default function McpAppView(props: McpAppViewProps) {
           </button>
         </Show>
       </div>
-      <iframe
-        ref={iframeRef}
-        srcdoc={preparedHtml()}
-        sandbox={buildSandbox(props.uiMeta)}
-        allow={allowAttr()}
-        style={{
-          width: '100%',
-          height: isFullscreen() ? '100%' : `${iframeHeight()}px`,
-          border: 'none',
-          'background-color': 'transparent',
-          ...(isFullscreen() ? { flex: '1', 'min-height': '0' } : {}),
-        }}
-        title={`MCP App: ${props.toolName}`}
-      />
+      <div class="relative" style={isFullscreen() ? { flex: '1', 'min-height': '0', display: 'flex', 'flex-direction': 'column' } : undefined}>
+        <Show when={loading()}>
+          <div class="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+            <div class="flex flex-col items-center gap-2">
+              <span class="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span class="text-xs text-muted-foreground">Loading MCP App…</span>
+            </div>
+          </div>
+        </Show>
+        <iframe
+          ref={iframeRef}
+          srcdoc={preparedHtml()}
+          sandbox={buildSandbox(props.uiMeta)}
+          allow={allowAttr()}
+          style={{
+            width: '100%',
+            height: isFullscreen() ? '100%' : `${iframeHeight()}px`,
+            border: 'none',
+            'background-color': 'transparent',
+            ...(isFullscreen() ? { flex: '1', 'min-height': '0' } : {}),
+          }}
+          title={`MCP App: ${props.toolName}`}
+        />
+      </div>
     </div>
   );
 }

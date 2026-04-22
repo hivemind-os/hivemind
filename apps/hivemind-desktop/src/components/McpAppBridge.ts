@@ -66,6 +66,8 @@ export interface McpAppBridgeConfig {
   onOpenLink?: (url: string) => void;
   onModelContextUpdate?: (context: Record<string, unknown>) => void;
   onPopout?: () => void;
+  /** Called when the app completes the ui/initialize handshake */
+  onInitialized?: () => void;
 }
 
 // ── Bridge implementation ───────────────────────────────────────────
@@ -234,6 +236,7 @@ export class McpAppBridge {
     switch (msg.method) {
       case 'ui/notifications/initialized':
         this.initialized = true;
+        this.config.onInitialized?.();
         if (this.config.toolInput) {
           this.sendToolInput(this.config.toolInput);
         }
@@ -310,8 +313,16 @@ export class McpAppBridge {
       },
     );
     if (!resp.ok) throw new Error(`Tool call failed: ${resp.status}`);
-    // The backend now returns the full CallToolResult-shaped JSON
-    return await resp.json();
+    const data = await resp.json() as { content: string; is_error: boolean; raw?: unknown };
+    // Return the raw CallToolResult if available (preserves structuredContent for apps),
+    // otherwise reconstruct a minimal CallToolResult from the flattened fields.
+    if (data.raw && typeof data.raw === 'object') {
+      return data.raw;
+    }
+    return {
+      content: [{ type: 'text', text: data.content ?? '' }],
+      isError: data.is_error ?? false,
+    };
   }
 
   private async handleResourcesRead(params: { uri: string }): Promise<unknown> {
