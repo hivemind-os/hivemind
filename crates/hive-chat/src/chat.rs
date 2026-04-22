@@ -11732,4 +11732,92 @@ mod tests {
         let result = service.restore_sessions().await;
         assert!(result.is_ok(), "restore should not fail on corrupt agent data");
     }
+
+    #[tokio::test]
+    async fn register_app_tools_preserves_supervisor_and_agents() {
+        let tempdir = tempdir().expect("tempdir");
+        let service = test_chat_service(tempdir.path().join("graph.db"));
+
+        let session = service
+            .create_session(SessionModality::Linear, Some("App tools test".to_string()), None)
+            .await
+            .expect("create session");
+
+        // Spawn an agent via the supervisor.
+        let supervisor = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("create supervisor");
+        let agent_id = supervisor
+            .spawn_agent(
+                AgentSpec {
+                    id: "helper".to_string(),
+                    name: "Helper".to_string(),
+                    friendly_name: "swift_hopper".to_string(),
+                    description: "Helps with things".to_string(),
+                    role: AgentRole::Coder,
+                    model: None,
+                    preferred_models: None,
+                    loop_strategy: None,
+                    tool_execution_mode: None,
+                    system_prompt: "Help the user".to_string(),
+                    allowed_tools: Vec::new(),
+                    avatar: None,
+                    color: None,
+                    data_class: hive_classification::DataClass::Public,
+                    keep_alive: false,
+                    idle_timeout_secs: None,
+                    tool_limits: None,
+                    persona_id: None,
+                    workflow_managed: false,
+                },
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("spawn agent");
+
+        assert_eq!(supervisor.get_all_agents().len(), 1, "agent should be alive before register");
+
+        // Register app tools — must NOT drop the supervisor or agents.
+        service
+            .register_app_tools(
+                &session.id,
+                "app-instance-abc",
+                vec![AppToolRegistration {
+                    name: "do-something".to_string(),
+                    description: "Does something".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                    server_id: "test-server".to_string(),
+                }],
+            )
+            .await
+            .expect("register app tools");
+
+        // Supervisor must still be the same instance with the agent alive.
+        let supervisor_after = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("get supervisor after register");
+        assert!(Arc::ptr_eq(&supervisor, &supervisor_after), "supervisor must not be replaced on register");
+        assert_eq!(supervisor_after.get_all_agents().len(), 1, "agent must survive app tool registration");
+        assert_eq!(supervisor_after.get_all_agents()[0].agent_id, agent_id);
+
+        // Unregister app tools — must also NOT drop the supervisor or agents.
+        service
+            .unregister_app_tools(&session.id, "app-instance-abc")
+            .await
+            .expect("unregister app tools");
+
+        let supervisor_final = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("get supervisor after unregister");
+        assert!(Arc::ptr_eq(&supervisor, &supervisor_final), "supervisor must not be replaced on unregister");
+        assert_eq!(supervisor_final.get_all_agents().len(), 1, "agent must survive app tool unregistration");
+
+        supervisor.kill_all().await.expect("cleanup");
+    }
 }
