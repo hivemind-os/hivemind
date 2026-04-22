@@ -94,6 +94,7 @@ export default function McpAppView(props: McpAppViewProps) {
   let iframeRef: HTMLIFrameElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let bridge: McpAppBridge | undefined;
+  let hasInitialized = false;
   let loadingTimeout: ReturnType<typeof setTimeout> | undefined;
 
   // Inject CSP meta tag into the app HTML
@@ -114,10 +115,12 @@ export default function McpAppView(props: McpAppViewProps) {
     // Destroy previous bridge before creating a new one (avoid listener leaks)
     bridge?.destroy();
     if (loadingTimeout) clearTimeout(loadingTimeout);
-    setLoading(true);
 
-    // Safety timeout: hide spinner after 4s even if initialized never fires
-    loadingTimeout = setTimeout(() => setLoading(false), 4000);
+    // Only show spinner on the very first load, never on prop-driven re-runs
+    if (!hasInitialized) {
+      setLoading(true);
+      loadingTimeout = setTimeout(() => setLoading(false), 4000);
+    }
 
     // Measure container for containerDimensions
     const containerWidth = containerRef?.clientWidth ?? 600;
@@ -147,6 +150,7 @@ export default function McpAppView(props: McpAppViewProps) {
       onMessage: props.onMessage,
       onModelContextUpdate: props.onModelContextUpdate,
       onInitialized: () => {
+        hasInitialized = true;
         if (loadingTimeout) clearTimeout(loadingTimeout);
         setLoading(false);
       },
