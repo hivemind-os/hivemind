@@ -2906,8 +2906,13 @@ impl Tool for McpBridgeTool {
                  <external_data>\n{}\n</external_data>",
                 self.server_id, safe_content
             );
+            let mut output = json!({ "content": wrapped });
+            // Include raw MCP CallToolResult for MCP Apps (structuredContent, etc.)
+            if let Some(raw) = result.raw {
+                output["_mcp_raw"] = raw;
+            }
             Ok(ToolResult {
-                output: json!({ "content": wrapped }),
+                output,
                 data_class: channel_class_to_data_class(self.definition.channel_class),
             })
         })

@@ -125,8 +125,8 @@ const ChatView = (props: ChatViewProps) => {
   const [expandedToolMsgs, setExpandedToolMsgs] = createSignal<Set<string>>(new Set());
   // Tool call whose details are shown in the popup overlay.
   const [popupToolCall, setPopupToolCall] = createSignal<{
-    id: string; label: string; input?: string; output?: string; isError: boolean;
-    startedAt: number; completedAt?: number;
+    id: string; tool_id?: string; label: string; input?: string; output?: string; isError: boolean;
+    startedAt: number; completedAt?: number; mcpRaw?: unknown;
   } | null>(null);
   const [expandedNotifications, setExpandedNotifications] = createSignal<Set<string>>(new Set());
   const [isDragging, setIsDragging] = createSignal(false);
@@ -912,6 +912,7 @@ const ChatView = (props: ChatViewProps) => {
                                       toolInput={tc.input}
                                       toolOutput={tc.output}
                                       toolIsError={tc.isError}
+                                      toolResultRaw={tc.mcpRaw}
                                       toolInputSchema={mcpTool()?.input_schema as Record<string, unknown> | undefined}
                                       toolDescription={mcpTool()?.description}
                                       toolVisibility={mcpTool()?.ui_meta?.visibility ?? undefined}
@@ -929,6 +930,7 @@ const ChatView = (props: ChatViewProps) => {
                                           isError: tc.isError,
                                           startedAt: tc.startedAt,
                                           completedAt: tc.completedAt,
+                                          mcpRaw: tc.mcpRaw,
                                         });
                                       }}
                                     />
@@ -1797,6 +1799,7 @@ const ChatView = (props: ChatViewProps) => {
                   toolInput={tc().input}
                   toolOutput={tc().output}
                   toolIsError={tc().isError}
+                  toolResultRaw={tc().mcpRaw}
                   toolInputSchema={mcpToolEntry()?.input_schema as Record<string, unknown> | undefined}
                   toolDescription={mcpToolEntry()?.description}
                   toolVisibility={toolUiMeta()?.visibility ?? undefined}

@@ -661,9 +661,13 @@ const App = () => {
     isError: boolean;
     startedAt: number;
     completedAt?: number;
+    /** Raw MCP CallToolResult (for MCP Apps structuredContent) */
+    mcpRaw?: unknown;
   };
   const [pendingToolCalls, setPendingToolCalls] = createSignal<ToolCallRecord[]>([]);
   const [toolCallHistory, setToolCallHistory] = createSignal<Record<string, ToolCallRecord[]>>({});
+  // Per-session cache so tool call history survives session switches
+  const toolCallHistoryCache = new Map<string, Record<string, ToolCallRecord[]>>();
 
   const pushActivity = (item: Omit<ActivityItem, 'startedAt' | 'done'>) => {
     setActivities(prev => [...prev.filter(a => a.id !== item.id), { ...item, startedAt: Date.now(), done: false }]);
@@ -679,12 +683,12 @@ const App = () => {
   const recordToolCallStart = (activityId: string, tool_id: string, label: string, input?: string) => {
     setPendingToolCalls(prev => [...prev, { id: activityId, tool_id, label, input, isError: false, startedAt: Date.now() }]);
   };
-  const recordToolCallResult = (tool_id: string, output?: string, isError?: boolean) => {
+  const recordToolCallResult = (tool_id: string, output?: string, isError?: boolean, mcpRaw?: unknown) => {
     setPendingToolCalls(prev => {
       const idx = prev.findIndex(tc => tc.tool_id === tool_id && !tc.completedAt);
       if (idx < 0) return prev;
       const updated = [...prev];
-      updated[idx] = { ...updated[idx], output, isError: isError ?? false, completedAt: Date.now() };
+      updated[idx] = { ...updated[idx], output, isError: isError ?? false, completedAt: Date.now(), mcpRaw };
       return updated;
     });
   };
@@ -738,9 +742,17 @@ const App = () => {
     });
   };
 
+  let prevSessionIdForToolCache: string | null = null;
   createEffect(() => {
     const sid = selectedSessionId();
     console.debug('[session-switch] clearing questions for session change →', sid);
+    // Save current tool call history before switching away
+    if (prevSessionIdForToolCache) {
+      const current = toolCallHistory();
+      if (Object.keys(current).length > 0) {
+        toolCallHistoryCache.set(prevSessionIdForToolCache, current);
+      }
+    }
     setActiveTab('chat');
     setSelectedEntryPath(null);
     setSelectedFilePath(null);
@@ -749,7 +761,9 @@ const App = () => {
     setWorkspaceFiles([]);
     setWorkspaceLoadedForSession(null);
     setAllQuestions([]);
-    setToolCallHistory({});
+    // Restore cached tool call history for the new session, or clear
+    setToolCallHistory(sid ? (toolCallHistoryCache.get(sid) ?? {}) : {});
+    prevSessionIdForToolCache = sid;
   });
 
   createEffect(() => {
@@ -2291,7 +2305,8 @@ const App = () => {
                   const tool_id = inner.tool_id ?? 'unknown';
                   const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
                   if (match) completeActivity(match.id, inner.is_error);
-                  recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false);
+                  const mcpRaw = inner.output?._mcp_raw;
+                  recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, mcpRaw);
                   pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
                   break;
                 }
@@ -2419,7 +2434,7 @@ const App = () => {
           const tool_id = event.ToolCallResult.tool_id ?? 'unknown';
           const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
           if (match) completeActivity(match.id, event.ToolCallResult.is_error);
-          recordToolCallResult(tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error);
+          recordToolCallResult(tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error, tryParseJson(event.ToolCallResult.output)?._mcp_raw);
           pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
         } else if (event.ModelLoading) {
           pushActivity({
@@ -2471,7 +2486,7 @@ const App = () => {
             const tool_id = inner.tool_id ?? 'unknown';
             const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
             if (match) completeActivity(match.id, inner.is_error);
-            recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false);
+            recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, inner.output?._mcp_raw);
             pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
           } else if (inner.type === 'user_interaction_required') {
             completeActivity('inference');
