@@ -785,6 +785,10 @@ const App = () => {
     });
   };
 
+  // Monotonic counter: each syncChatState call increments this so that
+  // stale fetch responses (issued earlier but arriving later) are discarded.
+  let chatSyncEpoch = 0;
+
   let streamSyncEpoch = 0;
   const syncChatStateAfterStream = (session_id: string) => {
     // Capture accumulated tool calls before clearing streaming state — the
@@ -1306,6 +1310,8 @@ const App = () => {
   };
 
   const syncChatState = async (desiredSessionId?: string | null) => {
+    const myEpoch = ++chatSyncEpoch;
+
     if (!daemonOnline()) {
       clearChatState();
       return;
@@ -1315,6 +1321,11 @@ const App = () => {
     setPendingReviewContent(null);
 
     const list = (await invoke<ChatSessionSummary[] | null>('chat_list_sessions')) ?? [];
+
+    // A newer sync was started while we were awaiting — abandon this one
+    // so we don't overwrite with stale data.
+    if (myEpoch !== chatSyncEpoch) return;
+
     updateSessions(list);
 
     // For auto-selection purposes, only consider non-bot sessions.
@@ -1341,10 +1352,25 @@ const App = () => {
 
     const nextSession = await invoke<ChatSessionSnapshot>('chat_get_session', { session_id: nextId });
 
+    // Stale sync — a newer call started while we were fetching.
+    if (myEpoch !== chatSyncEpoch) return;
+
+    // Freshness guard: never overwrite a newer snapshot with an older one
+    // for the same session (protects against out-of-order completion).
+    const prev = session();
+    if (
+      prev &&
+      prev.id === nextSession.id &&
+      typeof prev.updated_at_ms === 'number' &&
+      typeof nextSession.updated_at_ms === 'number' &&
+      nextSession.updated_at_ms < prev.updated_at_ms
+    ) {
+      return;
+    }
+
     // Avoid replacing the session object when nothing changed — a new object
     // reference causes SolidJS to re-render every message, which kills text
     // selection and any in-progress user interaction.
-    const prev = session();
     const lastPrev = prev && prev.messages.length > 0 ? prev.messages[prev.messages.length - 1] : null;
     const lastNext = nextSession.messages.length > 0 ? nextSession.messages[nextSession.messages.length - 1] : null;
     const changed =
@@ -3609,7 +3635,11 @@ const App = () => {
                     modelRouter={modelRouter}
                     pendingQuestions={() => pendingQuestions().filter((q) => q.session_id === session_id)}
                     answeredQuestions={answeredQuestions}
-                    onQuestionAnswered={markQuestionAnswered}
+                    onQuestionAnswered={(request_id, answerText) => {
+                      markQuestionAnswered(request_id, answerText);
+                      const sid = selectedSessionId();
+                      if (sid) void syncChatState(sid);
+                    }}
                     onAgentQuestion={(agent_id, request_id, text, choices, allow_freeform, message, multi_select) => {
                       addPendingQuestion({ request_id, text, choices, allow_freeform, multi_select, agent_id: agent_id, message, session_id });
                     }}
