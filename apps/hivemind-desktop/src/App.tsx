@@ -125,6 +125,9 @@ const App = () => {
   // Aggregated MCP App tools from all connected servers (for inline rendering).
   // Maps "serverId::toolName" → McpToolInfo for tools that have ui_meta.
   const [mcpAppTools, setMcpAppTools] = createSignal<Map<string, McpToolInfo & { server_id: string }>>(new Map());
+  // Cache for MCP App UI resource HTML templates (survives session switches).
+  // Key: "serverId::resourceUri", Value: HTML string
+  const [mcpAppHtmlCache, setMcpAppHtmlCache] = createSignal<Map<string, string>>(new Map());
   const [mcpNotifications, setMcpNotifications] = createSignal<McpNotificationEvent[]>([]);
   const [mcpServerLogs, setMcpServerLogs] = createSignal<McpServerLog[]>([]);
   const [mcpLogsServerId, setMcpLogsServerId] = createSignal<string | null>(null);
@@ -3390,6 +3393,8 @@ const App = () => {
                   onRespondWorkflowGate={respondWorkflowGate}
                   fetchParsedWorkflow={(name) => workflowStore.getDefinitionParsed(name)}
                   mcpAppTools={mcpAppTools}
+                  mcpAppHtmlCache={mcpAppHtmlCache}
+                  setMcpAppHtmlCache={setMcpAppHtmlCache}
                   daemonUrl={() => context()?.daemon_url}
                 />
               </div>

@@ -111,6 +111,8 @@ export interface ChatViewProps {
   workspaceFiles?: Accessor<any[]>;
   // MCP App integration: map of "serverId::toolName" → McpToolInfo for tools with UI
   mcpAppTools?: Accessor<Map<string, import('../types').McpToolInfo & { server_id: string }>>;
+  mcpAppHtmlCache?: Accessor<Map<string, string>>;
+  setMcpAppHtmlCache?: Setter<Map<string, string>>;
   daemonUrl?: Accessor<string | undefined>;
 }
 
@@ -875,6 +877,10 @@ const ChatView = (props: ChatViewProps) => {
                                 const uri = mcpTool()?.ui_meta?.resource_uri;
                                 const daemonUrl = props.daemonUrl?.();
                                 if (!uri || !daemonUrl) return;
+                                // Check app-level cache first (survives session switches)
+                                const cacheKey = `${serverId}::${uri}`;
+                                const cached = props.mcpAppHtmlCache?.()?.get(cacheKey);
+                                if (cached) { setAppHtml(cached); return; }
                                 void (async () => {
                                   try {
                                     const resp = await authFetch(`${daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(serverId)}/fetch-ui-resource`, {
@@ -885,6 +891,10 @@ const ChatView = (props: ChatViewProps) => {
                                     if (resp.ok) {
                                       const resource = await resp.json() as { html: string; uri: string };
                                       setAppHtml(resource.html);
+                                      // Populate cache for future navigations
+                                      if (props.setMcpAppHtmlCache) {
+                                        props.setMcpAppHtmlCache(prev => { const m = new Map(prev); m.set(cacheKey, resource.html); return m; });
+                                      }
                                     }
                                   } catch (e) {
                                     console.warn('[MCP App] Failed to fetch UI resource:', e);
@@ -1743,6 +1753,10 @@ const ChatView = (props: ChatViewProps) => {
               const sid = serverId();
               const daemonUrl = props.daemonUrl?.();
               if (!uri || !sid || !daemonUrl) return;
+              // Check app-level cache first
+              const cacheKey = `${sid}::${uri}`;
+              const cached = props.mcpAppHtmlCache?.()?.get(cacheKey);
+              if (cached) { setAppHtml(cached); return; }
               void (async () => {
                 try {
                   const resp = await authFetch(`${daemonUrl}/api/v1/mcp/servers/${encodeURIComponent(sid)}/fetch-ui-resource`, {
@@ -1753,6 +1767,9 @@ const ChatView = (props: ChatViewProps) => {
                   if (resp.ok) {
                     const resource = await resp.json() as { html: string };
                     setAppHtml(resource.html);
+                    if (props.setMcpAppHtmlCache) {
+                      props.setMcpAppHtmlCache(prev => { const m = new Map(prev); m.set(cacheKey, resource.html); return m; });
+                    }
                   }
                 } catch (e) {
                   console.warn('[MCP App] Failed to fetch UI resource:', e);
