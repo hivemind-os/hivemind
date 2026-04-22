@@ -234,6 +234,9 @@ export class McpAppBridge {
       case 'ui/update-model-context':
         return this.handleUpdateModelContext(params as Record<string, unknown>);
 
+      case 'sampling/createMessage':
+        return this.handleSamplingCreateMessage(params as Record<string, unknown>);
+
       case 'ui/request-display-mode':
         return { mode: this.config.displayMode ?? 'inline' };
 
@@ -304,6 +307,7 @@ export class McpAppBridge {
         logging: {},
         message: { text: {} },
         updateModelContext: {},
+        sampling: {},
         sandbox: {},
       },
       hostContext: this.buildHostContext(),
@@ -474,6 +478,23 @@ export class McpAppBridge {
       this.config.onModelContextUpdate(params);
     }
     return {};
+  }
+
+  private async handleSamplingCreateMessage(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    // Proxy sampling request to the daemon's completion API
+    const resp = await authFetch(
+      `${this.config.daemonUrl}/api/v1/mcp/sampling/create-message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+    );
+    if (!resp.ok) {
+      const errorText = await resp.text().catch(() => '');
+      throw { code: -32603, message: `Sampling failed: ${resp.status} ${errorText}` };
+    }
+    return await resp.json();
   }
 
   // ── Helpers ───────────────────────────────────────────────────

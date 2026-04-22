@@ -405,3 +405,116 @@ pub(crate) async fn fetch_mcp_ui_resource(
         .map_err(mcp_error)?;
     Ok(Json(resource))
 }
+
+// ── MCP Apps sampling ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SamplingCreateMessageRequest {
+    pub messages: Vec<SamplingMessage>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub model_preferences: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SamplingMessage {
+    pub role: String,
+    pub content: SamplingContent,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum SamplingContent {
+    Text(String),
+    Parts(Vec<SamplingContentPart>),
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SamplingContentPart {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+pub(crate) async fn mcp_sampling_create_message(
+    State(state): State<AppState>,
+    Json(req): Json<SamplingCreateMessageRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_model::{Capability, CompletionMessage, CompletionRequest};
+    use std::collections::BTreeSet;
+
+    let mut messages: Vec<CompletionMessage> = Vec::new();
+
+    // System prompt as first system message
+    if let Some(ref sys) = req.system_prompt {
+        messages.push(CompletionMessage::text("system", sys.clone()));
+    }
+
+    // Convert MCP sampling messages to CompletionMessages
+    for msg in &req.messages {
+        let text = match &msg.content {
+            SamplingContent::Text(t) => t.clone(),
+            SamplingContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| {
+                    if p.kind == "text" { p.text.clone() } else { None }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        messages.push(CompletionMessage::text(&msg.role, text));
+    }
+
+    // Extract model hints from preferences for preferred_models
+    let preferred_models = req
+        .model_preferences
+        .as_ref()
+        .and_then(|prefs| prefs.get("hints"))
+        .and_then(|h| h.as_array())
+        .map(|hints| {
+            hints
+                .iter()
+                .filter_map(|h| h.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+
+    // Build the prompt from the last user message
+    let prompt = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    let completion_req = CompletionRequest {
+        prompt,
+        prompt_content_parts: vec![],
+        messages,
+        required_capabilities: BTreeSet::from([Capability::Chat]),
+        preferred_models,
+        tools: vec![],
+    };
+
+    // complete_once is synchronous (blocking I/O) — run on a blocking thread
+    let chat = Arc::clone(&state.chat);
+    let result = tokio::task::spawn_blocking(move || chat.complete_once(&completion_req))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Join error: {e}")))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("LLM error: {e}")))?;
+
+    // Return MCP sampling response format
+    Ok(Json(serde_json::json!({
+        "role": "assistant",
+        "content": {
+            "type": "text",
+            "text": result.content
+        },
+        "model": result.model
+    })))
+}

@@ -33,9 +33,9 @@ use hive_loop::{
 };
 use hive_mcp::{McpCatalogStore, McpService, SessionMcpManager};
 use hive_model::{
-    Capability, CompletionMessage, CompletionRequest, EchoProvider, HttpProvider,
-    LocalModelProvider, ModelRouter, ModelRouterSnapshot, ProviderAuth, ProviderDescriptor,
-    ProviderKind, RoutingRequest,
+    Capability, CompletionMessage, CompletionRequest, CompletionResponse, EchoProvider,
+    HttpProvider, LocalModelProvider, ModelRouter, ModelRouterError, ModelRouterSnapshot,
+    ProviderAuth, ProviderDescriptor, ProviderKind, RoutingRequest,
 };
 use hive_risk::{RiskService, RiskServiceError};
 use hive_skills::SkillCatalog;
@@ -3597,6 +3597,19 @@ impl ChatService {
 
     pub fn model_router_snapshot(&self) -> ModelRouterSnapshot {
         self.model_router.load().snapshot()
+    }
+
+    /// Perform a one-shot LLM completion without creating a chat session.
+    ///
+    /// Routes the request through the model router and returns the response.
+    /// This is a blocking call — callers should use `spawn_blocking` when
+    /// invoked from an async context.
+    pub fn complete_once(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelRouterError> {
+        let router = self.model_router.load_full();
+        router.complete(request)
     }
 
     /// Atomically replace the model router with a newly built one.
