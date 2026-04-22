@@ -6,6 +6,7 @@ import { Tabs, TabsIndicator, TabsList, TabsTrigger } from '~/ui/tabs';
 import { Dialog, DialogContent, DialogFooter } from '~/ui/dialog';
 import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Button } from '~/ui/button';
+import { ConfirmDialog } from '~/ui/confirm-dialog';
 import PersonasTab from './PersonasTab';
 import { Collapsible, CollapsibleContent } from '~/ui/collapsible';
 import ProvidersTab from './settings/ProvidersTab';
@@ -199,12 +200,30 @@ const SettingsModal = (props: SettingsModalProps) => {
 
   let modalRef: HTMLDivElement | undefined;
 
+  // Track whether persona editor has unsaved changes
+  const [personasDirty, setPersonasDirty] = createSignal(false);
+  const [showPersonasDiscardConfirm, setShowPersonasDiscardConfirm] = createSignal(false);
+  const [pendingNavAction, setPendingNavAction] = createSignal<(() => void) | null>(null);
+
+  const guardedNavigate = (action: () => void) => {
+    if (personasDirty()) {
+      setPendingNavAction(() => action);
+      setShowPersonasDiscardConfirm(true);
+    } else {
+      action();
+    }
+  };
+
   // Close on Escape key
   onMount(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && props.onClose) {
         e.preventDefault();
-        props.onClose();
+        if (localTab() === 'personas' && personasDirty()) {
+          guardedNavigate(() => props.onClose!());
+        } else {
+          props.onClose();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -249,6 +268,20 @@ const SettingsModal = (props: SettingsModalProps) => {
   // Uses `on()` to only track settingsTab — avoids tracking localTab which
   // would cause a bounce when switchTab sets both signals.
   createEffect(on(settingsTab, (tab) => {
+    if (localTab() === 'personas' && tab !== 'personas' && personasDirty()) {
+      // External change wants to leave personas while dirty — route through guard
+      guardedNavigate(() => {
+        setLocalTab(tab);
+        const catId = categoryForTab(tab);
+        setExpandedCategories(prev => {
+          if (prev.has(catId)) return prev;
+          const next = new Set(prev);
+          next.add(catId);
+          return next;
+        });
+      });
+      return;
+    }
     setLocalTab(tab);
     const catId = categoryForTab(tab);
     setExpandedCategories(prev => {
@@ -272,16 +305,23 @@ const SettingsModal = (props: SettingsModalProps) => {
     }
   };
   const switchTab = (tab: SettingsTab) => {
-    setLocalTab(tab);
-    setSettingsTab(tab);
-    // Auto-expand the category containing this tab
-    const catId = categoryForTab(tab);
-    setExpandedCategories(prev => {
-      if (prev.has(catId)) return prev;
-      const next = new Set(prev);
-      next.add(catId);
-      return next;
-    });
+    const doSwitch = () => {
+      setLocalTab(tab);
+      setSettingsTab(tab);
+      // Auto-expand the category containing this tab
+      const catId = categoryForTab(tab);
+      setExpandedCategories(prev => {
+        if (prev.has(catId)) return prev;
+        const next = new Set(prev);
+        next.add(catId);
+        return next;
+      });
+    };
+    if (localTab() === 'personas' && tab !== 'personas' && personasDirty()) {
+      guardedNavigate(doSwitch);
+    } else {
+      doSwitch();
+    }
   };
 
   const configLoadingFallback = (label: string) => (
@@ -399,7 +439,13 @@ const SettingsModal = (props: SettingsModalProps) => {
                   await saveConfig();
                 }}>Save</Button>
                 <Show when={props.onClose}>
-                  <Button variant="ghost" data-testid="settings-close-btn" aria-label="Close settings" onClick={() => props.onClose?.()}>✕</Button>
+                  <Button variant="ghost" data-testid="settings-close-btn" aria-label="Close settings" onClick={() => {
+                    if (localTab() === 'personas' && personasDirty()) {
+                      guardedNavigate(() => props.onClose!());
+                    } else {
+                      props.onClose!();
+                    }
+                  }}>✕</Button>
                 </Show>
               </div>
             </header>
@@ -1588,6 +1634,7 @@ const SettingsModal = (props: SettingsModalProps) => {
                         daemon_url={daemonUrl}
                         onPersonasSaved={loadPersonas}
                         onExportToKit={props.onExportPersonaToKit}
+                        onDirtyChange={setPersonasDirty}
                       />
                     )}
                   </Show>
@@ -1651,6 +1698,21 @@ const SettingsModal = (props: SettingsModalProps) => {
                 </Show>
               </div>
               </div>
+
+          <ConfirmDialog
+            open={showPersonasDiscardConfirm()}
+            onOpenChange={(open) => { if (!open) { setShowPersonasDiscardConfirm(false); setPendingNavAction(null); } }}
+            title="Discard unsaved changes?"
+            description="You have unsaved changes to this persona. Discard them?"
+            confirmLabel="Discard"
+            variant="destructive"
+            onConfirm={() => {
+              setPersonasDirty(false);
+              const action = pendingNavAction();
+              setPendingNavAction(null);
+              action?.();
+            }}
+          />
           </div>
   );
 };
