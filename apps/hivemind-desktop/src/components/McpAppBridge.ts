@@ -34,6 +34,13 @@ interface JsonRpcResponse {
 
 type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
+/** Tool definition declared by an MCP App via appCapabilities.tools */
+export interface AppToolDefinition {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
 // ── Bridge configuration ────────────────────────────────────────────
 
 export interface McpAppBridgeConfig {
@@ -68,6 +75,8 @@ export interface McpAppBridgeConfig {
   onPopout?: () => void;
   /** Called when the app completes the ui/initialize handshake */
   onInitialized?: () => void;
+  /** Called when the app registers or updates its tool list */
+  onAppToolsChanged?: (tools: AppToolDefinition[]) => void;
 }
 
 // ── Bridge implementation ───────────────────────────────────────────
@@ -82,6 +91,8 @@ export class McpAppBridge {
   private initialized = false;
   private nextId = 1;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
+  /** Tools declared by the app via appCapabilities.tools */
+  private appTools: AppToolDefinition[] = [];
 
   constructor(config: McpAppBridgeConfig) {
     this.config = config;
@@ -164,6 +175,32 @@ export class McpAppBridge {
     this.config.displayMode = mode;
     if (this.initialized) {
       this.sendHostContextChanged({ displayMode: mode });
+    }
+  }
+
+  // ── App-registered tools ─────────────────────────────────────
+
+  /** Get the current list of app-registered tools. */
+  getAppTools(): AppToolDefinition[] {
+    return [...this.appTools];
+  }
+
+  /**
+   * Call a tool registered by the app. Sends tools/call as a JSON-RPC
+   * request TO the iframe and returns the result.
+   */
+  async callAppTool(name: string, args?: Record<string, unknown>): Promise<unknown> {
+    return this.sendRequest('tools/call', { name, arguments: args ?? {} });
+  }
+
+  /** Re-fetch app tools via tools/list and notify listeners. */
+  private async refreshAppTools(): Promise<void> {
+    try {
+      const result = await this.sendRequest('tools/list', {}) as { tools?: AppToolDefinition[] };
+      this.appTools = result?.tools ?? [];
+      this.config.onAppToolsChanged?.(this.appTools);
+    } catch (err) {
+      console.warn('[McpAppBridge] Failed to refresh app tools:', err);
     }
   }
 
@@ -279,6 +316,8 @@ export class McpAppBridge {
       }
 
       case 'notifications/tools/list_changed':
+        // App's tool list changed — re-fetch via tools/list
+        this.refreshAppTools();
         break;
 
       default:
@@ -289,9 +328,17 @@ export class McpAppBridge {
   // ── Request handlers ──────────────────────────────────────────
 
   private handleInitialize(params: unknown): Record<string, unknown> {
-    // Store app info/capabilities for future use
-    const p = params as { appInfo?: unknown; appCapabilities?: unknown; protocolVersion?: string } | undefined;
-    void p; // reserved for future use
+    const p = params as {
+      appInfo?: unknown;
+      appCapabilities?: { tools?: AppToolDefinition[] };
+      protocolVersion?: string;
+    } | undefined;
+
+    // Store app-registered tools if declared
+    if (p?.appCapabilities?.tools && Array.isArray(p.appCapabilities.tools)) {
+      this.appTools = p.appCapabilities.tools;
+      this.config.onAppToolsChanged?.(this.appTools);
+    }
 
     return {
       protocolVersion: '2026-01-26',
