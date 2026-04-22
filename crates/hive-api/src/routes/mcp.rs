@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::clamp_limit;
 use crate::{mcp_error, AppState};
@@ -517,4 +518,115 @@ pub(crate) async fn mcp_sampling_create_message(
         },
         "model": result.model
     })))
+}
+
+// ── App-registered tools endpoints ─────────────────────────────────
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolsRegisterRequest {
+    pub session_id: String,
+    pub app_instance_id: String,
+    #[allow(dead_code)]
+    pub server_id: Option<String>,
+    pub tools: Vec<AppToolDef>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, rename = "inputSchema")]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+/// Register app-declared tools so they appear in the LLM's tool list.
+pub(crate) async fn mcp_app_tools_register(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolsRegisterRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_chat::AppToolRegistration;
+
+    let tools: Vec<AppToolRegistration> = req
+        .tools
+        .into_iter()
+        .map(|t| AppToolRegistration {
+            name: t.name,
+            description: t.description.unwrap_or_default(),
+            input_schema: t.input_schema.unwrap_or(json!({"type": "object"})),
+            server_id: req.server_id.clone().unwrap_or_default(),
+        })
+        .collect();
+
+    let count = tools.len();
+    state
+        .chat
+        .register_app_tools(&req.session_id, &req.app_instance_id, tools)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(json!({ "registered": count })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolsUnregisterRequest {
+    pub session_id: String,
+    pub app_instance_id: String,
+}
+
+/// Unregister all tools for an app instance (called on iframe teardown).
+pub(crate) async fn mcp_app_tools_unregister(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolsUnregisterRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    state
+        .chat
+        .unregister_app_tools(&req.session_id, &req.app_instance_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolRespondRequest {
+    pub session_id: String,
+    pub request_id: String,
+    pub result: AppToolResultPayload,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolResultPayload {
+    #[serde(default)]
+    pub content: serde_json::Value,
+    #[serde(default, rename = "isError")]
+    pub is_error: bool,
+}
+
+/// Frontend responds with the result of an app tool call (resolves the oneshot).
+pub(crate) async fn mcp_app_tools_respond(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolRespondRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_contracts::{InteractionResponsePayload, UserInteractionResponse};
+
+    let gate = state
+        .chat
+        .get_interaction_gate(&req.session_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let response = UserInteractionResponse {
+        request_id: req.request_id.clone(),
+        payload: InteractionResponsePayload::AppToolCallResult {
+            content: req.result.content,
+            is_error: req.result.is_error,
+        },
+    };
+
+    if !gate.respond(response) {
+        return Err((StatusCode::BAD_REQUEST, "No pending request found for this request_id".to_string()));
+    }
+
+    Ok(Json(json!({ "ok": true })))
 }

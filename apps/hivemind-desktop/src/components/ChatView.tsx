@@ -114,6 +114,12 @@ export interface ChatViewProps {
   mcpAppHtmlCache?: Accessor<Map<string, string>>;
   setMcpAppHtmlCache?: Setter<Map<string, string>>;
   daemonUrl?: Accessor<string | undefined>;
+  /** Called when an MCP App bridge is ready (iframe initialized with tools) */
+  onAppBridgeReady?: (appInstanceId: string, bridge: import('./McpAppBridge').McpAppBridge) => void;
+  /** Called when an MCP App view is destroyed */
+  onAppBridgeDestroy?: (appInstanceId: string) => void;
+  /** Called when an MCP App declares/updates its tools */
+  onAppToolsChanged?: (appInstanceId: string, tools: import('./McpAppBridge').AppToolDefinition[]) => void;
 }
 
 const ChatView = (props: ChatViewProps) => {
@@ -933,6 +939,9 @@ const ChatView = (props: ChatViewProps) => {
                                           mcpRaw: tc.mcpRaw,
                                         });
                                       }}
+                                      onBridgeReady={props.onAppBridgeReady}
+                                      onDestroy={props.onAppBridgeDestroy}
+                                      onAppToolsChanged={props.onAppToolsChanged}
                                     />
                                   )}
                                 </Show>
@@ -1808,6 +1817,9 @@ const ChatView = (props: ChatViewProps) => {
                   uiMeta={toolUiMeta()}
                   theme="dark"
                   displayMode="fullscreen"
+                  onBridgeReady={props.onAppBridgeReady}
+                  onDestroy={props.onAppBridgeDestroy}
+                  onAppToolsChanged={props.onAppToolsChanged}
                 />
               )}
             </Show>

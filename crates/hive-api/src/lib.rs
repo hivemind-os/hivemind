@@ -2285,6 +2285,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/mcp/servers/{server_id}/read-resource", post(mcp::read_mcp_resource))
         .route("/api/v1/mcp/servers/{server_id}/fetch-ui-resource", post(mcp::fetch_mcp_ui_resource))
         .route("/api/v1/mcp/sampling/create-message", post(mcp::mcp_sampling_create_message))
+        .route("/api/v1/mcp/app-tools/register", post(mcp::mcp_app_tools_register))
+        .route("/api/v1/mcp/app-tools/unregister", post(mcp::mcp_app_tools_unregister))
+        .route("/api/v1/mcp/app-tools/respond", post(mcp::mcp_app_tools_respond))
         .route("/api/v1/mcp/catalog/{server_id}/refresh", post(mcp::refresh_mcp_catalog_server))
         // Session-scoped MCP endpoints
         .route("/api/v1/sessions/{session_id}/mcp/servers", get(mcp::list_session_mcp_servers))

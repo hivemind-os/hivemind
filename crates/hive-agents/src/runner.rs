@@ -837,6 +837,12 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                     message,
                 }
             }
+            InteractionKind::AppToolCall { tool_name, .. } => {
+                ReasoningEvent::ToolCallStarted {
+                    tool_id: format!("app.{tool_name}"),
+                    input: serde_json::json!({}),
+                }
+            }
         },
         LoopEvent::Done { content, .. } => ReasoningEvent::Completed { result: content },
         LoopEvent::Error { message, error_code, http_status, provider_id, model } => ReasoningEvent::Failed {

@@ -128,6 +128,98 @@ const App = () => {
   // Cache for MCP App UI resource HTML templates (survives session switches).
   // Key: "serverId::resourceUri", Value: HTML string
   const [mcpAppHtmlCache, setMcpAppHtmlCache] = createSignal<Map<string, string>>(new Map());
+
+  // ── App-registered tools: bridge registry for routing LLM tool calls to iframes ──
+  type McpAppBridgeRef = import('./components/McpAppBridge').McpAppBridge;
+  type AppToolDef = import('./components/McpAppBridge').AppToolDefinition;
+  const appBridgeRegistry = new Map<string, McpAppBridgeRef>();
+
+  const handleAppBridgeReady = (appInstanceId: string, bridge: McpAppBridgeRef) => {
+    appBridgeRegistry.set(appInstanceId, bridge);
+  };
+
+  const handleAppBridgeDestroy = (appInstanceId: string) => {
+    appBridgeRegistry.delete(appInstanceId);
+    // Unregister tools with daemon
+    const sid = selectedSessionId();
+    const baseUrl = context()?.daemon_url;
+    if (sid && baseUrl) {
+      authFetch(`${baseUrl}/api/v1/mcp/app-tools/unregister`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid, app_instance_id: appInstanceId }),
+      }).catch((e: unknown) => console.warn('[app-tools] unregister failed:', e));
+    }
+  };
+
+  const handleAppToolsChanged = (appInstanceId: string, tools: AppToolDef[]) => {
+    const sid = selectedSessionId();
+    const baseUrl = context()?.daemon_url;
+    if (!sid || !baseUrl) return;
+    // Register/update tools with daemon
+    authFetch(`${baseUrl}/api/v1/mcp/app-tools/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sid,
+        app_instance_id: appInstanceId,
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+        })),
+      }),
+    }).catch((e: unknown) => console.warn('[app-tools] register failed:', e));
+  };
+
+  /** Handle an app-tool-call event from the daemon (LLM wants to call an app tool). */
+  const handleAppToolCallEvent = async (event: {
+    request_id: string;
+    app_instance_id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    session_id: string;
+  }) => {
+    const bridge = appBridgeRegistry.get(event.app_instance_id);
+    const baseUrl = context()?.daemon_url;
+    if (!bridge || !baseUrl) {
+      // Bridge gone — respond with error
+      if (baseUrl) {
+        await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: event.session_id,
+            request_id: event.request_id,
+            result: { content: { error: 'App bridge not available' }, isError: true },
+          }),
+        }).catch(() => {});
+      }
+      return;
+    }
+    try {
+      const result = await bridge.callAppTool(event.tool_name, event.arguments);
+      await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: event.session_id,
+          request_id: event.request_id,
+          result: { content: result ?? {}, isError: false },
+        }),
+      });
+    } catch (err) {
+      await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: event.session_id,
+          request_id: event.request_id,
+          result: { content: { error: String(err) }, isError: true },
+        }),
+      }).catch(() => {});
+    }
+  };
   const [mcpNotifications, setMcpNotifications] = createSignal<McpNotificationEvent[]>([]);
   const [mcpServerLogs, setMcpServerLogs] = createSignal<McpServerLog[]>([]);
   const [mcpLogsServerId, setMcpLogsServerId] = createSignal<string | null>(null);
@@ -2724,7 +2816,19 @@ const App = () => {
     // ── MCP push events: refetch servers, notifications & tools on any mcp:event ──
     let mcpUnlisten: UnlistenFn | undefined;
     let mcpDebounce: ReturnType<typeof setTimeout> | undefined;
-    const mcpListenPromise = listen('mcp:event', () => {
+    const mcpListenPromise = listen<string>('mcp:event', (ev) => {
+      // Check for app-tool-call events (route to iframe bridge)
+      try {
+        const envelope = JSON.parse(ev.payload as unknown as string);
+        if (typeof envelope?.topic === 'string' && envelope.topic.startsWith('mcp.app-tool.call-requested.')) {
+          const eventData = envelope.payload ?? envelope.data;
+          if (eventData?.request_id && eventData?.app_instance_id) {
+            void handleAppToolCallEvent(eventData);
+            return; // Don't debounce-refresh for tool call events
+          }
+        }
+      } catch { /* not JSON or not an app-tool event — proceed with normal refresh */ }
+
       if (mcpDebounce) clearTimeout(mcpDebounce);
       mcpDebounce = setTimeout(() => {
         loadMcpServers();
@@ -3411,6 +3515,9 @@ const App = () => {
                   mcpAppHtmlCache={mcpAppHtmlCache}
                   setMcpAppHtmlCache={setMcpAppHtmlCache}
                   daemonUrl={() => context()?.daemon_url}
+                  onAppBridgeReady={handleAppBridgeReady}
+                  onAppBridgeDestroy={handleAppBridgeDestroy}
+                  onAppToolsChanged={handleAppToolsChanged}
                 />
               </div>
 

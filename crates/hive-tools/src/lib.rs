@@ -89,6 +89,9 @@ pub use workflow_author_tools::{
     WORKFLOW_AUTHOR_TOOL_IDS,
 };
 
+pub mod app_tool_proxy;
+pub use app_tool_proxy::{AppToolCallEvent, AppToolEventFn, AppToolProxy, InteractionRequestFn};
+
 use glob::glob;
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::prompt_sanitize::escape_prompt_tags;
@@ -262,6 +265,32 @@ impl ToolRegistry {
         }
         self.tools.insert(id, tool);
         Ok(())
+    }
+
+    /// Register a tool, replacing any existing tool with the same ID.
+    pub fn register_or_replace(&mut self, tool: Arc<dyn Tool>) -> Result<(), ToolRegistryError> {
+        let id = tool.definition().id.trim().to_string();
+        if id.is_empty() {
+            return Err(ToolRegistryError::EmptyId);
+        }
+        self.tools.insert(id, tool);
+        Ok(())
+    }
+
+    /// Remove a tool by ID. Returns true if the tool was found and removed.
+    pub fn unregister(&mut self, id: &str) -> bool {
+        self.tools.remove(id).is_some()
+    }
+
+    /// Remove all tools whose IDs start with the given prefix.
+    /// Returns the number of tools removed.
+    pub fn unregister_by_prefix(&mut self, prefix: &str) -> usize {
+        let ids: Vec<String> = self.tools.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        let count = ids.len();
+        for id in ids {
+            self.tools.remove(&id);
+        }
+        count
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn Tool>> {

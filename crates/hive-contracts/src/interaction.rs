@@ -38,6 +38,17 @@ pub enum InteractionKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+    /// MCP App tool call — the LLM wants to invoke a tool registered by an
+    /// in-browser MCP App iframe.  The frontend must route this to the correct
+    /// app instance and return the result.
+    AppToolCall {
+        /// Unique ID of the app instance (maps to a specific iframe).
+        app_instance_id: String,
+        /// Tool name as declared by the app.
+        tool_name: String,
+        /// Tool arguments (JSON object).
+        arguments: serde_json::Value,
+    },
 }
 
 fn default_true() -> bool {
@@ -80,6 +91,14 @@ pub enum InteractionResponsePayload {
         /// Free-form text answer (if the user typed one).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+    /// Response to an AppToolCall interaction — result from the MCP App iframe.
+    AppToolCallResult {
+        /// Tool output content blocks (MCP CallToolResult shape).
+        content: serde_json::Value,
+        /// Whether the tool execution failed.
+        #[serde(default)]
+        is_error: bool,
     },
 }
 

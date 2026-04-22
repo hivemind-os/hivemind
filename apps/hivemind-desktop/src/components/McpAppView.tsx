@@ -48,6 +48,12 @@ export interface McpAppViewProps {
   onModelContextUpdate?: (context: Record<string, unknown>) => void;
   /** Callback to popout the app into a larger dialog */
   onPopout?: () => void;
+  /** Callback when app tools are registered/updated/removed */
+  onAppToolsChanged?: (appInstanceId: string, tools: import('./McpAppBridge').AppToolDefinition[]) => void;
+  /** Callback to get the bridge ref for external tool calls */
+  onBridgeReady?: (appInstanceId: string, bridge: McpAppBridge) => void;
+  /** Callback when this view is being destroyed */
+  onDestroy?: (appInstanceId: string) => void;
 }
 
 /** Default restrictive CSP for MCP Apps with no declared CSP. */
@@ -99,6 +105,9 @@ export default function McpAppView(props: McpAppViewProps) {
   let hasInitialized = false;
   let loadingTimeout: ReturnType<typeof setTimeout> | undefined;
 
+  // Stable identity for this app instance — survives bridge re-creation
+  const appInstanceId = crypto.randomUUID();
+
   // Inject CSP meta tag into the app HTML
   const preparedHtml = () => {
     const cspTag = buildCspMeta(props.uiMeta);
@@ -130,6 +139,7 @@ export default function McpAppView(props: McpAppViewProps) {
 
     bridge = new McpAppBridge({
       iframe: iframeRef,
+      appInstanceId,
       serverId: props.serverId,
       toolName: props.toolName,
       toolInput: props.toolInput,
@@ -151,10 +161,12 @@ export default function McpAppView(props: McpAppViewProps) {
       },
       onMessage: props.onMessage,
       onModelContextUpdate: props.onModelContextUpdate,
+      onAppToolsChanged: (tools) => props.onAppToolsChanged?.(appInstanceId, tools),
       onInitialized: () => {
         hasInitialized = true;
         if (loadingTimeout) clearTimeout(loadingTimeout);
         setLoading(false);
+        props.onBridgeReady?.(appInstanceId, bridge!);
       },
     });
   });
@@ -168,6 +180,7 @@ export default function McpAppView(props: McpAppViewProps) {
   });
 
   onCleanup(() => {
+    props.onDestroy?.(appInstanceId);
     bridge?.destroy();
     if (loadingTimeout) clearTimeout(loadingTimeout);
   });

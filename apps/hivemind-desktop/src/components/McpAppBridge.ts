@@ -45,6 +45,8 @@ export interface AppToolDefinition {
 
 export interface McpAppBridgeConfig {
   iframe: HTMLIFrameElement;
+  /** Unique identifier for this app instance */
+  appInstanceId: string;
   serverId: string;
   toolName: string;
   toolInput?: string;
@@ -99,6 +101,11 @@ export class McpAppBridge {
     this.iframe = config.iframe;
     this.messageHandler = this.handleMessage.bind(this);
     window.addEventListener('message', this.messageHandler);
+  }
+
+  /** Unique identifier for this app instance. */
+  get appInstanceId(): string {
+    return this.config.appInstanceId;
   }
 
   /** Clean up event listeners. Call before removing the iframe. */
