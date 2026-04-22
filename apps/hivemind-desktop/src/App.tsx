@@ -24,6 +24,7 @@ const SessionProcesses = lazy(() => import('./components/SessionProcesses'));
 import ChatView from './components/ChatView';
 import WorkspaceView from './components/WorkspaceView';
 import { warmUpHighlighter } from './lib/shikiHighlighter';
+import { createToolCallTracker } from './lib/toolCallTracker';
 import BotsPage from './components/BotsPage';
 import BotConfigPanel from './components/BotConfigPanel';
 import SessionMcpPanel from './components/SessionMcpPanel';
@@ -427,7 +428,7 @@ const App = () => {
       stageUnlisten = await listen<{ session_id: string; event: any }>(
         'stage:event',
         (ev) => {
-          if (ev.payload.session_id !== sid) return;
+          if (ev.payload.session_id !== sid || ev.payload.session_id !== selectedSessionId()) return;
           const event = ev.payload.event;
           if (!event?.type) return;
 
@@ -743,23 +744,9 @@ const App = () => {
   };
   const [activities, setActivities] = createSignal<ActivityItem[]>([]);
 
-  // Tool call history: accumulates during streaming, committed per assistant message.
-  type ToolCallRecord = {
-    id: string;
-    tool_id: string;
-    label: string;
-    input?: string;
-    output?: string;
-    isError: boolean;
-    startedAt: number;
-    completedAt?: number;
-    /** Raw MCP CallToolResult (for MCP Apps structuredContent) */
-    mcpRaw?: unknown;
-  };
-  const [pendingToolCalls, setPendingToolCalls] = createSignal<ToolCallRecord[]>([]);
-  const [toolCallHistory, setToolCallHistory] = createSignal<Record<string, ToolCallRecord[]>>({});
-  // Per-session cache so tool call history survives session switches
-  const toolCallHistoryCache = new Map<string, Record<string, ToolCallRecord[]>>();
+  // Session-scoped tool call tracker — prevents cross-session contamination.
+  const tcTracker = createToolCallTracker();
+  const { pendingToolCalls, toolCallHistory } = tcTracker;
 
   const pushActivity = (item: Omit<ActivityItem, 'startedAt' | 'done'>) => {
     setActivities(prev => [...prev.filter(a => a.id !== item.id), { ...item, startedAt: Date.now(), done: false }]);
@@ -772,23 +759,11 @@ const App = () => {
   const tryParseJson = (s: string | undefined): any => { try { return s ? JSON.parse(s) : undefined; } catch { return undefined; } };
   const truncate = (s: string | undefined, n: number) => s && s.length > n ? s.slice(0, n) + '…' : s;
 
-  const recordToolCallStart = (activityId: string, tool_id: string, label: string, input?: string) => {
-    setPendingToolCalls(prev => [...prev, { id: activityId, tool_id, label, input, isError: false, startedAt: Date.now() }]);
+  const recordToolCallStart = (sessionId: string, activityId: string, tool_id: string, label: string, input?: string) => {
+    tcTracker.recordStart(sessionId, activityId, tool_id, label, input);
   };
-  const recordToolCallResult = (tool_id: string, output?: string, isError?: boolean, mcpRaw?: unknown) => {
-    setPendingToolCalls(prev => {
-      const idx = prev.findIndex(tc => tc.tool_id === tool_id && !tc.completedAt);
-      if (idx < 0) return prev;
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], output, isError: isError ?? false, completedAt: Date.now(), mcpRaw };
-      return updated;
-    });
-  };
-  const commitToolCalls = (messageId: string) => {
-    const calls = pendingToolCalls();
-    if (calls.length === 0) return;
-    setToolCallHistory(prev => ({ ...prev, [messageId]: calls }));
-    setPendingToolCalls([]);
+  const recordToolCallResult = (sessionId: string, tool_id: string, output?: string, isError?: boolean, mcpRaw?: unknown) => {
+    tcTracker.recordResult(sessionId, tool_id, output, isError, mcpRaw);
   };
 
   const clearStreamingState = () => {
@@ -796,7 +771,7 @@ const App = () => {
       setIsStreaming(false);
       setStreamingContent('');
       setActivities([]);
-      setPendingToolCalls([]);
+      tcTracker.clearPending();
     });
   };
 
@@ -805,7 +780,7 @@ const App = () => {
       setIsStreaming(true);
       setStreamingContent('');
       setActivities([]);
-      setPendingToolCalls([]);
+      tcTracker.clearPending();
       pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
     });
   };
@@ -814,7 +789,7 @@ const App = () => {
   const syncChatStateAfterStream = (session_id: string) => {
     // Capture accumulated tool calls before clearing streaming state — the
     // assistant message ID isn't known until the post-sync session arrives.
-    const capturedCalls = pendingToolCalls().slice();
+    const capturedCalls = tcTracker.captureAndClear(session_id);
     const epoch = ++streamSyncEpoch;
     clearStreamingState();
     void syncChatState(session_id).then(() => {
@@ -823,7 +798,7 @@ const App = () => {
         if (s) {
           const lastAssistant = [...s.messages].reverse().find(m => m.role === 'assistant');
           if (lastAssistant) {
-            setToolCallHistory(prev => ({ ...prev, [lastAssistant.id]: capturedCalls }));
+            tcTracker.commitCaptured(session_id, lastAssistant.id, capturedCalls);
           }
         }
       }
@@ -838,12 +813,11 @@ const App = () => {
   createEffect(() => {
     const sid = selectedSessionId();
     console.debug('[session-switch] clearing questions for session change →', sid);
-    // Save current tool call history before switching away (untrack to avoid reactive loop)
-    if (prevSessionIdForToolCache) {
-      const current = untrack(() => toolCallHistory());
-      if (Object.keys(current).length > 0) {
-        toolCallHistoryCache.set(prevSessionIdForToolCache, current);
-      }
+    // Delegate session-switch cache management to the tracker
+    tcTracker.switchSession(sid, prevSessionIdForToolCache);
+    // Cancel SSE streams from the previous session to prevent stale events
+    if (sid) {
+      invoke('chat_cancel_other_streams', { keep_session_id: sid }).catch(() => {});
     }
     setActiveTab('chat');
     setSelectedEntryPath(null);
@@ -853,8 +827,6 @@ const App = () => {
     setWorkspaceFiles([]);
     setWorkspaceLoadedForSession(null);
     setAllQuestions([]);
-    // Restore cached tool call history for the new session, or clear
-    setToolCallHistory(sid ? (toolCallHistoryCache.get(sid) ?? {}) : {});
     prevSessionIdForToolCache = sid;
   });
 
@@ -2390,7 +2362,7 @@ const App = () => {
                   const tool_id = inner.tool_id ?? 'unknown';
                   const actId = `tool:${tool_id}:${Date.now()}`;
                   pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
-                  recordToolCallStart(actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+                  recordToolCallStart(currentSessionId, actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
                   break;
                 }
                 case 'tool_call_completed': {
@@ -2398,7 +2370,7 @@ const App = () => {
                   const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
                   if (match) completeActivity(match.id, inner.is_error);
                   const mcpRaw = inner.output?._mcp_raw;
-                  recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, mcpRaw);
+                  recordToolCallResult(currentSessionId, tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, mcpRaw);
                   pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
                   break;
                 }
@@ -2505,7 +2477,9 @@ const App = () => {
     const setupStreamListeners = async () => {
       streamUnlisten = await listen<{ session_id: string; event: any }>('chat:event', (e) => {
         const { session_id: sid, event } = e.payload;
-        if (sid !== currentSessionId) return;
+        // Double-guard: check both the closure-captured ID and the live signal.
+        // The live signal catches stale listeners that survive the async cleanup race.
+        if (sid !== currentSessionId || sid !== selectedSessionId()) return;
 
         if (event.Token) {
           // If we receive tokens but are not streaming (e.g. after a Done from
@@ -2542,12 +2516,12 @@ const App = () => {
             label,
             detail: isSkill ? undefined : truncate(event.ToolCallStart.input, 80),
           });
-          recordToolCallStart(actId, tool_id, label, event.ToolCallStart.input);
+          recordToolCallStart(sid, actId, tool_id, label, event.ToolCallStart.input);
         } else if (event.ToolCallResult) {
           const tool_id = event.ToolCallResult.tool_id ?? 'unknown';
           const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
           if (match) completeActivity(match.id, event.ToolCallResult.is_error);
-          recordToolCallResult(tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error, tryParseJson(event.ToolCallResult.output)?._mcp_raw);
+          recordToolCallResult(sid, tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error, tryParseJson(event.ToolCallResult.output)?._mcp_raw);
           pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
         } else if (event.ModelLoading) {
           pushActivity({
@@ -2594,12 +2568,12 @@ const App = () => {
             const tool_id = inner.tool_id ?? 'unknown';
             const actId = `tool:${tool_id}:${Date.now()}`;
             pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
-            recordToolCallStart(actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+            recordToolCallStart(sid, actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
           } else if (inner.type === 'tool_call_completed') {
             const tool_id = inner.tool_id ?? 'unknown';
             const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
             if (match) completeActivity(match.id, inner.is_error);
-            recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, inner.output?._mcp_raw);
+            recordToolCallResult(sid, tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, inner.output?._mcp_raw);
             pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
           } else if (inner.type === 'user_interaction_required') {
             completeActivity('inference');
@@ -2640,13 +2614,13 @@ const App = () => {
       });
 
       doneUnlisten = await listen<{ session_id: string }>('chat:done', (e) => {
-        if (e.payload.session_id === currentSessionId) {
+        if (e.payload.session_id === currentSessionId && e.payload.session_id === selectedSessionId()) {
           syncChatStateAfterStream(e.payload.session_id);
         }
       });
 
       errorUnlisten = await listen<{ session_id: string; error: string; kind?: string }>('chat:error', (e) => {
-        if (e.payload.session_id === currentSessionId) {
+        if (e.payload.session_id === currentSessionId && e.payload.session_id === selectedSessionId()) {
           clearStreamingState();
           const kind = e.payload.kind;
           if (kind === 'transport' || kind === 'stream') {
