@@ -124,6 +124,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_APP_CERT_NAME: ${{ secrets.APPLE_APP_CERT_NAME }}
+          BUILTIN_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          BUILTIN_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
       - name: Sign and notarize
@@ -206,6 +208,8 @@ jobs:
           # llama.cpp uses throw, so we must re-enable them.
           # cc crate reads CXXFLAGS (not CMAKE_CXX_FLAGS) for extra C++ compiler flags.
           CXXFLAGS: /EHsc
+          BUILTIN_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          BUILTIN_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}
 
       - name: Azure login (OIDC)

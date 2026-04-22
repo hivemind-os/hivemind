@@ -111,20 +111,21 @@ pub fn resolve_client_id(
 ) -> Option<String> {
     use hive_contracts::connectors::ConnectorProvider;
 
-    const BUILTIN_GOOGLE: &str =
-        "481167909619-abi5rphrurebvquqb9evmecbvmnagf1h.apps.googleusercontent.com";
     const BUILTIN_OUTLOOK: &str = "80b5c82a-8733-4d48-a39c-bde93b9afa39";
 
     let (env_key, builtin) = match provider {
-        ConnectorProvider::Gmail => ("HIVEMIND_GOOGLE_CLIENT_ID", BUILTIN_GOOGLE),
-        ConnectorProvider::Microsoft => ("HIVEMIND_OUTLOOK_CLIENT_ID", BUILTIN_OUTLOOK),
+        ConnectorProvider::Gmail => (
+            "HIVEMIND_GOOGLE_CLIENT_ID",
+            option_env!("BUILTIN_GOOGLE_CLIENT_ID"),
+        ),
+        ConnectorProvider::Microsoft => ("HIVEMIND_OUTLOOK_CLIENT_ID", Some(BUILTIN_OUTLOOK)),
         _ => return None,
     };
     std::env::var(env_key)
         .ok()
         .filter(|s| !s.is_empty())
         .or_else(|| hive_connectors::secrets::load(connector_id, "client_id_override"))
-        .or_else(|| Some(builtin.to_string()))
+        .or_else(|| builtin.map(|s| s.to_string()))
 }
 
 /// Resolve the OAuth client secret for a provider.
@@ -136,10 +137,11 @@ pub fn resolve_client_secret(
 ) -> String {
     use hive_contracts::connectors::ConnectorProvider;
 
-    const BUILTIN_GOOGLE_SECRET: &str = "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";
-
     let (env_key, builtin) = match provider {
-        ConnectorProvider::Gmail => ("HIVEMIND_GOOGLE_CLIENT_SECRET", BUILTIN_GOOGLE_SECRET),
+        ConnectorProvider::Gmail => (
+            "HIVEMIND_GOOGLE_CLIENT_SECRET",
+            option_env!("BUILTIN_GOOGLE_CLIENT_SECRET"),
+        ),
         // Outlook device code flow doesn't need a client secret
         _ => return String::new(),
     };
@@ -147,7 +149,7 @@ pub fn resolve_client_secret(
         .ok()
         .filter(|s| !s.is_empty())
         .or_else(|| hive_connectors::secrets::load(connector_id, "client_secret"))
-        .or_else(|| Some(builtin.to_string()))
+        .or_else(|| builtin.map(|s| s.to_string()))
         .unwrap_or_default()
 }
 

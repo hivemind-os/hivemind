@@ -4,9 +4,10 @@ use tracing::debug;
 
 const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 
-/// Builtin Google OAuth client ID.
-pub const BUILTIN_GOOGLE_CLIENT_ID: &str =
-    "481167909619-abi5rphrurebvquqb9evmecbvmnagf1h.apps.googleusercontent.com";
+/// Builtin Google OAuth client ID, injected at compile time.
+pub fn builtin_google_client_id() -> Option<&'static str> {
+    option_env!("BUILTIN_GOOGLE_CLIENT_ID")
+}
 
 /// Shared Google API client with automatic OAuth2 token refresh.
 ///
@@ -34,7 +35,7 @@ impl GoogleClient {
         Self {
             client: reqwest::Client::new(),
             client_id: if client_id.is_empty() {
-                BUILTIN_GOOGLE_CLIENT_ID.to_string()
+                builtin_google_client_id().unwrap_or_default().to_string()
             } else {
                 client_id.to_string()
             },
