@@ -4103,4 +4103,107 @@ mod tests {
         assert!(ids.contains(&"datetime.now".to_string()));
         assert!(!ids.contains(&"math.calculate".to_string()));
     }
+
+    // ── ToolRegistry lifecycle: register_or_replace, unregister ──────
+
+    #[test]
+    fn register_or_replace_overwrites_existing() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+
+        // register_or_replace with same ID should succeed (not error)
+        registry.register_or_replace(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+        assert_eq!(registry.list_definitions().len(), 1);
+    }
+
+    #[test]
+    fn register_or_replace_rejects_empty_id() {
+        let mut registry = ToolRegistry::new();
+        struct EmptyTool;
+        impl Tool for EmptyTool {
+            fn definition(&self) -> &ToolDefinition {
+                static DEF: std::sync::LazyLock<ToolDefinition> = std::sync::LazyLock::new(|| {
+                    ToolDefinition {
+                        id: "".to_string(),
+                        name: "".to_string(),
+                        description: "".to_string(),
+                        input_schema: serde_json::json!({}),
+                        output_schema: None,
+                        channel_class: hive_classification::ChannelClass::Internal,
+                        side_effects: false,
+                        approval: hive_contracts::ToolApproval::Auto,
+                        annotations: hive_contracts::ToolAnnotations {
+                            title: "".to_string(),
+                            read_only_hint: None,
+                            destructive_hint: None,
+                            idempotent_hint: None,
+                            open_world_hint: None,
+                        },
+                    }
+                });
+                &DEF
+            }
+            fn execute(&self, _: serde_json::Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+                Box::pin(async { Err(ToolError::ExecutionFailed("not impl".into())) })
+            }
+        }
+        assert!(matches!(
+            registry.register_or_replace(Arc::new(EmptyTool)),
+            Err(ToolRegistryError::EmptyId)
+        ));
+    }
+
+    #[test]
+    fn unregister_removes_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+
+        assert!(registry.unregister("math.calculate"));
+        assert!(registry.get("math.calculate").is_none());
+    }
+
+    #[test]
+    fn unregister_nonexistent_returns_false() {
+        let mut registry = ToolRegistry::new();
+        assert!(!registry.unregister("nonexistent.tool"));
+    }
+
+    #[test]
+    fn unregister_by_prefix_removes_matching() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        registry.register(Arc::new(DateTimeTool::default())).unwrap();
+
+        // Only "math." prefix should match calculator
+        let removed = registry.unregister_by_prefix("math.");
+        assert_eq!(removed, 1);
+        assert!(registry.get("math.calculate").is_none());
+        assert!(registry.get("datetime.now").is_some());
+    }
+
+    #[test]
+    fn unregister_by_prefix_no_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert_eq!(registry.unregister_by_prefix("app."), 0);
+    }
+
+    #[test]
+    fn register_duplicate_id_errors() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        let result = registry.register(Arc::new(CalculatorTool::default()));
+        assert!(matches!(result, Err(ToolRegistryError::DuplicateId { .. })));
+    }
+
+    #[test]
+    fn get_falls_back_to_sanitized_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        // "math.calculate" should be findable as "math_calculate" (LLM sanitization)
+        assert!(registry.get("math_calculate").is_some());
+    }
 }

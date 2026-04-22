@@ -3419,4 +3419,197 @@ mod tests {
         assert_eq!(extract_http_status(&err), Some(429));
         assert_eq!(classify_provider_error(&err), ProviderErrorKind::RateLimited);
     }
+
+    // ── SSE parsing: OpenAI-style tool call deltas ──────────────────
+
+    #[test]
+    fn openai_text_delta_chunk() {
+        let data = r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert!(result.tool_call_deltas.is_empty());
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.delta, "Hello");
+        assert!(chunk.finish_reason.is_none());
+        assert!(chunk.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn openai_tool_call_delta_start() {
+        let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert_eq!(result.tool_call_deltas.len(), 1);
+        match &result.tool_call_deltas[0] {
+            ToolCallDelta::OpenAi { index, id, name, arguments } => {
+                assert_eq!(*index, 0);
+                assert_eq!(id.as_deref(), Some("call_abc"));
+                assert_eq!(name.as_deref(), Some("get_weather"));
+                assert_eq!(arguments.as_deref(), Some(""));
+            }
+            _ => panic!("expected OpenAi delta"),
+        }
+    }
+
+    #[test]
+    fn openai_tool_call_delta_args_fragment() {
+        let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert_eq!(result.tool_call_deltas.len(), 1);
+        match &result.tool_call_deltas[0] {
+            ToolCallDelta::OpenAi { index, id, name, arguments } => {
+                assert_eq!(*index, 0);
+                assert!(id.is_none());
+                assert!(name.is_none());
+                assert_eq!(arguments.as_deref(), Some("{\"city\":"));
+            }
+            _ => panic!("expected OpenAi delta"),
+        }
+    }
+
+    #[test]
+    fn openai_finish_reason_tool_calls() {
+        let data = r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.finish_reason, Some(FinishReason::ToolCalls));
+    }
+
+    #[test]
+    fn openai_finish_reason_stop() {
+        let data = r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.finish_reason, Some(FinishReason::Stop));
+    }
+
+    #[test]
+    fn openai_empty_choices_yields_no_chunk() {
+        let data = r#"{"choices":[]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert!(result.chunk.is_none());
+        assert!(result.tool_call_deltas.is_empty());
+    }
+
+    #[test]
+    fn openai_multiple_tool_call_deltas_in_one_chunk() {
+        let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"a"}},{"index":1,"id":"call_2","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert_eq!(result.tool_call_deltas.len(), 2);
+    }
+
+    // ── SSE parsing: Anthropic-style tool call deltas ───────────────
+
+    #[test]
+    fn anthropic_tool_use_start() {
+        let data = r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.chunk.is_none());
+        assert_eq!(result.tool_call_deltas.len(), 1);
+        match &result.tool_call_deltas[0] {
+            ToolCallDelta::AnthropicStart { id, name } => {
+                assert_eq!(id, "toolu_01");
+                assert_eq!(name, "get_weather");
+            }
+            _ => panic!("expected AnthropicStart"),
+        }
+    }
+
+    #[test]
+    fn anthropic_input_json_delta() {
+        let data = r#"{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.chunk.is_none());
+        assert_eq!(result.tool_call_deltas.len(), 1);
+        match &result.tool_call_deltas[0] {
+            ToolCallDelta::AnthropicArgsDelta { partial_json } => {
+                assert_eq!(partial_json, "{\"city\":");
+            }
+            _ => panic!("expected AnthropicArgsDelta"),
+        }
+    }
+
+    #[test]
+    fn anthropic_text_delta() {
+        let data = r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.delta, "Hello");
+        assert!(result.tool_call_deltas.is_empty());
+    }
+
+    #[test]
+    fn anthropic_content_block_stop() {
+        let data = r#"{"type":"content_block_stop"}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.chunk.is_none());
+        assert_eq!(result.tool_call_deltas.len(), 1);
+        matches!(&result.tool_call_deltas[0], ToolCallDelta::AnthropicStop);
+    }
+
+    #[test]
+    fn anthropic_message_delta_tool_use() {
+        let data = r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.finish_reason, Some(FinishReason::ToolCalls));
+    }
+
+    #[test]
+    fn anthropic_message_delta_end_turn() {
+        let data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.finish_reason, Some(FinishReason::Stop));
+    }
+
+    #[test]
+    fn anthropic_unknown_event_yields_nothing() {
+        let data = r#"{"type":"ping"}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.chunk.is_none());
+        assert!(result.tool_call_deltas.is_empty());
+    }
+
+    // ── parse_finish_reason ─────────────────────────────────────────
+
+    #[test]
+    fn finish_reason_mappings() {
+        assert_eq!(parse_finish_reason("stop"), Some(FinishReason::Stop));
+        assert_eq!(parse_finish_reason("length"), Some(FinishReason::Length));
+        assert_eq!(parse_finish_reason("tool_calls"), Some(FinishReason::ToolCalls));
+        assert_eq!(parse_finish_reason("function_call"), Some(FinishReason::ToolCalls));
+        assert_eq!(parse_finish_reason("unknown"), None);
+    }
+
+    // ── CompletionChunk serde ───────────────────────────────────────
+
+    #[test]
+    fn completion_chunk_serde_roundtrip_text() {
+        let chunk = CompletionChunk {
+            delta: "Hello".to_string(),
+            finish_reason: None,
+            tool_calls: vec![],
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        assert!(!json.contains("tool_calls"), "empty tool_calls should be skipped");
+        let parsed: CompletionChunk = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.delta, "Hello");
+    }
+
+    #[test]
+    fn completion_chunk_serde_roundtrip_with_tool_calls() {
+        let chunk = CompletionChunk {
+            delta: String::new(),
+            finish_reason: Some(FinishReason::ToolCalls),
+            tool_calls: vec![ToolCallResponse {
+                id: "call_1".to_string(),
+                name: "get_weather".to_string(),
+                arguments: serde_json::json!({"city": "London"}),
+            }],
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        let parsed: CompletionChunk = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].name, "get_weather");
+        assert_eq!(parsed.finish_reason, Some(FinishReason::ToolCalls));
+    }
 }

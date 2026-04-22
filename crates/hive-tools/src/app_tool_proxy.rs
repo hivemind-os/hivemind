@@ -151,3 +151,162 @@ impl Tool for AppToolProxy {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hive_contracts::UserInteractionResponse;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn make_proxy(
+        interaction_fn: InteractionRequestFn,
+        event_fn: AppToolEventFn,
+    ) -> AppToolProxy {
+        AppToolProxy::new(
+            "app.test1234.get_data".to_string(),
+            "get_data".to_string(),
+            "Gets data from app".to_string(),
+            json!({"type": "object"}),
+            "test-instance-1234".to_string(),
+            "session-1".to_string(),
+            interaction_fn,
+            event_fn,
+        )
+    }
+
+    #[test]
+    fn definition_has_correct_fields() {
+        let interaction_fn: InteractionRequestFn = Arc::new(|_id, _kind| {
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            rx
+        });
+        let event_fn: AppToolEventFn = Arc::new(|_| {});
+        let proxy = make_proxy(interaction_fn, event_fn);
+
+        let def = proxy.definition();
+        assert_eq!(def.id, "app.test1234.get_data");
+        assert_eq!(def.annotations.title, "get_data");
+        assert_eq!(def.approval, hive_contracts::ToolApproval::Auto);
+    }
+
+    #[tokio::test]
+    async fn execute_success_returns_tool_result() {
+        let interaction_fn: InteractionRequestFn = Arc::new(|_id, _kind| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tx.send(UserInteractionResponse {
+                request_id: "ignored".to_string(),
+                payload: InteractionResponsePayload::AppToolCallResult {
+                    content: json!({"answer": 42}),
+                    is_error: false,
+                },
+            })
+            .unwrap();
+            rx
+        });
+        let event_fired = Arc::new(AtomicBool::new(false));
+        let event_fired2 = event_fired.clone();
+        let event_fn: AppToolEventFn = Arc::new(move |_evt| {
+            event_fired2.store(true, Ordering::SeqCst);
+        });
+
+        let proxy = make_proxy(interaction_fn, event_fn);
+        let result = proxy.execute(json!({"query": "test"})).await.unwrap();
+        assert_eq!(result.output["answer"], 42);
+        assert!(event_fired.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn execute_error_response_wraps_in_error_json() {
+        let interaction_fn: InteractionRequestFn = Arc::new(|_id, _kind| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tx.send(UserInteractionResponse {
+                request_id: "ignored".to_string(),
+                payload: InteractionResponsePayload::AppToolCallResult {
+                    content: json!("something went wrong"),
+                    is_error: true,
+                },
+            })
+            .unwrap();
+            rx
+        });
+        let event_fn: AppToolEventFn = Arc::new(|_| {});
+
+        let proxy = make_proxy(interaction_fn, event_fn);
+        let result = proxy.execute(json!({})).await.unwrap();
+        assert_eq!(result.output["error"], "something went wrong");
+    }
+
+    #[tokio::test]
+    async fn execute_cancelled_returns_error() {
+        let interaction_fn: InteractionRequestFn = Arc::new(|_id, _kind| {
+            let (tx, rx) = tokio::sync::oneshot::channel::<UserInteractionResponse>();
+            drop(tx); // simulate bridge destroyed
+            rx
+        });
+        let event_fn: AppToolEventFn = Arc::new(|_| {});
+
+        let proxy = make_proxy(interaction_fn, event_fn);
+        let err = proxy.execute(json!({})).await.unwrap_err();
+        match err {
+            ToolError::ExecutionFailed(msg) => {
+                assert!(msg.contains("cancelled"), "got: {msg}");
+            }
+            _ => panic!("expected ExecutionFailed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_timeout_returns_error() {
+        // We need the sender to stay alive (not dropped) so the receiver
+        // doesn't get a RecvError before the timeout fires.
+        use std::sync::Mutex;
+        let held_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<UserInteractionResponse>>>> =
+            Arc::new(Mutex::new(None));
+        let held_tx2 = held_tx.clone();
+
+        let interaction_fn: InteractionRequestFn = Arc::new(move |_id, _kind| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            *held_tx2.lock().unwrap() = Some(tx); // keep sender alive
+            rx
+        });
+        let event_fn: AppToolEventFn = Arc::new(|_| {});
+
+        let mut proxy = make_proxy(interaction_fn, event_fn);
+        proxy.timeout = Duration::from_millis(10);
+
+        let err = proxy.execute(json!({})).await.unwrap_err();
+        match err {
+            ToolError::ExecutionFailed(msg) => {
+                assert!(msg.contains("timed out"), "got: {msg}");
+            }
+            _ => panic!("expected ExecutionFailed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_wrong_payload_type_errors() {
+        let interaction_fn: InteractionRequestFn = Arc::new(|_id, _kind| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tx.send(UserInteractionResponse {
+                request_id: "ignored".to_string(),
+                payload: InteractionResponsePayload::Answer {
+                    selected_choice: None,
+                    selected_choices: None,
+                    text: Some("wrong type".to_string()),
+                },
+            })
+            .unwrap();
+            rx
+        });
+        let event_fn: AppToolEventFn = Arc::new(|_| {});
+
+        let proxy = make_proxy(interaction_fn, event_fn);
+        let err = proxy.execute(json!({})).await.unwrap_err();
+        match err {
+            ToolError::ExecutionFailed(msg) => {
+                assert!(msg.contains("unexpected"), "got: {msg}");
+            }
+            _ => panic!("expected ExecutionFailed"),
+        }
+    }
+}
