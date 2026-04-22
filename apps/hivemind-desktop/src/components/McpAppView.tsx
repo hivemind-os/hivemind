@@ -109,6 +109,9 @@ export default function McpAppView(props: McpAppViewProps) {
   createEffect(() => {
     if (!iframeRef) return;
 
+    // Destroy previous bridge before creating a new one (avoid listener leaks)
+    bridge?.destroy();
+
     // Measure container for containerDimensions
     const containerWidth = containerRef?.clientWidth ?? 600;
     const containerHeight = containerRef?.clientHeight ?? 400;

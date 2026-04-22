@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, ErrorBoundary, batch, createEffect, createMemo, createSignal, lazy, onCleanup, onMount } from 'solid-js';
+import { For, Show, Switch, Match, ErrorBoundary, batch, createEffect, createMemo, createSignal, lazy, onCleanup, onMount, untrack } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { ShieldCheck, TriangleAlert, RefreshCw, Rocket, FolderOpen, Link, ClipboardList, MessageSquare, Compass, Layers, GitBranch, Activity, Terminal, Settings, Plug } from 'lucide-solid';
 import { invoke } from '@tauri-apps/api/core';
@@ -746,9 +746,9 @@ const App = () => {
   createEffect(() => {
     const sid = selectedSessionId();
     console.debug('[session-switch] clearing questions for session change →', sid);
-    // Save current tool call history before switching away
+    // Save current tool call history before switching away (untrack to avoid reactive loop)
     if (prevSessionIdForToolCache) {
-      const current = toolCallHistory();
+      const current = untrack(() => toolCallHistory());
       if (Object.keys(current).length > 0) {
         toolCallHistoryCache.set(prevSessionIdForToolCache, current);
       }
