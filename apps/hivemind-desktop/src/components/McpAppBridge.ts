@@ -75,6 +75,8 @@ export interface McpAppBridgeConfig {
   onOpenLink?: (url: string) => void;
   onModelContextUpdate?: (context: Record<string, unknown>) => void;
   onPopout?: () => void;
+  /** Called when the app requests a display mode change. Return the actual mode set. */
+  onRequestDisplayMode?: (requested: 'inline' | 'fullscreen' | 'pip') => 'inline' | 'fullscreen' | 'pip';
   /** Called when the app completes the ui/initialize handshake */
   onInitialized?: () => void;
   /** Called when the app registers or updates its tool list */
@@ -108,10 +110,21 @@ export class McpAppBridge {
     return this.config.appInstanceId;
   }
 
-  /** Clean up event listeners. Call before removing the iframe. */
-  destroy(): void {
-    // Send teardown as a request (spec: has id, expects response)
-    this.sendRequest('ui/resource-teardown', {}).catch(() => {});
+  /** Clean up event listeners. Call before removing the iframe.
+   *  Returns a promise that resolves after the app acknowledges teardown (or timeout). */
+  async destroy(): Promise<void> {
+    if (this.initialized) {
+      // Spec: Host MUST send ui/resource-teardown and wait for response
+      // to give the app a chance to persist state before iframe removal.
+      try {
+        await Promise.race([
+          this.sendRequest('ui/resource-teardown', {}),
+          new Promise(resolve => setTimeout(resolve, 3000)),
+        ]);
+      } catch {
+        // App may not respond — proceed with cleanup
+      }
+    }
     if (this.messageHandler) {
       window.removeEventListener('message', this.messageHandler);
       this.messageHandler = null;
@@ -187,6 +200,14 @@ export class McpAppBridge {
     this.config.displayMode = mode;
     if (this.initialized) {
       this.sendHostContextChanged({ displayMode: mode });
+    }
+  }
+
+  /** Update theme and notify the app. */
+  updateTheme(theme: 'light' | 'dark'): void {
+    this.config.theme = theme;
+    if (this.initialized) {
+      this.sendHostContextChanged({ theme, styles: { variables: getThemeVariables() } });
     }
   }
 
@@ -286,8 +307,17 @@ export class McpAppBridge {
       case 'sampling/createMessage':
         return this.handleSamplingCreateMessage(params as Record<string, unknown>);
 
-      case 'ui/request-display-mode':
-        return { mode: this.config.displayMode ?? 'inline' };
+      case 'ui/request-display-mode': {
+        const req = params as { mode?: string } | undefined;
+        const requested = (req?.mode ?? 'inline') as 'inline' | 'fullscreen' | 'pip';
+        const actual = this.config.onRequestDisplayMode
+          ? this.config.onRequestDisplayMode(requested)
+          : (this.config.displayMode ?? 'inline');
+        if (actual !== this.config.displayMode) {
+          this.updateDisplayMode(actual);
+        }
+        return { mode: actual };
+      }
 
       case 'ping':
         return {};

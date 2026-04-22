@@ -152,7 +152,7 @@ export default function McpAppView(props: McpAppViewProps) {
       daemonUrl: props.daemonUrl,
       theme: props.theme ?? 'dark',
       displayMode: props.displayMode ?? 'inline',
-      availableDisplayModes: ['inline'],
+      availableDisplayModes: props.onPopout ? ['inline', 'fullscreen'] : ['inline'],
       containerWidth,
       containerHeight,
       toolVisibility: props.toolVisibility,
@@ -161,6 +161,13 @@ export default function McpAppView(props: McpAppViewProps) {
       },
       onMessage: props.onMessage,
       onModelContextUpdate: props.onModelContextUpdate,
+      onRequestDisplayMode: (requested) => {
+        if (requested === 'fullscreen' && props.onPopout) {
+          props.onPopout();
+          return 'fullscreen';
+        }
+        return props.displayMode ?? 'inline';
+      },
       onAppToolsChanged: (tools) => props.onAppToolsChanged?.(appInstanceId, tools),
       onInitialized: () => {
         hasInitialized = true;
@@ -179,8 +186,18 @@ export default function McpAppView(props: McpAppViewProps) {
     }
   });
 
+  // Propagate theme changes to the bridge
+  createEffect(() => {
+    const theme = props.theme;
+    if (theme && bridge) {
+      bridge.updateTheme(theme);
+    }
+  });
+
   onCleanup(() => {
     props.onDestroy?.(appInstanceId);
+    // destroy() is async (awaits resource-teardown) but onCleanup is sync.
+    // Fire and let it resolve — the iframe removal will follow shortly.
     bridge?.destroy();
     if (loadingTimeout) clearTimeout(loadingTimeout);
   });
