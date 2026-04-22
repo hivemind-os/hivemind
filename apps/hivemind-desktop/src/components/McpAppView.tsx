@@ -26,6 +26,8 @@ export interface McpAppViewProps {
   toolResultRaw?: unknown;
   /** Tool input schema (JSON Schema) */
   toolInputSchema?: Record<string, unknown>;
+  /** Tool description */
+  toolDescription?: string;
   /** Session ID */
   sessionId: string;
   /** Daemon API URL */
@@ -120,6 +122,7 @@ export default function McpAppView(props: McpAppViewProps) {
       toolIsError: props.toolIsError,
       toolResultRaw: props.toolResultRaw,
       toolInputSchema: props.toolInputSchema,
+      toolDescription: props.toolDescription,
       sessionId: props.sessionId,
       daemonUrl: props.daemonUrl,
       theme: props.theme ?? 'dark',

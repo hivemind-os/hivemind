@@ -903,6 +903,7 @@ const ChatView = (props: ChatViewProps) => {
                                       toolOutput={tc.output}
                                       toolIsError={tc.isError}
                                       toolInputSchema={mcpTool()?.input_schema as Record<string, unknown> | undefined}
+                                      toolDescription={mcpTool()?.description}
                                       toolVisibility={mcpTool()?.ui_meta?.visibility ?? undefined}
                                       sessionId={props.selectedSessionId() ?? ''}
                                       daemonUrl={props.daemonUrl?.() ?? ''}
@@ -1780,6 +1781,7 @@ const ChatView = (props: ChatViewProps) => {
                   toolOutput={tc().output}
                   toolIsError={tc().isError}
                   toolInputSchema={mcpToolEntry()?.input_schema as Record<string, unknown> | undefined}
+                  toolDescription={mcpToolEntry()?.description}
                   toolVisibility={toolUiMeta()?.visibility ?? undefined}
                   sessionId={props.selectedSessionId() ?? ''}
                   daemonUrl={props.daemonUrl?.() ?? ''}

@@ -47,6 +47,8 @@ export interface McpAppBridgeConfig {
   toolResultRaw?: unknown;
   /** Tool input schema (JSON Schema) for hostContext.toolInfo */
   toolInputSchema?: Record<string, unknown>;
+  /** Tool description for hostContext.toolInfo */
+  toolDescription?: string;
   sessionId: string;
   daemonUrl: string;
   theme: 'light' | 'dark';
@@ -369,10 +371,14 @@ export class McpAppBridge {
     };
 
     // toolInfo: apps need to know which tool was called and its schema
+    // Spec: toolInfo.tool is a standard MCP Tool object { name, description, inputSchema }
     if (this.config.toolName) {
       ctx.toolInfo = {
-        name: this.config.toolName,
-        ...(this.config.toolInputSchema ? { inputSchema: this.config.toolInputSchema } : {}),
+        tool: {
+          name: this.config.toolName,
+          ...(this.config.toolDescription ? { description: this.config.toolDescription } : {}),
+          ...(this.config.toolInputSchema ? { inputSchema: this.config.toolInputSchema } : { inputSchema: { type: 'object' } }),
+        },
       };
     }
 
@@ -425,30 +431,28 @@ export class McpAppBridge {
   }
 }
 
-/** Read theme CSS variables from the document for the MCP Apps styles.variables spec. */
+/** Read theme CSS variables from the document for the MCP Apps styles.variables spec.
+ *  Keys must match McpUiStyleVariableKey from the spec (e.g. --color-background-primary). */
 function getThemeVariables(): Record<string, string> {
   try {
     const styles = getComputedStyle(document.documentElement);
     const vars: Record<string, string> = {};
-    // Map standard MCP Apps variable names to Hivemind CSS custom properties
+    // Map standardized MCP Apps variable names → Hivemind CSS custom properties
     const mapping: Record<string, string> = {
-      '--mcp-background': '--background',
-      '--mcp-foreground': '--foreground',
-      '--mcp-primary': '--primary',
-      '--mcp-primary-foreground': '--primary-foreground',
-      '--mcp-secondary': '--secondary',
-      '--mcp-secondary-foreground': '--secondary-foreground',
-      '--mcp-muted': '--muted',
-      '--mcp-muted-foreground': '--muted-foreground',
-      '--mcp-accent': '--accent',
-      '--mcp-accent-foreground': '--accent-foreground',
-      '--mcp-destructive': '--destructive',
-      '--mcp-border': '--border',
-      '--mcp-radius': '--radius',
+      '--color-background-primary': '--background',
+      '--color-background-secondary': '--secondary',
+      '--color-background-tertiary': '--muted',
+      '--color-text-primary': '--foreground',
+      '--color-text-secondary': '--muted-foreground',
+      '--color-text-inverse': '--primary-foreground',
+      '--color-text-danger': '--destructive',
+      '--color-border-primary': '--border',
+      '--color-ring-primary': '--ring',
+      '--border-radius-sm': '--radius',
     };
-    for (const [mcpVar, cssVar] of Object.entries(mapping)) {
+    for (const [specVar, cssVar] of Object.entries(mapping)) {
       const val = styles.getPropertyValue(cssVar).trim();
-      if (val) vars[mcpVar] = val;
+      if (val) vars[specVar] = val;
     }
     return vars;
   } catch {
