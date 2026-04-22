@@ -51,17 +51,17 @@ export interface McpAppViewProps {
 /** Default restrictive CSP for MCP Apps with no declared CSP. */
 function buildCspMeta(uiMeta?: McpToolUiMeta): string {
   if (!uiMeta?.csp) {
-    return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'none'; object-src 'none'; connect-src 'none';">`;
+    return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; connect-src 'none';">`;
   }
   const csp = uiMeta.csp;
   const parts: string[] = ["default-src 'none'", "object-src 'none'"];
   const connectSrc = csp.connect_domains?.length ? csp.connect_domains.join(' ') : "'none'";
   parts.push(`connect-src ${connectSrc}`);
-  parts.push("script-src 'self' 'unsafe-inline'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
+  parts.push("script-src 'self' 'unsafe-inline' 'unsafe-eval'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
   parts.push("style-src 'self' 'unsafe-inline'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("img-src 'self' data:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("media-src 'self' data:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
-  parts.push("font-src 'self'" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
+  parts.push("img-src 'self' data: blob:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
+  parts.push("media-src 'self' data: blob:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
+  parts.push("font-src 'self' data:" + (csp.resource_domains?.length ? ' ' + csp.resource_domains.join(' ') : ''));
   if (csp.frame_domains?.length) {
     parts.push(`frame-src ${csp.frame_domains.join(' ')}`);
   }
