@@ -133,13 +133,14 @@ export class McpAppBridge {
 
   /** Send partial/streaming tool input before the final tool-input. */
   sendToolInputPartial(partialInput: string): void {
-    // partialInput is the accumulated argument string so far.
-    // Attempt to parse as JSON; if it fails (common during streaming),
-    // send the raw string so the app can do partial-JSON reconstruction.
-    const parsed = tryParseJson(partialInput);
-    this.sendNotification('ui/notifications/tool-input-partial', {
-      arguments: parsed ?? partialInput,
-    });
+    // Per spec: arguments is Record<string, unknown> with best-effort
+    // recovery of incomplete JSON (close unclosed structures).
+    const recovered = recoverPartialJson(partialInput);
+    if (recovered) {
+      this.sendNotification('ui/notifications/tool-input-partial', {
+        arguments: recovered,
+      });
+    }
   }
 
   /** Send tool result to the app (full CallToolResult shape). */
@@ -658,4 +659,51 @@ function getThemeVariables(): Record<string, string> {
 function tryParseJson(s: string | undefined): unknown | undefined {
   if (!s) return undefined;
   try { return JSON.parse(s); } catch { return undefined; }
+}
+
+/**
+ * Best-effort recovery of incomplete JSON by closing unclosed structures.
+ * Per MCP Apps spec: "unclosed structures automatically closed to produce valid JSON."
+ */
+function recoverPartialJson(s: string): Record<string, unknown> | undefined {
+  if (!s || !s.trim()) return undefined;
+  // Already valid?
+  try { const v = JSON.parse(s); return typeof v === 'object' && v !== null ? v as Record<string, unknown> : undefined; } catch { /* continue */ }
+
+  let attempt = s.trim();
+  // If it doesn't start with '{', it's not recoverable as an object
+  if (!attempt.startsWith('{')) return undefined;
+
+  // Close unclosed strings: if odd number of unescaped quotes, add one
+  let inString = false;
+  for (let i = 0; i < attempt.length; i++) {
+    if (attempt[i] === '\\' && inString) { i++; continue; }
+    if (attempt[i] === '"') inString = !inString;
+  }
+  if (inString) attempt += '"';
+
+  // Track bracket/brace stack and close them
+  const stack: string[] = [];
+  inString = false;
+  for (let i = 0; i < attempt.length; i++) {
+    const c = attempt[i];
+    if (c === '\\' && inString) { i++; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === '{') stack.push('}');
+    else if (c === '[') stack.push(']');
+    else if (c === '}' || c === ']') stack.pop();
+  }
+
+  // Remove trailing comma before closing
+  attempt = attempt.replace(/,\s*$/, '');
+  // Close all open structures
+  while (stack.length > 0) attempt += stack.pop();
+
+  try {
+    const v = JSON.parse(attempt);
+    return typeof v === 'object' && v !== null ? v as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
 }
