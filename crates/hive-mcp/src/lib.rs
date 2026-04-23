@@ -1,8 +1,8 @@
 pub use hive_contracts::{
-    ChannelClass, McpCallToolResult, McpCatalog, McpCatalogEntry, McpConnectedTool,
+    ChannelClass, McpAppResource, McpCallToolResult, McpCatalog, McpCatalogEntry, McpConnectedTool,
     McpConnectionStatus, McpNotificationEvent, McpNotificationKind, McpPromptArgumentInfo,
-    McpPromptInfo, McpResourceInfo, McpSandboxStatus, McpServerLog, McpServerSnapshot, McpToolInfo,
-    McpTransportConfig,
+    McpPromptInfo, McpReadResourceResult, McpResourceContent, McpResourceInfo, McpSandboxStatus,
+    McpServerLog, McpServerSnapshot, McpToolInfo, McpToolUiMeta, McpTransportConfig,
 };
 use hive_core::{EventBus, McpServerConfig};
 use rmcp::model::{
@@ -178,6 +178,8 @@ pub struct McpService {
     /// Servers whose catalog discovery failed because the required runtime
     /// (Node.js or Python) was not yet installed.  Keyed by server ID.
     pending_runtime_servers: Arc<parking_lot::RwLock<HashMap<String, runtime::McpRuntime>>>,
+    /// Cache of fetched MCP App UI resources. Key: (server_id, resource_uri).
+    ui_resource_cache: Arc<RwLock<HashMap<(String, String), McpAppResource>>>,
 }
 
 impl McpService {
@@ -201,6 +203,7 @@ impl McpService {
             node_env: None,
             python_env: None,
             pending_runtime_servers: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            ui_resource_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -1041,6 +1044,7 @@ impl McpService {
             .await
             .map_err(|error| map_request_error(server_id, error))?;
 
+        // Flatten text content for backward-compat display
         let content = result
             .content
             .iter()
@@ -1051,7 +1055,14 @@ impl McpService {
             .collect::<Vec<_>>()
             .join("\n");
 
-        Ok(McpCallToolResult { content, is_error: result.is_error.unwrap_or(false) })
+        // Serialize the full result as raw JSON for MCP Apps
+        let raw = serde_json::to_value(&result).ok();
+
+        Ok(McpCallToolResult {
+            content,
+            is_error: result.is_error.unwrap_or(false),
+            raw,
+        })
     }
 
     /// Return every tool from every *connected* server, together with the
@@ -1129,7 +1140,7 @@ impl McpService {
         &self,
         server_id: &str,
         uri: &str,
-    ) -> Result<String, McpServiceError> {
+    ) -> Result<McpReadResourceResult, McpServiceError> {
         let peer = self.peer_for(server_id).await?;
         let result = peer
             .read_resource(ReadResourceRequestParam { uri: uri.to_string() })
@@ -1137,18 +1148,53 @@ impl McpService {
             .map_err(|error| map_request_error(server_id, error))?;
 
         use rmcp::model::ResourceContents;
-        let content = result
+        let contents: Vec<McpResourceContent> = result
+            .contents
+            .into_iter()
+            .map(|c| match c {
+                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                    McpResourceContent {
+                        uri: uri.to_string(),
+                        mime_type,
+                        text: Some(text),
+                        blob: None,
+                    }
+                }
+                ResourceContents::BlobResourceContents { uri, mime_type, blob, .. } => {
+                    McpResourceContent {
+                        uri: uri.to_string(),
+                        mime_type,
+                        text: None,
+                        blob: Some(blob),
+                    }
+                }
+            })
+            .collect();
+        Ok(McpReadResourceResult { contents })
+    }
+
+    /// Read a resource as plain text (convenience wrapper for backward compat).
+    pub async fn read_resource_text(
+        &self,
+        server_id: &str,
+        uri: &str,
+    ) -> Result<String, McpServiceError> {
+        let result = self.read_resource(server_id, uri).await?;
+        let text = result
             .contents
             .iter()
-            .map(|c| match c {
-                ResourceContents::TextResourceContents { text, .. } => text.clone(),
-                ResourceContents::BlobResourceContents { blob, .. } => {
-                    format!("[binary resource, base64 ({} chars)]\n{}", blob.len(), blob)
+            .map(|c| {
+                if let Some(t) = &c.text {
+                    t.clone()
+                } else if let Some(b) = &c.blob {
+                    format!("[binary resource, base64 ({} chars)]\n{}", b.len(), b)
+                } else {
+                    String::new()
                 }
             })
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(content)
+        Ok(text)
     }
 
     /// Subscribe to change notifications for a resource URI.
@@ -1162,6 +1208,57 @@ impl McpService {
             .await
             .map_err(|error| map_request_error(server_id, error))?;
         Ok(())
+    }
+
+    /// Fetch an MCP App UI resource (`ui://` scheme) and return structured content.
+    /// Results are cached per (server_id, uri); cache is invalidated on
+    /// `notifications/resources/list_changed`.
+    ///
+    /// CSP/permissions metadata is extracted from the resource content's `_meta.ui`
+    /// (per spec), not from the tool-level `_meta.ui`.
+    pub async fn fetch_ui_resource(
+        &self,
+        server_id: &str,
+        resource_uri: &str,
+        _ui_meta: Option<&McpToolUiMeta>,
+    ) -> Result<McpAppResource, McpServiceError> {
+        // Check cache first
+        let cache_key = (server_id.to_string(), resource_uri.to_string());
+        {
+            let cache = self.ui_resource_cache.read().await;
+            if let Some(cached) = cache.get(&cache_key) {
+                return Ok(cached.clone());
+            }
+        }
+
+        // Fetch from server using structured read_resource
+        let result = self.read_resource(server_id, resource_uri).await?;
+        let html = result
+            .contents
+            .iter()
+            .filter_map(|c| c.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let resource = McpAppResource {
+            uri: resource_uri.to_string(),
+            html,
+            ui_meta: _ui_meta.cloned(),
+        };
+
+        // Cache the result
+        {
+            let mut cache = self.ui_resource_cache.write().await;
+            cache.insert(cache_key, resource.clone());
+        }
+
+        Ok(resource)
+    }
+
+    /// Invalidate cached UI resources for a server (called on resource list changed).
+    pub async fn invalidate_ui_cache(&self, server_id: &str) {
+        let mut cache = self.ui_resource_cache.write().await;
+        cache.retain(|(sid, _), _| sid != server_id);
     }
 
     /// Drain all pending notifications, returning them and clearing the buffer.
@@ -1654,7 +1751,9 @@ impl ClientHandler for McpClientHandler {
         let server_id = self.server_id.clone();
         let event_bus = self.event_bus.clone();
         tokio::spawn(async move {
-            if let Some(svc) = service {
+            if let Some(svc) = &service {
+                // Invalidate cached MCP App UI resources for this server.
+                svc.invalidate_ui_cache(&server_id).await;
                 if let Err(e) = svc.list_resources(&server_id).await {
                     tracing::debug!(server_id = %server_id, error = %e, "failed to refresh resource cache after resource_list_changed");
                 }
@@ -1717,6 +1816,31 @@ impl ClientHandler for McpClientHandler {
 
     fn set_peer(&mut self, peer: Peer<RoleClient>) {
         self.peer = Some(peer);
+    }
+
+    fn get_info(&self) -> rmcp::model::ClientInfo {
+        use rmcp::model::{ClientCapabilities, Implementation};
+        use std::collections::BTreeMap;
+
+        let mut ui_ext = serde_json::Map::new();
+        ui_ext.insert(
+            "mimeTypes".to_string(),
+            serde_json::json!(["text/html;profile=mcp-app"]),
+        );
+        let mut extensions = BTreeMap::new();
+        extensions.insert("io.modelcontextprotocol/ui".to_string(), ui_ext);
+
+        rmcp::model::ClientInfo {
+            protocol_version: Default::default(),
+            capabilities: ClientCapabilities {
+                extensions: Some(extensions),
+                ..Default::default()
+            },
+            client_info: Implementation {
+                name: "hivemind".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+        }
     }
 }
 
@@ -1823,10 +1947,34 @@ pub(crate) fn now_ms() -> u128 {
 }
 
 fn tool_to_info(tool: Tool) -> McpToolInfo {
+    // Extract _meta.ui for MCP Apps support (standard format)
+    let mut ui_meta = tool
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("ui"))
+        .and_then(|ui| serde_json::from_value::<McpToolUiMeta>(ui.clone()).ok());
+
+    // Fallback: deprecated flat key format _meta["ui/resourceUri"]
+    if ui_meta.as_ref().and_then(|m| m.resource_uri.as_ref()).is_none() {
+        if let Some(meta) = tool.meta.as_ref() {
+            if let Some(uri) = meta.get("ui/resourceUri").and_then(|v| v.as_str()) {
+                let m = ui_meta.get_or_insert_with(|| McpToolUiMeta {
+                    resource_uri: None,
+                    visibility: None,
+                    csp: None,
+                    permissions: None,
+                    prefers_border: None,
+                });
+                m.resource_uri = Some(uri.to_string());
+            }
+        }
+    }
+
     McpToolInfo {
         name: tool.name.to_string(),
         description: tool.description.to_string(),
         input_schema: tool.schema_as_json_value(),
+        ui_meta,
     }
 }
 
@@ -2180,6 +2328,7 @@ mod tests {
                 name: name.to_string().into(),
                 description: description.to_string().into(),
                 input_schema: schema,
+                meta: None,
             });
             self
         }

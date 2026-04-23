@@ -33,9 +33,9 @@ use hive_loop::{
 };
 use hive_mcp::{McpCatalogStore, McpService, SessionMcpManager};
 use hive_model::{
-    Capability, CompletionMessage, CompletionRequest, EchoProvider, HttpProvider,
-    LocalModelProvider, ModelRouter, ModelRouterSnapshot, ProviderAuth, ProviderDescriptor,
-    ProviderKind, RoutingRequest,
+    Capability, CompletionMessage, CompletionRequest, CompletionResponse, EchoProvider,
+    HttpProvider, LocalModelProvider, ModelRouter, ModelRouterError, ModelRouterSnapshot,
+    ProviderAuth, ProviderDescriptor, ProviderKind, RoutingRequest,
 };
 use hive_risk::{RiskService, RiskServiceError};
 use hive_skills::SkillCatalog;
@@ -193,6 +193,15 @@ impl From<SupervisorEvent> for SessionEvent {
     }
 }
 
+/// An MCP App tool registered by a frontend iframe.
+#[derive(Debug, Clone)]
+pub struct AppToolRegistration {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    pub server_id: String,
+}
+
 #[derive(Clone)]
 struct SessionRecord {
     session_node_id: i64,
@@ -240,6 +249,8 @@ struct SessionRecord {
     session_mcp: Option<Arc<SessionMcpManager>>,
     /// The active persona for this session, determines which MCP servers are available.
     active_persona_id: Option<String>,
+    /// App-registered tools from MCP App iframes. Keyed by app_instance_id.
+    app_tools: HashMap<String, Vec<AppToolRegistration>>,
     /// Ring buffer of recent signals from workflow sub-agents. These are
     /// included in the workflow context system message rather than triggering
     /// a separate LLM turn. Entries are `(agent_friendly_name, message)`.
@@ -2050,6 +2061,7 @@ impl ChatService {
                 title_pinned: false,
                 session_mcp: session_mcp_manager,
                 active_persona_id: persona_id,
+                app_tools: HashMap::new(),
                 workflow_agent_signals: Vec::new(),
             },
         );
@@ -2354,6 +2366,7 @@ impl ChatService {
                 title_pinned: restored.title_pinned,
                 session_mcp: restored_session_mcp,
                 active_persona_id: restored.last_persona_id,
+                app_tools: HashMap::new(),
                 workflow_agent_signals: Vec::new(),
             };
 
@@ -3256,6 +3269,58 @@ impl ChatService {
         Ok(())
     }
 
+    /// Save binary content (base64-encoded) to a workspace file.
+    pub async fn save_workspace_file_binary(
+        &self,
+        session_id: &str,
+        file_path: &str,
+        content_base64: &str,
+    ) -> Result<(), ChatServiceError> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(content_base64)
+            .map_err(|e| ChatServiceError::Internal { detail: format!("invalid base64: {e}") })?;
+
+        let workspace = self.get_workspace_path(session_id).await?;
+        let full_path = workspace.join(normalize_workspace_relative_path(file_path)?);
+
+        let canonical_workspace = workspace
+            .canonicalize()
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        }
+        let canonical_parent = full_path
+            .parent()
+            .unwrap_or(workspace.as_path())
+            .canonicalize()
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        if !canonical_parent.starts_with(&canonical_workspace) {
+            return Err(ChatServiceError::Internal {
+                detail: "Path traversal not allowed".to_string(),
+            });
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(&full_path) {
+            if metadata.file_type().is_symlink() {
+                return Err(ChatServiceError::Internal {
+                    detail: "Path traversal not allowed".to_string(),
+                });
+            }
+            if let Ok(canonical_path) = full_path.canonicalize() {
+                if !canonical_path.starts_with(&canonical_workspace) {
+                    return Err(ChatServiceError::Internal {
+                        detail: "Path traversal not allowed".to_string(),
+                    });
+                }
+            }
+        }
+
+        std::fs::write(&full_path, &bytes)
+            .map_err(|error| ChatServiceError::Internal { detail: error.to_string() })?;
+        Ok(())
+    }
+
     pub async fn create_workspace_directory(
         &self,
         session_id: &str,
@@ -3599,9 +3664,77 @@ impl ChatService {
         self.model_router.load().snapshot()
     }
 
+    /// Perform a one-shot LLM completion without creating a chat session.
+    ///
+    /// Routes the request through the model router and returns the response.
+    /// This is a blocking call — callers should use `spawn_blocking` when
+    /// invoked from an async context.
+    pub fn complete_once(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelRouterError> {
+        let router = self.model_router.load_full();
+        router.complete(request)
+    }
+
     /// Atomically replace the model router with a newly built one.
     pub fn swap_router(&self, new_router: Arc<ModelRouter>) {
         self.model_router.store(new_router);
+    }
+
+    // ── App-registered tools (MCP Apps) ─────────────────────────────
+
+    /// Register tools declared by an MCP App iframe for a session.
+    /// These are included in the session's tool registry on next LLM turn.
+    pub async fn register_app_tools(
+        &self,
+        session_id: &str,
+        app_instance_id: &str,
+        tools: Vec<AppToolRegistration>,
+    ) -> Result<(), ChatServiceError> {
+        let mut sessions = self.sessions.write().await;
+        let record = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        record.app_tools.insert(app_instance_id.to_string(), tools);
+        Ok(())
+    }
+
+    /// Unregister all tools for a specific app instance.
+    pub async fn unregister_app_tools(
+        &self,
+        session_id: &str,
+        app_instance_id: &str,
+    ) -> Result<(), ChatServiceError> {
+        let mut sessions = self.sessions.write().await;
+        if let Some(record) = sessions.get_mut(session_id) {
+            record.app_tools.remove(app_instance_id);
+        }
+        Ok(())
+    }
+
+    /// Get the interaction gate for a session (used for app tool call responses).
+    pub async fn get_interaction_gate(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<UserInteractionGate>, ChatServiceError> {
+        let sessions = self.sessions.read().await;
+        let record = sessions
+            .get(session_id)
+            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        Ok(Arc::clone(&record.interaction_gate))
+    }
+
+    /// Get all registered app tools for a session.
+    pub async fn get_app_tools(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, Vec<AppToolRegistration>)>, ChatServiceError> {
+        let sessions = self.sessions.read().await;
+        let record = sessions
+            .get(session_id)
+            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        Ok(record.app_tools.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 
     /// Propagate new MCP server configurations to all existing sessions.
@@ -4763,6 +4896,7 @@ impl ChatService {
                 title_pinned: true,
                 session_mcp: bot_session_mcp,
                 active_persona_id: None,
+                app_tools: HashMap::new(),
                 workflow_agent_signals: Vec::new(),
             },
         );
@@ -5098,6 +5232,7 @@ impl ChatService {
                         title_pinned: true,
                         session_mcp: bot_bridge_mcp,
                         active_persona_id: None,
+                        app_tools: HashMap::new(),
                         workflow_agent_signals: Vec::new(),
                     },
                 );
@@ -6166,7 +6301,7 @@ impl ChatService {
                 let sessions = self.sessions.read().await;
                 sessions.get(&session_id).and_then(|s| s.session_mcp.clone())
             };
-            let session_tools = build_session_tools(
+            let mut session_tools = build_session_tools(
                 &workspace_path,
                 &pending.persona.allowed_tools,
                 pending.excluded_tools.as_deref(),
@@ -6197,6 +6332,55 @@ impl ChatService {
                 self.plugin_registry.as_ref().map(|r| r.as_ref()),
             )
             .await;
+
+            // Inject app-registered tools (from MCP App iframes) into the registry
+            {
+                let sessions = self.sessions.read().await;
+                if let Some(record) = sessions.get(&session_id) {
+                    if !record.app_tools.is_empty() {
+                        let interaction_gate = Arc::clone(&record.interaction_gate);
+                        let event_bus = self.event_bus.clone();
+                        let sid = session_id.clone();
+                        let mut registry = (*session_tools).clone();
+                        for (app_instance_id, tools) in &record.app_tools {
+                            for tool_reg in tools {
+                                let tool_id = format!(
+                                    "app.{}.{}",
+                                    &app_instance_id[..8.min(app_instance_id.len())],
+                                    tool_reg.name
+                                );
+                                let gate = Arc::clone(&interaction_gate);
+                                let bus = event_bus.clone();
+                                let sid2 = sid.clone();
+                                let interaction_fn: hive_tools::InteractionRequestFn =
+                                    Arc::new(move |req_id, kind| gate.create_request(req_id, kind));
+                                let event_fn: hive_tools::AppToolEventFn = Arc::new(move |evt| {
+                                    let payload =
+                                        serde_json::to_value(&evt).unwrap_or_default();
+                                    let _ = bus.publish(
+                                        format!("mcp.app-tool.call-requested.{}", sid2),
+                                        "app-tool-proxy",
+                                        payload,
+                                    );
+                                });
+                                let proxy = hive_tools::AppToolProxy::new(
+                                    tool_id,
+                                    tool_reg.name.clone(),
+                                    tool_reg.description.clone(),
+                                    tool_reg.input_schema.clone(),
+                                    app_instance_id.clone(),
+                                    sid.clone(),
+                                    interaction_fn,
+                                    event_fn,
+                                );
+                                let _ = registry.register_or_replace(Arc::new(proxy));
+                            }
+                        }
+                        session_tools = Arc::new(registry);
+                    }
+                }
+            }
+
             let agent_orchestrator: Arc<dyn AgentOrchestrator> =
                 Arc::new(SessionAgentOrchestrator::new(self.as_ref().clone(), session_id.clone()));
             let personas = self.available_personas();
@@ -8332,6 +8516,13 @@ fn answer_text_from_payload(payload: &hive_contracts::InteractionResponsePayload
                 "Denied".to_string()
             }
         }
+        hive_contracts::InteractionResponsePayload::AppToolCallResult { is_error, .. } => {
+            if *is_error {
+                "(app tool error)".to_string()
+            } else {
+                "(app tool result)".to_string()
+            }
+        }
     }
 }
 
@@ -9033,6 +9224,12 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                     message: message.clone(),
                 }
             }
+            InteractionKind::AppToolCall { tool_name, .. } => {
+                ReasoningEvent::ToolCallStarted {
+                    tool_id: format!("app.{tool_name}"),
+                    input: json!({}),
+                }
+            }
         },
         LoopEvent::AgentSessionMessage { from_agent_id, content } => {
             ReasoningEvent::ToolCallCompleted {
@@ -9065,6 +9262,14 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
         LoopEvent::Preempted => {
             ReasoningEvent::PathAbandoned {
                 reason: "Turn preempted: a new user message is waiting".to_string(),
+            }
+        }
+        LoopEvent::ToolCallArgDelta { index, call_id, tool_name, arguments_so_far } => {
+            ReasoningEvent::ToolCallArgDelta {
+                index: *index,
+                call_id: call_id.clone(),
+                tool_name: tool_name.clone(),
+                arguments_so_far: arguments_so_far.clone(),
             }
         }
     }
@@ -10132,6 +10337,7 @@ mod tests {
                     name: "do_stuff".to_string(),
                     description: "does stuff".to_string(),
                     input_schema: serde_json::json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -11110,6 +11316,7 @@ mod tests {
                     name: "search_docs".to_string(),
                     description: "Search documentation".to_string(),
                     input_schema: serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -11524,5 +11731,93 @@ mod tests {
         let service = test_chat_service(graph_path);
         let result = service.restore_sessions().await;
         assert!(result.is_ok(), "restore should not fail on corrupt agent data");
+    }
+
+    #[tokio::test]
+    async fn register_app_tools_preserves_supervisor_and_agents() {
+        let tempdir = tempdir().expect("tempdir");
+        let service = test_chat_service(tempdir.path().join("graph.db"));
+
+        let session = service
+            .create_session(SessionModality::Linear, Some("App tools test".to_string()), None)
+            .await
+            .expect("create session");
+
+        // Spawn an agent via the supervisor.
+        let supervisor = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("create supervisor");
+        let agent_id = supervisor
+            .spawn_agent(
+                AgentSpec {
+                    id: "helper".to_string(),
+                    name: "Helper".to_string(),
+                    friendly_name: "swift_hopper".to_string(),
+                    description: "Helps with things".to_string(),
+                    role: AgentRole::Coder,
+                    model: None,
+                    preferred_models: None,
+                    loop_strategy: None,
+                    tool_execution_mode: None,
+                    system_prompt: "Help the user".to_string(),
+                    allowed_tools: Vec::new(),
+                    avatar: None,
+                    color: None,
+                    data_class: hive_classification::DataClass::Public,
+                    keep_alive: false,
+                    idle_timeout_secs: None,
+                    tool_limits: None,
+                    persona_id: None,
+                    workflow_managed: false,
+                },
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("spawn agent");
+
+        assert_eq!(supervisor.get_all_agents().len(), 1, "agent should be alive before register");
+
+        // Register app tools — must NOT drop the supervisor or agents.
+        service
+            .register_app_tools(
+                &session.id,
+                "app-instance-abc",
+                vec![AppToolRegistration {
+                    name: "do-something".to_string(),
+                    description: "Does something".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                    server_id: "test-server".to_string(),
+                }],
+            )
+            .await
+            .expect("register app tools");
+
+        // Supervisor must still be the same instance with the agent alive.
+        let supervisor_after = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("get supervisor after register");
+        assert!(Arc::ptr_eq(&supervisor, &supervisor_after), "supervisor must not be replaced on register");
+        assert_eq!(supervisor_after.get_all_agents().len(), 1, "agent must survive app tool registration");
+        assert_eq!(supervisor_after.get_all_agents()[0].agent_id, agent_id);
+
+        // Unregister app tools — must also NOT drop the supervisor or agents.
+        service
+            .unregister_app_tools(&session.id, "app-instance-abc")
+            .await
+            .expect("unregister app tools");
+
+        let supervisor_final = service
+            .get_or_create_supervisor(&session.id)
+            .await
+            .expect("get supervisor after unregister");
+        assert!(Arc::ptr_eq(&supervisor, &supervisor_final), "supervisor must not be replaced on unregister");
+        assert_eq!(supervisor_final.get_all_agents().len(), 1, "agent must survive app tool unregistration");
+
+        supervisor.kill_all().await.expect("cleanup");
     }
 }

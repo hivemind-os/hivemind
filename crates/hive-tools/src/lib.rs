@@ -89,6 +89,9 @@ pub use workflow_author_tools::{
     WORKFLOW_AUTHOR_TOOL_IDS,
 };
 
+pub mod app_tool_proxy;
+pub use app_tool_proxy::{AppToolCallEvent, AppToolEventFn, AppToolProxy, InteractionRequestFn};
+
 use glob::glob;
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::prompt_sanitize::escape_prompt_tags;
@@ -262,6 +265,32 @@ impl ToolRegistry {
         }
         self.tools.insert(id, tool);
         Ok(())
+    }
+
+    /// Register a tool, replacing any existing tool with the same ID.
+    pub fn register_or_replace(&mut self, tool: Arc<dyn Tool>) -> Result<(), ToolRegistryError> {
+        let id = tool.definition().id.trim().to_string();
+        if id.is_empty() {
+            return Err(ToolRegistryError::EmptyId);
+        }
+        self.tools.insert(id, tool);
+        Ok(())
+    }
+
+    /// Remove a tool by ID. Returns true if the tool was found and removed.
+    pub fn unregister(&mut self, id: &str) -> bool {
+        self.tools.remove(id).is_some()
+    }
+
+    /// Remove all tools whose IDs start with the given prefix.
+    /// Returns the number of tools removed.
+    pub fn unregister_by_prefix(&mut self, prefix: &str) -> usize {
+        let ids: Vec<String> = self.tools.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        let count = ids.len();
+        for id in ids {
+            self.tools.remove(&id);
+        }
+        count
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn Tool>> {
@@ -1018,7 +1047,7 @@ fn reject_hivemind_config_path(path: &Path) -> Result<(), ToolError> {
 }
 
 pub(crate) fn resolve_existing_path(root: &Path, path: &str) -> Result<PathBuf, ToolError> {
-    if Path::new(path).is_absolute() {
+    if Path::new(path).is_absolute() || path.starts_with('/') {
         return Err(ToolError::InvalidInput("absolute paths are not allowed".to_string()));
     }
     let root = root
@@ -1036,7 +1065,7 @@ pub(crate) fn resolve_existing_path(root: &Path, path: &str) -> Result<PathBuf, 
 }
 
 pub(crate) fn resolve_relative_path(root: &Path, path: &str) -> Result<PathBuf, ToolError> {
-    if Path::new(path).is_absolute() {
+    if Path::new(path).is_absolute() || path.starts_with('/') {
         return Err(ToolError::InvalidInput("absolute paths are not allowed".to_string()));
     }
     if Path::new(path).components().any(|component| matches!(component, Component::ParentDir)) {
@@ -2906,8 +2935,13 @@ impl Tool for McpBridgeTool {
                  <external_data>\n{}\n</external_data>",
                 self.server_id, safe_content
             );
+            let mut output = json!({ "content": wrapped });
+            // Include raw MCP CallToolResult for MCP Apps (structuredContent, etc.)
+            if let Some(raw) = result.raw {
+                output["_mcp_raw"] = raw;
+            }
             Ok(ToolResult {
-                output: json!({ "content": wrapped }),
+                output,
                 data_class: channel_class_to_data_class(self.definition.channel_class),
             })
         })
@@ -2930,6 +2964,14 @@ pub async fn register_mcp_tools(
     for ct in catalog.all_cataloged_tools().await {
         if !enabled_server_ids.contains(&ct.server_id.to_string()) {
             continue;
+        }
+        // MCP Apps visibility: skip tools that are only for apps (not for the model/LLM)
+        if let Some(ref ui_meta) = ct.tool.ui_meta {
+            if let Some(ref vis) = ui_meta.visibility {
+                if !vis.is_empty() && !vis.iter().any(|v| v == "model") {
+                    continue;
+                }
+            }
         }
         let server_id = ct.server_id;
         let tool_name = ct.tool.name;
@@ -3408,6 +3450,7 @@ mod tests {
                     name: "tool_a".to_string(),
                     description: "tool a".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -3422,6 +3465,7 @@ mod tests {
                     name: "tool_b".to_string(),
                     description: "tool b".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -3463,6 +3507,7 @@ mod tests {
                     name: "tool_a".to_string(),
                     description: "a".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -3477,6 +3522,7 @@ mod tests {
                     name: "tool_b".to_string(),
                     description: "b".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -4056,5 +4102,108 @@ mod tests {
 
         assert!(ids.contains(&"datetime.now".to_string()));
         assert!(!ids.contains(&"math.calculate".to_string()));
+    }
+
+    // ── ToolRegistry lifecycle: register_or_replace, unregister ──────
+
+    #[test]
+    fn register_or_replace_overwrites_existing() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+
+        // register_or_replace with same ID should succeed (not error)
+        registry.register_or_replace(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+        assert_eq!(registry.list_definitions().len(), 1);
+    }
+
+    #[test]
+    fn register_or_replace_rejects_empty_id() {
+        let mut registry = ToolRegistry::new();
+        struct EmptyTool;
+        impl Tool for EmptyTool {
+            fn definition(&self) -> &ToolDefinition {
+                static DEF: std::sync::LazyLock<ToolDefinition> = std::sync::LazyLock::new(|| {
+                    ToolDefinition {
+                        id: "".to_string(),
+                        name: "".to_string(),
+                        description: "".to_string(),
+                        input_schema: serde_json::json!({}),
+                        output_schema: None,
+                        channel_class: hive_classification::ChannelClass::Internal,
+                        side_effects: false,
+                        approval: hive_contracts::ToolApproval::Auto,
+                        annotations: hive_contracts::ToolAnnotations {
+                            title: "".to_string(),
+                            read_only_hint: None,
+                            destructive_hint: None,
+                            idempotent_hint: None,
+                            open_world_hint: None,
+                        },
+                    }
+                });
+                &DEF
+            }
+            fn execute(&self, _: serde_json::Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+                Box::pin(async { Err(ToolError::ExecutionFailed("not impl".into())) })
+            }
+        }
+        assert!(matches!(
+            registry.register_or_replace(Arc::new(EmptyTool)),
+            Err(ToolRegistryError::EmptyId)
+        ));
+    }
+
+    #[test]
+    fn unregister_removes_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert!(registry.get("math.calculate").is_some());
+
+        assert!(registry.unregister("math.calculate"));
+        assert!(registry.get("math.calculate").is_none());
+    }
+
+    #[test]
+    fn unregister_nonexistent_returns_false() {
+        let mut registry = ToolRegistry::new();
+        assert!(!registry.unregister("nonexistent.tool"));
+    }
+
+    #[test]
+    fn unregister_by_prefix_removes_matching() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        registry.register(Arc::new(DateTimeTool::default())).unwrap();
+
+        // Only "math." prefix should match calculator
+        let removed = registry.unregister_by_prefix("math.");
+        assert_eq!(removed, 1);
+        assert!(registry.get("math.calculate").is_none());
+        assert!(registry.get("datetime.now").is_some());
+    }
+
+    #[test]
+    fn unregister_by_prefix_no_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        assert_eq!(registry.unregister_by_prefix("app."), 0);
+    }
+
+    #[test]
+    fn register_duplicate_id_errors() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        let result = registry.register(Arc::new(CalculatorTool::default()));
+        assert!(matches!(result, Err(ToolRegistryError::DuplicateId { .. })));
+    }
+
+    #[test]
+    fn get_falls_back_to_sanitized_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(CalculatorTool::default())).unwrap();
+        // "math.calculate" should be findable as "math_calculate" (LLM sanitization)
+        assert!(registry.get("math_calculate").is_some());
     }
 }

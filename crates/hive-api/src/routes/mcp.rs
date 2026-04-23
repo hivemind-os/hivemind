@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::clamp_limit;
 use crate::{mcp_error, AppState};
@@ -317,4 +318,315 @@ pub(crate) async fn install_mcp_runtime(
     // Retry connection now that the runtime is installed.
     let snapshot = state.mcp.connect(&server_id).await.map_err(mcp_error)?;
     Ok(Json(snapshot))
+}
+
+// ── MCP App endpoints ───────────────────────────────────────────────
+
+/// POST /api/v1/mcp/servers/{server_id}/call-tool
+///
+/// Call a tool on an MCP server. Used by MCP Apps to proxy tool calls.
+#[derive(Deserialize)]
+pub(crate) struct CallToolRequest {
+    pub name: String,
+    pub arguments: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct CallToolResponse {
+    pub content: String,
+    pub is_error: bool,
+    /// Full raw MCP CallToolResult (for MCP Apps — preserves structuredContent, _meta, multi-block content)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
+}
+
+pub(crate) async fn call_mcp_tool(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<CallToolRequest>,
+) -> Result<Json<CallToolResponse>, (StatusCode, String)> {
+    let args: serde_json::Map<String, serde_json::Value> = match req.arguments {
+        Some(serde_json::Value::Object(map)) => map,
+        Some(_) => return Err((StatusCode::BAD_REQUEST, "arguments must be an object".into())),
+        None => serde_json::Map::new(),
+    };
+    let result = state
+        .mcp
+        .call_tool(&server_id, &req.name, args)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(CallToolResponse {
+        content: result.content,
+        is_error: result.is_error,
+        raw: result.raw,
+    }))
+}
+
+/// POST /api/v1/mcp/servers/{server_id}/read-resource
+///
+/// Read a resource from an MCP server. Used by MCP Apps to proxy resource reads.
+#[derive(Deserialize)]
+pub(crate) struct ReadResourceRequest {
+    pub uri: String,
+}
+
+pub(crate) async fn read_mcp_resource(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<ReadResourceRequest>,
+) -> Result<Json<hive_mcp::McpReadResourceResult>, (StatusCode, String)> {
+    let result = state
+        .mcp
+        .read_resource(&server_id, &req.uri)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(result))
+}
+
+/// POST /api/v1/mcp/servers/{server_id}/fetch-ui-resource
+///
+/// Fetch an MCP App UI resource (ui:// scheme) with caching.
+#[derive(Deserialize)]
+pub(crate) struct FetchUiResourceRequest {
+    pub uri: String,
+}
+
+pub(crate) async fn fetch_mcp_ui_resource(
+    State(state): State<AppState>,
+    Path(server_id): Path<String>,
+    Json(req): Json<FetchUiResourceRequest>,
+) -> Result<Json<hive_mcp::McpAppResource>, (StatusCode, String)> {
+    // Ensure the server is connected — UI resources require a live session
+    // because they're fetched via the MCP resources/read protocol call.
+    state.mcp.ensure_connected(&server_id).await.map_err(mcp_error)?;
+    let resource = state
+        .mcp
+        .fetch_ui_resource(&server_id, &req.uri, None)
+        .await
+        .map_err(mcp_error)?;
+    Ok(Json(resource))
+}
+
+// ── MCP Apps sampling ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SamplingCreateMessageRequest {
+    pub messages: Vec<SamplingMessage>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub model_preferences: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SamplingMessage {
+    pub role: String,
+    pub content: SamplingContent,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum SamplingContent {
+    Text(String),
+    Parts(Vec<SamplingContentPart>),
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SamplingContentPart {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+pub(crate) async fn mcp_sampling_create_message(
+    State(state): State<AppState>,
+    Json(req): Json<SamplingCreateMessageRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_model::{Capability, CompletionMessage, CompletionRequest};
+    use std::collections::BTreeSet;
+
+    let mut messages: Vec<CompletionMessage> = Vec::new();
+
+    // System prompt as first system message
+    if let Some(ref sys) = req.system_prompt {
+        messages.push(CompletionMessage::text("system", sys.clone()));
+    }
+
+    // Convert MCP sampling messages to CompletionMessages
+    for msg in &req.messages {
+        let text = match &msg.content {
+            SamplingContent::Text(t) => t.clone(),
+            SamplingContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| {
+                    if p.kind == "text" { p.text.clone() } else { None }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        messages.push(CompletionMessage::text(&msg.role, text));
+    }
+
+    // Extract model hints from preferences for preferred_models
+    let preferred_models = req
+        .model_preferences
+        .as_ref()
+        .and_then(|prefs| prefs.get("hints"))
+        .and_then(|h| h.as_array())
+        .map(|hints| {
+            hints
+                .iter()
+                .filter_map(|h| h.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+
+    // Build the prompt from the last user message
+    let prompt = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    let completion_req = CompletionRequest {
+        prompt,
+        prompt_content_parts: vec![],
+        messages,
+        required_capabilities: BTreeSet::from([Capability::Chat]),
+        preferred_models,
+        tools: vec![],
+    };
+
+    // complete_once is synchronous (blocking I/O) — run on a blocking thread
+    let chat = Arc::clone(&state.chat);
+    let result = tokio::task::spawn_blocking(move || chat.complete_once(&completion_req))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Join error: {e}")))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("LLM error: {e}")))?;
+
+    // Return MCP sampling response format
+    Ok(Json(serde_json::json!({
+        "role": "assistant",
+        "content": {
+            "type": "text",
+            "text": result.content
+        },
+        "model": result.model
+    })))
+}
+
+// ── App-registered tools endpoints ─────────────────────────────────
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolsRegisterRequest {
+    pub session_id: String,
+    pub app_instance_id: String,
+    #[allow(dead_code)]
+    pub server_id: Option<String>,
+    pub tools: Vec<AppToolDef>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, rename = "inputSchema")]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+/// Register app-declared tools so they appear in the LLM's tool list.
+pub(crate) async fn mcp_app_tools_register(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolsRegisterRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_chat::AppToolRegistration;
+
+    let tools: Vec<AppToolRegistration> = req
+        .tools
+        .into_iter()
+        .map(|t| AppToolRegistration {
+            name: t.name,
+            description: t.description.unwrap_or_default(),
+            input_schema: t.input_schema.unwrap_or(json!({"type": "object"})),
+            server_id: req.server_id.clone().unwrap_or_default(),
+        })
+        .collect();
+
+    let count = tools.len();
+    state
+        .chat
+        .register_app_tools(&req.session_id, &req.app_instance_id, tools)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(json!({ "registered": count })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolsUnregisterRequest {
+    pub session_id: String,
+    pub app_instance_id: String,
+}
+
+/// Unregister all tools for an app instance (called on iframe teardown).
+pub(crate) async fn mcp_app_tools_unregister(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolsUnregisterRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    state
+        .chat
+        .unregister_app_tools(&req.session_id, &req.app_instance_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolRespondRequest {
+    pub session_id: String,
+    pub request_id: String,
+    pub result: AppToolResultPayload,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppToolResultPayload {
+    #[serde(default)]
+    pub content: serde_json::Value,
+    #[serde(default, rename = "isError")]
+    pub is_error: bool,
+}
+
+/// Frontend responds with the result of an app tool call (resolves the oneshot).
+pub(crate) async fn mcp_app_tools_respond(
+    State(state): State<AppState>,
+    Json(req): Json<AppToolRespondRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use hive_contracts::{InteractionResponsePayload, UserInteractionResponse};
+
+    let gate = state
+        .chat
+        .get_interaction_gate(&req.session_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let response = UserInteractionResponse {
+        request_id: req.request_id.clone(),
+        payload: InteractionResponsePayload::AppToolCallResult {
+            content: req.result.content,
+            is_error: req.result.is_error,
+        },
+    };
+
+    if !gate.respond(response) {
+        return Err((StatusCode::BAD_REQUEST, "No pending request found for this request_id".to_string()));
+    }
+
+    Ok(Json(json!({ "ok": true })))
 }

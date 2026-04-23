@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{get_copilot_token_blocking, read_env, read_keyring, ProviderAuth, ProviderKind};
 use crate::{
-    parse_sse_data, restore_tool_name_with_map, CompletionStream, FinishReason, ToolCallDelta,
-    ToolCallResponse,
+    parse_sse_data, restore_tool_name_with_map, CompletionChunk, CompletionStream, FinishReason,
+    ToolCallArgDelta, ToolCallDelta, ToolCallResponse,
 };
 
 use tokio_stream::StreamExt as _;
@@ -199,7 +199,8 @@ pub(crate) fn sse_completion_stream(
 
                     let result = parse_sse_data(data, &kind, &provider_id)?;
 
-                    // Accumulate tool call deltas
+                    // Accumulate tool call deltas and build snapshot entries
+                    let mut arg_deltas = Vec::new();
                     for delta in result.tool_call_deltas {
                         match delta {
                             ToolCallDelta::OpenAi { index, id, name, arguments } => {
@@ -222,13 +223,35 @@ pub(crate) fn sse_completion_stream(
                                 if let Some(args) = arguments {
                                     pending_tool_calls[index].2.push_str(&args);
                                 }
+                                // Emit snapshot of accumulated state
+                                let entry = &pending_tool_calls[index];
+                                arg_deltas.push(ToolCallArgDelta {
+                                    index,
+                                    call_id: if entry.0.is_empty() { None } else { Some(entry.0.clone()) },
+                                    name: if entry.1.is_empty() { None } else { Some(entry.1.clone()) },
+                                    arguments_so_far: entry.2.clone(),
+                                });
                             }
                             ToolCallDelta::AnthropicStart { id, name } => {
-                                pending_tool_calls.push((id, name, String::new()));
+                                pending_tool_calls.push((id.clone(), name.clone(), String::new()));
+                                let index = pending_tool_calls.len() - 1;
+                                arg_deltas.push(ToolCallArgDelta {
+                                    index,
+                                    call_id: Some(id),
+                                    name: Some(name),
+                                    arguments_so_far: String::new(),
+                                });
                             }
                             ToolCallDelta::AnthropicArgsDelta { partial_json } => {
+                                let index = pending_tool_calls.len().saturating_sub(1);
                                 if let Some(last) = pending_tool_calls.last_mut() {
                                     last.2.push_str(&partial_json);
+                                    arg_deltas.push(ToolCallArgDelta {
+                                        index,
+                                        call_id: if last.0.is_empty() { None } else { Some(last.0.clone()) },
+                                        name: if last.1.is_empty() { None } else { Some(last.1.clone()) },
+                                        arguments_so_far: last.2.clone(),
+                                    });
                                 }
                             }
                             ToolCallDelta::AnthropicStop => {
@@ -238,6 +261,8 @@ pub(crate) fn sse_completion_stream(
                     }
 
                     if let Some(mut chunk) = result.chunk {
+                        // Attach partial arg snapshots to the chunk
+                        chunk.tool_call_arg_deltas = arg_deltas;
                         // Attach accumulated tool calls on the final tool-calls chunk.
                         if chunk.finish_reason == Some(FinishReason::ToolCalls) && !pending_tool_calls.is_empty() {
                             chunk.tool_calls = pending_tool_calls
@@ -251,6 +276,15 @@ pub(crate) fn sse_completion_stream(
                                 .collect();
                         }
                         yield chunk;
+                    } else if !arg_deltas.is_empty() {
+                        // No text/finish chunk but we have arg deltas — emit
+                        // a delta-only chunk so they reach downstream.
+                        yield CompletionChunk {
+                            delta: String::new(),
+                            finish_reason: None,
+                            tool_calls: vec![],
+                            tool_call_arg_deltas: arg_deltas,
+                        };
                     }
                 }
             }

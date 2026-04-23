@@ -1,5 +1,5 @@
 import Handlebars from 'handlebars';
-import { For, Index, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
+import { For, Index, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from 'solid-js';
 import type { Accessor, JSX } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import type { Persona, PromptTemplate, ToolDefinition, McpServerConfig, InstalledSkill } from '../types';
@@ -25,6 +25,7 @@ interface PersonasTabProps {
   daemon_url?: string;
   onPersonasSaved?: () => Promise<void>;
   onExportToKit?: (persona_id: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const NEW_AGENT_SENTINEL = '__new_agent__';
@@ -142,7 +143,28 @@ const PersonasTab = (props: PersonasTabProps) => {
   const [confirmResetId, setConfirmResetId] = createSignal<string | null>(null);
   const [showCreateWizard, setShowCreateWizard] = createSignal(false);
   const [connectorConfigs, setConnectorConfigs] = createSignal<any[]>([]);
+  const [showDiscardConfirm, setShowDiscardConfirm] = createSignal(false);
+  const [pendingEditPersona, setPendingEditPersona] = createSignal<Persona | null>(null);
   let paramHelperCounter = 0;
+
+  // Snapshot of the persona when editing started — used for dirty comparison
+  const [originalSnapshot, setOriginalSnapshot] = createSignal('');
+
+  const buildEditSnapshot = () => {
+    const d = draft();
+    const tools = allTools() ? ['*'] : [...selectedTools()].sort();
+    const mcp = mcpServers().map(s => ({ ...s }));
+    return JSON.stringify({ ...d, allowed_tools: tools, mcp_servers: mcp });
+  };
+
+  const isDirty = createMemo(() => {
+    if (!editingId()) return false;
+    return buildEditSnapshot() !== originalSnapshot();
+  });
+
+  createEffect(on(isDirty, (dirty) => {
+    props.onDirtyChange?.(dirty);
+  }));
 
   const resetEditor = () => {
     setEditingId(null);
@@ -154,6 +176,7 @@ const PersonasTab = (props: PersonasTabProps) => {
     setEditingMcpServerIdx(null);
     setExpandedPromptIdx(null);
     setPersonaSkills([]);
+    setOriginalSnapshot('');
   };
 
   const activePersonas = createMemo(() => personas().filter((p) => !p.archived));
@@ -245,11 +268,15 @@ const PersonasTab = (props: PersonasTabProps) => {
     invoke<any[]>('list_connectors').then(setConnectorConfigs).catch(() => {});
   });
 
+  onCleanup(() => {
+    props.onDirtyChange?.(false);
+  });
+
   const startAdd = () => {
     setShowCreateWizard(true);
   };
 
-  const startEdit = (persona: Persona) => {
+  const applyEdit = (persona: Persona) => {
     setError(null);
     setEditingId(persona.id);
     setDraft(clonePersona(persona));
@@ -257,6 +284,17 @@ const PersonasTab = (props: PersonasTabProps) => {
     setSelectedTools(isWildcard(persona.allowed_tools) ? [] : [...persona.allowed_tools]);
     setMcpServers(persona.mcp_servers?.map(s => ({...s})) ?? []);
     void loadPersonaSkills(persona.id);
+    // Capture snapshot after setting all editing state
+    setOriginalSnapshot(buildEditSnapshot());
+  };
+
+  const startEdit = (persona: Persona) => {
+    if (editingId() && isDirty()) {
+      setPendingEditPersona(persona);
+      setShowDiscardConfirm(true);
+      return;
+    }
+    applyEdit(persona);
   };
 
   const savePersonas = async (nextPersonas: Persona[]) => {
@@ -1459,7 +1497,10 @@ const PersonasTab = (props: PersonasTabProps) => {
             <button class="primary" disabled={saving()} onClick={() => void saveAgent()}>
               {saving() ? 'Saving…' : 'Save Persona'}
             </button>
-            <button disabled={saving()} onClick={resetEditor}>Cancel</button>
+            <button disabled={saving()} onClick={() => {
+              if (isDirty()) { setShowDiscardConfirm(true); setPendingEditPersona(null); }
+              else resetEditor();
+            }}>Cancel</button>
           </div>
         </div>
       </Show>
@@ -1552,6 +1593,20 @@ const PersonasTab = (props: PersonasTabProps) => {
         onConfirm={() => {
           const p = personas().find((x) => x.id === confirmArchiveId());
           if (p) void archivePersona(p);
+        }}
+      />
+
+      <ConfirmDialog
+        open={showDiscardConfirm()}
+        onOpenChange={(open) => { if (!open) { setShowDiscardConfirm(false); setPendingEditPersona(null); } }}
+        title="Discard unsaved changes?"
+        description="You have unsaved changes to this persona. Discard them?"
+        confirmLabel="Discard"
+        variant="destructive"
+        onConfirm={() => {
+          const pending = pendingEditPersona();
+          resetEditor();
+          if (pending) applyEdit(pending);
         }}
       />
 

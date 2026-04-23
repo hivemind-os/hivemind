@@ -124,6 +124,15 @@ pub enum ReasoningEvent {
         http_status: Option<u16>,
         backoff_ms: u64,
     },
+    /// Partial tool-call argument snapshot during LLM streaming.
+    ToolCallArgDelta {
+        index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
+        arguments_so_far: String,
+    },
 }
 
 /// Defines how a modality stores conversation data and assembles context.
@@ -303,7 +312,11 @@ pub struct WorkspaceFileContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveFileRequest {
+    #[serde(default)]
     pub content: String,
+    /// Optional base64-encoded binary content. If present, takes precedence over `content`.
+    #[serde(default)]
+    pub content_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,4 +398,120 @@ pub struct ToolApprovalResponse {
     /// The scope that was inferred and saved (if `allow_session` was true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_scope: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_event_token_delta_serde_roundtrip() {
+        let event = ReasoningEvent::TokenDelta { token: "Hello".to_string() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""type":"token_delta""#));
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::TokenDelta { token } => assert_eq!(token, "Hello"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn reasoning_event_tool_call_started_serde_roundtrip() {
+        let event = ReasoningEvent::ToolCallStarted {
+            tool_id: "mcp.server.tool".to_string(),
+            input: serde_json::json!({"key": "value"}),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""type":"tool_call_started""#));
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::ToolCallStarted { tool_id, input } => {
+                assert_eq!(tool_id, "mcp.server.tool");
+                assert_eq!(input["key"], "value");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn reasoning_event_tool_call_completed_serde_roundtrip() {
+        let event = ReasoningEvent::ToolCallCompleted {
+            tool_id: "test.tool".to_string(),
+            output: serde_json::json!({"result": 42}),
+            is_error: false,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::ToolCallCompleted { tool_id, output, is_error } => {
+                assert_eq!(tool_id, "test.tool");
+                assert_eq!(output["result"], 42);
+                assert!(!is_error);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn reasoning_event_model_call_started_serde_roundtrip() {
+        let event = ReasoningEvent::ModelCallStarted {
+            model: "gpt-4".to_string(),
+            prompt_preview: "Hello".to_string(),
+            tool_result_counts: std::collections::HashMap::new(),
+            estimated_tokens: Some(100),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::ModelCallStarted { model, estimated_tokens, .. } => {
+                assert_eq!(model, "gpt-4");
+                assert_eq!(estimated_tokens, Some(100));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn reasoning_event_failed_serde_roundtrip() {
+        let event = ReasoningEvent::Failed {
+            error: "timeout".to_string(),
+            error_code: Some("timeout".to_string()),
+            http_status: Some(504),
+            provider_id: Some("openai".to_string()),
+            model: Some("gpt-4".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::Failed { error, http_status, .. } => {
+                assert_eq!(error, "timeout");
+                assert_eq!(http_status, Some(504));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn reasoning_event_model_retry_serde_roundtrip() {
+        let event = ReasoningEvent::ModelRetry {
+            provider_id: "openai".to_string(),
+            model: "gpt-4".to_string(),
+            attempt: 1,
+            max_attempts: 3,
+            error_kind: "rate_limited".to_string(),
+            http_status: Some(429),
+            backoff_ms: 5000,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: ReasoningEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ReasoningEvent::ModelRetry { attempt, max_attempts, backoff_ms, .. } => {
+                assert_eq!(attempt, 1);
+                assert_eq!(max_attempts, 3);
+                assert_eq!(backoff_ms, 5000);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
 }

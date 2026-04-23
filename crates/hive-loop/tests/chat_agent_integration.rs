@@ -146,12 +146,8 @@ impl ModelProvider for ScriptProvider {
             delta: response.content,
             finish_reason: Some(FinishReason::Stop),
             tool_calls: response.tool_calls,
-        };
-        Ok(Box::pin(tokio_stream::once(Ok(chunk))))
-    }
-}
-
-// ── MockTool ────────────────────────────────────────────────────────────────
+            tool_call_arg_deltas: vec![],
+        };// ── MockTool ────────────────────────────────────────────────────────────────
 
 /// Configurable mock [`Tool`] with a builder API.
 struct MockTool {

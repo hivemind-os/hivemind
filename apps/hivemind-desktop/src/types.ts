@@ -295,10 +295,29 @@ export type McpServerSnapshot = {
   sandbox_status?: McpSandboxStatus;
 };
 
+export type McpToolUiMeta = {
+  resource_uri?: string;
+  visibility?: string[];
+  csp?: {
+    connect_domains?: string[];
+    resource_domains?: string[];
+    frame_domains?: string[];
+    base_uri_domains?: string[];
+  };
+  permissions?: {
+    camera?: unknown;
+    microphone?: unknown;
+    geolocation?: unknown;
+    clipboard_write?: unknown;
+  };
+  prefers_border?: boolean;
+};
+
 export type McpToolInfo = {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
+  ui_meta?: McpToolUiMeta;
 };
 
 export type McpResourceInfo = {

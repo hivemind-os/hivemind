@@ -65,6 +65,29 @@ impl MockServer {
             name: name.to_string().into(),
             description: description.to_string().into(),
             input_schema: schema,
+            meta: None,
+        });
+        self
+    }
+
+    /// Add a tool with MCP App UI metadata (has a `_meta.ui.resourceUri`).
+    fn with_ui_tool(mut self, name: &str, description: &str, resource_uri: &str) -> Self {
+        let schema: Arc<serde_json::Map<String, serde_json::Value>> = Arc::new(
+            serde_json::from_value(json!({
+                "type": "object",
+                "properties": {}
+            }))
+            .unwrap(),
+        );
+        self.tools.push(Tool {
+            name: name.to_string().into(),
+            description: description.to_string().into(),
+            input_schema: schema,
+            meta: Some(json!({
+                "ui": {
+                    "resourceUri": resource_uri,
+                }
+            })),
         });
         self
     }
@@ -248,12 +271,8 @@ async fn inject_mock_into_service(
     let resources_result = client_svc.list_all_resources().await.unwrap_or_default();
 
     let tools: Vec<McpToolInfo> = tools_result
-        .iter()
-        .map(|t| McpToolInfo {
-            name: t.name.to_string(),
-            description: t.description.to_string(),
-            input_schema: serde_json::to_value(&*t.input_schema).unwrap_or(json!({})),
-        })
+        .into_iter()
+        .map(crate::tool_to_info)
         .collect();
 
     let resources: Vec<McpResourceInfo> = resources_result
@@ -479,7 +498,7 @@ async fn service_read_resource_content() {
     let mock = MockServer::new().with_resource("file:///test.txt", "test.txt");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
 
-    let content = service.read_resource("srv1", "file:///test.txt").await.unwrap();
+    let content = service.read_resource_text("srv1", "file:///test.txt").await.unwrap();
     assert!(content.contains("content of file:///test.txt"));
 }
 
@@ -821,11 +840,13 @@ async fn catalog_all_cataloged_tools_multi_server() {
                     name: "tool-a1".to_string(),
                     description: "First tool".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 },
                 McpToolInfo {
                     name: "tool-a2".to_string(),
                     description: "Second tool".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 },
             ],
             vec![],
@@ -843,7 +864,8 @@ async fn catalog_all_cataloged_tools_multi_server() {
                 name: "tool-b1".to_string(),
                 description: "Public tool".to_string(),
                 input_schema: json!({"type": "object"}),
-            }],
+                    ui_meta: None,
+                }],
             vec![],
             vec![],
         )
@@ -875,6 +897,7 @@ async fn catalog_persist_survives_reload() {
                     name: "survive".to_string(),
                     description: "Must survive reload".to_string(),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![McpResourceInfo {
                     uri: "file:///kept.txt".to_string(),
@@ -937,6 +960,7 @@ async fn catalog_concurrent_upserts_no_data_loss() {
                     name: format!("tool-{i}"),
                     description: format!("tool {i}"),
                     input_schema: json!({"type": "object"}),
+                    ui_meta: None,
                 }],
                 vec![],
                 vec![],
@@ -1836,5 +1860,236 @@ async fn test_build_sandbox_from_global_config_actually_sandboxes() {
             r#"(allow file-read-data (subpath "/Users/danielgerlag/dev/forge/tools/mock-mcp-server"#
         ),
         "Profile does not allow MCP server project root!"
+    );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// MCP Apps Integration Tests
+// ═══════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_tool_ui_meta_extraction() {
+    let service = mcp_service_with_servers(vec![test_server_config("mock")]);
+
+    let mock = MockServer::new()
+        .with_ui_tool("get-time", "Returns the current time", "ui://get-time/app.html")
+        .with_tool("plain-tool", "A tool without UI");
+
+    let _server = inject_mock_into_service(&service, "mock", mock).await;
+
+    let tools = service.list_tools("mock").await.unwrap();
+    assert_eq!(tools.len(), 2);
+
+    // The UI tool should have ui_meta with the resource URI
+    let ui_tool = tools.iter().find(|t| t.name == "get-time").unwrap();
+    assert!(ui_tool.ui_meta.is_some(), "UI tool should have ui_meta");
+    let meta = ui_tool.ui_meta.as_ref().unwrap();
+    assert_eq!(
+        meta.resource_uri.as_deref(),
+        Some("ui://get-time/app.html"),
+        "resource_uri should match"
+    );
+
+    // The plain tool should have no ui_meta
+    let plain_tool = tools.iter().find(|t| t.name == "plain-tool").unwrap();
+    assert!(plain_tool.ui_meta.is_none(), "Plain tool should not have ui_meta");
+}
+
+#[tokio::test]
+async fn test_ui_resource_cache() {
+    let service = mcp_service_with_servers(vec![test_server_config("mock")]);
+
+    let mock = MockServer::new()
+        .with_ui_tool("widget", "A widget", "ui://widget/app.html")
+        .with_resource("ui://widget/app.html", "Widget App");
+
+    let _server = inject_mock_into_service(&service, "mock", mock).await;
+
+    // First fetch should work
+    let resource = service
+        .fetch_ui_resource("mock", "ui://widget/app.html", None)
+        .await
+        .unwrap();
+    assert!(!resource.html.is_empty(), "Should return HTML content");
+    assert_eq!(resource.uri, "ui://widget/app.html");
+
+    // Second fetch should return cached result (same content)
+    let cached = service
+        .fetch_ui_resource("mock", "ui://widget/app.html", None)
+        .await
+        .unwrap();
+    assert_eq!(cached.html, resource.html, "Cached result should match");
+
+    // Invalidation should clear the cache
+    service.invalidate_ui_cache("mock").await;
+
+    // After invalidation, fetch works again (hits the server)
+    let refreshed = service
+        .fetch_ui_resource("mock", "ui://widget/app.html", None)
+        .await
+        .unwrap();
+    assert_eq!(refreshed.uri, "ui://widget/app.html");
+}
+
+/// Verifies the full catalog round-trip preserves `ui_meta`:
+///
+/// 1. Connect mock server with a UI tool
+/// 2. Call `list_tools` (populates `state.tools` with `ui_meta`)
+/// 3. Store tools in catalog
+/// 4. Disconnect the server (clears `state.tools`)
+/// 5. Read tools back from catalog — `ui_meta` must still be present
+///
+/// This is the exact path the daemon follows at startup via
+/// `discover_and_catalog`, and the frontend relies on the catalog
+/// fallback to render MCP App iframes for disconnected servers.
+#[tokio::test]
+async fn test_catalog_preserves_ui_meta_after_disconnect() {
+    let service = mcp_service_with_servers(vec![test_server_config("vanjs")]);
+
+    let mock = MockServer::new()
+        .with_ui_tool("get-time", "Returns the current time", "ui://get-time/mcp-app.html")
+        .with_tool("plain-tool", "No UI");
+
+    let _server = inject_mock_into_service(&service, "vanjs", mock).await;
+
+    // Step 1: list_tools populates state.tools with ui_meta
+    let tools = service.list_tools("vanjs").await.unwrap();
+    assert_eq!(tools.len(), 2);
+    let ui_tool = tools.iter().find(|t| t.name == "get-time").unwrap();
+    assert!(ui_tool.ui_meta.is_some(), "ui_meta should be present after list_tools");
+
+    // Step 2: persist to catalog (simulating discover_and_catalog)
+    let dir = TempDir::new().unwrap();
+    let catalog = McpCatalogStore::new(dir.path());
+    catalog
+        .upsert("vanjs", "ck-vanjs", ChannelClass::Internal, tools, vec![], vec![])
+        .await;
+
+    // Step 3: disconnect clears state.tools (tool_count becomes 0)
+    let snapshot = service.disconnect("vanjs").await.unwrap();
+    assert_eq!(snapshot.tool_count, 0, "tool_count should be 0 after disconnect");
+
+    // Step 4: read from catalog — ui_meta must survive the round-trip
+    let cached_tools = catalog.tools_for_server("vanjs").await;
+    assert_eq!(cached_tools.len(), 2, "catalog should have 2 tools");
+
+    let cached_ui_tool = cached_tools.iter().find(|t| t.name == "get-time").unwrap();
+    assert!(
+        cached_ui_tool.ui_meta.is_some(),
+        "ui_meta should survive catalog round-trip"
+    );
+    assert_eq!(
+        cached_ui_tool.ui_meta.as_ref().unwrap().resource_uri.as_deref(),
+        Some("ui://get-time/mcp-app.html"),
+        "resource_uri should match original"
+    );
+
+    let cached_plain = cached_tools.iter().find(|t| t.name == "plain-tool").unwrap();
+    assert!(cached_plain.ui_meta.is_none(), "plain tool should still have no ui_meta");
+
+    // Step 5: verify JSON serialization matches what the API would return
+    let json = serde_json::to_value(&cached_tools).unwrap();
+    let json_tools = json.as_array().unwrap();
+    let json_ui_tool = json_tools.iter().find(|t| t["name"] == "get-time").unwrap();
+    assert!(
+        json_ui_tool.get("ui_meta").is_some() && !json_ui_tool["ui_meta"].is_null(),
+        "JSON serialization must include ui_meta: got {}",
+        serde_json::to_string_pretty(json_ui_tool).unwrap()
+    );
+    assert_eq!(
+        json_ui_tool["ui_meta"]["resource_uri"],
+        "ui://get-time/mcp-app.html",
+        "JSON resource_uri should match"
+    );
+}
+
+/// Simulates the frontend's exact lookup pattern:
+/// 1. tool_id "mcp.{serverId}.{toolName}" → regex extract serverId + toolName
+/// 2. Map key: "{serverId}::{toolName}"
+/// 3. Lookup in catalog tools by (server_id, tool_name)
+///
+/// This validates the full chain that broke in production.
+#[tokio::test]
+async fn test_frontend_mcp_app_lookup_pattern() {
+    let dir = TempDir::new().unwrap();
+    let catalog = McpCatalogStore::new(dir.path());
+
+    // Simulate what discover_and_catalog stores
+    catalog
+        .upsert(
+            "Vanilla",
+            "ck-vanilla",
+            ChannelClass::Internal,
+            vec![
+                McpToolInfo {
+                    name: "get-time".to_string(),
+                    description: "Get current time".to_string(),
+                    input_schema: json!({"type": "object"}),
+                    ui_meta: Some(hive_contracts::McpToolUiMeta {
+                        resource_uri: Some("ui://get-time/mcp-app.html".to_string()),
+                        visibility: None,
+                        csp: None,
+                        permissions: None,
+                        prefers_border: None,
+                    }),
+                },
+                McpToolInfo {
+                    name: "echo".to_string(),
+                    description: "Echo input".to_string(),
+                    input_schema: json!({"type": "object"}),
+                    ui_meta: None,
+                },
+            ],
+            vec![],
+            vec![],
+        )
+        .await;
+
+    // Simulate the SSE tool_id the frontend receives
+    let tool_id = "mcp.Vanilla.get-time";
+
+    // Frontend regex: /^mcp\.(.+?)\.(.+)$/  — simulate with simple split
+    assert!(tool_id.starts_with("mcp."));
+    let rest = &tool_id[4..]; // strip "mcp."
+    let dot = rest.find('.').expect("should have a dot separating serverId and toolName");
+    let server_id = &rest[..dot];
+    let tool_name = &rest[dot + 1..];
+    assert_eq!(server_id, "Vanilla");
+    assert_eq!(tool_name, "get-time");
+
+    // Frontend map key
+    let map_key = format!("{server_id}::{tool_name}");
+    assert_eq!(map_key, "Vanilla::get-time");
+
+    // Frontend loads tools from catalog (API fallback path)
+    let tools = catalog.tools_for_server(server_id).await;
+    assert_eq!(tools.len(), 2, "catalog should return tools for Vanilla");
+
+    // Build the mcpAppTools map (same logic as frontend)
+    let mut app_tools = std::collections::HashMap::new();
+    for tool in &tools {
+        if tool.ui_meta.as_ref().and_then(|m| m.resource_uri.as_ref()).is_some() {
+            app_tools.insert(format!("{server_id}::{}", tool.name), tool);
+        }
+    }
+
+    // The lookup that the ChatView does
+    assert!(
+        app_tools.contains_key(&map_key),
+        "mcpAppTools should contain key '{map_key}', but only has: {:?}",
+        app_tools.keys().collect::<Vec<_>>()
+    );
+
+    let found = app_tools[&map_key];
+    assert_eq!(
+        found.ui_meta.as_ref().unwrap().resource_uri.as_deref(),
+        Some("ui://get-time/mcp-app.html")
+    );
+
+    // Non-UI tool should NOT be in the map
+    assert!(
+        !app_tools.contains_key("Vanilla::echo"),
+        "non-UI tool should not be in mcpAppTools"
     );
 }

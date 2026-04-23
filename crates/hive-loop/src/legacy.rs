@@ -757,6 +757,13 @@ pub enum LoopEvent {
     StallWarning { tool_name: String, repeated_count: usize },
     /// The loop is yielding early because a new user message was enqueued.
     Preempted,
+    /// Partial tool-call argument snapshot during streaming.
+    ToolCallArgDelta {
+        index: usize,
+        call_id: Option<String>,
+        tool_name: Option<String>,
+        arguments_so_far: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -1044,6 +1051,23 @@ impl LoopStrategy for ReActStrategy {
                                     let visible = token_filter.feed(&chunk.delta);
                                     if !visible.is_empty() {
                                         let _ = tx.try_send(LoopEvent::Token { delta: visible });
+                                    }
+                                }
+                                // Emit partial tool-call argument snapshots
+                                // only for MCP server tools (id pattern: mcp.{server}.{tool},
+                                // sanitized to mcp_{server}_{tool}).  Skipping internal
+                                // tools like core_ask_user avoids flooding the event log.
+                                for d in &chunk.tool_call_arg_deltas {
+                                    let is_mcp_tool = d.name.as_deref()
+                                        .map(|n| n.starts_with("mcp_") || n.starts_with("mcp.") || n.starts_with("app."))
+                                        .unwrap_or(false);
+                                    if is_mcp_tool {
+                                        let _ = tx.try_send(LoopEvent::ToolCallArgDelta {
+                                            index: d.index,
+                                            call_id: d.call_id.clone(),
+                                            tool_name: d.name.clone(),
+                                            arguments_so_far: d.arguments_so_far.clone(),
+                                        });
                                     }
                                 }
                                 if !chunk.tool_calls.is_empty() {

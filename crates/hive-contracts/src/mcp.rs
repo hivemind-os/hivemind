@@ -55,12 +55,69 @@ pub struct McpSandboxStatus {
     pub extra_write_paths: Vec<String>,
 }
 
+/// UI metadata for MCP Apps (SEP-1865). Tools with a `resource_uri` have
+/// an interactive HTML interface that hosts can render in a sandboxed iframe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolUiMeta {
+    /// URI of the `ui://` resource containing the app HTML.
+    #[serde(alias = "resourceUri")]
+    pub resource_uri: Option<String>,
+    /// Who can access this tool: "model" and/or "app".
+    #[serde(default)]
+    pub visibility: Option<Vec<String>>,
+    /// Content Security Policy declarations.
+    pub csp: Option<McpUiCsp>,
+    /// Sandbox permissions requested by the UI.
+    pub permissions: Option<McpUiPermissions>,
+    /// Whether the host should render a border around the app.
+    #[serde(alias = "prefersBorder")]
+    pub prefers_border: Option<bool>,
+}
+
+/// CSP declarations for an MCP App resource.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpUiCsp {
+    #[serde(default, alias = "connectDomains")]
+    pub connect_domains: Option<Vec<String>>,
+    #[serde(default, alias = "resourceDomains")]
+    pub resource_domains: Option<Vec<String>>,
+    #[serde(default, alias = "frameDomains")]
+    pub frame_domains: Option<Vec<String>>,
+    #[serde(default, alias = "baseUriDomains")]
+    pub base_uri_domains: Option<Vec<String>>,
+}
+
+/// Sandbox permissions an MCP App may request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpUiPermissions {
+    pub camera: Option<serde_json::Value>,
+    pub microphone: Option<serde_json::Value>,
+    pub geolocation: Option<serde_json::Value>,
+    #[serde(alias = "clipboardWrite")]
+    pub clipboard_write: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolInfo {
     pub name: String,
     pub description: String,
     #[serde(alias = "inputSchema")]
     pub input_schema: Value,
+    /// MCP Apps UI metadata, extracted from `_meta.ui`.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "uiMeta")]
+    pub ui_meta: Option<McpToolUiMeta>,
+}
+
+/// Fetched MCP App UI resource content, ready for rendering in a sandboxed iframe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpAppResource {
+    /// The `ui://` URI of the resource.
+    pub uri: String,
+    /// The HTML content of the app.
+    pub html: String,
+    /// UI metadata (CSP, permissions, border preference) from the tool.
+    #[serde(skip_serializing_if = "Option::is_none", alias = "uiMeta")]
+    pub ui_meta: Option<McpToolUiMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +149,9 @@ pub struct McpCallToolResult {
     pub content: String,
     #[serde(alias = "isError")]
     pub is_error: bool,
+    /// Full raw MCP CallToolResult JSON (for MCP Apps structured forwarding).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +161,24 @@ pub struct McpConnectedTool {
     #[serde(alias = "channelClass")]
     pub channel_class: ChannelClass,
     pub tool: McpToolInfo,
+}
+
+/// Result of reading an MCP resource, with structured content items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpReadResourceResult {
+    pub contents: Vec<McpResourceContent>,
+}
+
+/// A single content item from an MCP resource read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResourceContent {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "mimeType")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

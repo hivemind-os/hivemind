@@ -3517,6 +3517,37 @@ async fn chat_subscribe_stream(app: tauri::AppHandle, session_id: String) -> Res
     Ok(())
 }
 
+/// Cancel all chat SSE streams except the one for `keep_session_id`.
+/// Called when switching sessions to prevent stale events from reaching the frontend.
+#[tauri::command(rename_all = "snake_case")]
+async fn chat_cancel_other_streams(keep_session_id: String) -> Result<(), String> {
+    if let Ok(mut streams) = ACTIVE_STREAMS.lock() {
+        let to_cancel: Vec<String> = streams
+            .keys()
+            .filter(|k| **k != keep_session_id)
+            .cloned()
+            .collect();
+        for key in to_cancel {
+            if let Some(handle) = streams.remove(&key) {
+                handle.abort();
+            }
+        }
+    }
+    if let Ok(mut streams) = AGENT_STAGE_STREAMS.lock() {
+        let to_cancel: Vec<String> = streams
+            .keys()
+            .filter(|k| **k != keep_session_id)
+            .cloned()
+            .collect();
+        for key in to_cancel {
+            if let Some(handle) = streams.remove(&key) {
+                handle.abort();
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Knowledge Graph commands ─────────────────────────────────────────
 
 #[tauri::command(rename_all = "snake_case")]
@@ -5565,6 +5596,7 @@ pub fn run() {
             local_models_resource_usage,
             local_models_storage,
             chat_subscribe_stream,
+            chat_cancel_other_streams,
             workspace_subscribe_index_status,
             workspace_reindex_file,
             workspace_indexed_files,

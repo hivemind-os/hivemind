@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 pub type ExperimentalCapabilities = BTreeMap<String, JsonObject>;
+pub type ExtensionCapabilities = BTreeMap<String, JsonObject>;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +53,8 @@ pub struct ClientCapabilities {
     pub roots: Option<RootsCapabilities>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling: Option<JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<ExtensionCapabilities>,
 }
 
 ///
@@ -242,11 +245,12 @@ builder! {
         experimental: ExperimentalCapabilities,
         roots: RootsCapabilities,
         sampling: JsonObject,
+        extensions: ExtensionCapabilities,
     }
 }
 
-impl<const E: bool, const S: bool>
-    ClientCapabilitiesBuilder<ClientCapabilitiesBuilderState<E, true, S>>
+impl<const E: bool, const S: bool, const X: bool>
+    ClientCapabilitiesBuilder<ClientCapabilitiesBuilderState<E, true, S, X>>
 {
     pub fn enable_roots_list_changed(mut self) -> Self {
         if let Some(c) = self.roots.as_mut() {

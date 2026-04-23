@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, ErrorBoundary, batch, createEffect, createMemo, createSignal, lazy, onCleanup, onMount } from 'solid-js';
+import { For, Show, Switch, Match, ErrorBoundary, batch, createEffect, createMemo, createSignal, lazy, onCleanup, onMount, untrack } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { ShieldCheck, TriangleAlert, RefreshCw, Rocket, FolderOpen, Link, ClipboardList, MessageSquare, Compass, Layers, GitBranch, Activity, Terminal, Settings, Plug } from 'lucide-solid';
 import { invoke } from '@tauri-apps/api/core';
@@ -24,6 +24,7 @@ const SessionProcesses = lazy(() => import('./components/SessionProcesses'));
 import ChatView from './components/ChatView';
 import WorkspaceView from './components/WorkspaceView';
 import { warmUpHighlighter } from './lib/shikiHighlighter';
+import { createToolCallTracker } from './lib/toolCallTracker';
 import BotsPage from './components/BotsPage';
 import BotConfigPanel from './components/BotConfigPanel';
 import SessionMcpPanel from './components/SessionMcpPanel';
@@ -122,6 +123,104 @@ const App = () => {
   const [mcpTools, setMcpTools] = createSignal<McpToolInfo[]>([]);
   const [mcpResources, setMcpResources] = createSignal<McpResourceInfo[]>([]);
   const [mcpPrompts, setMcpPrompts] = createSignal<McpPromptInfo[]>([]);
+  // Aggregated MCP App tools from all connected servers (for inline rendering).
+  // Maps "serverId::toolName" → McpToolInfo for tools that have ui_meta.
+  const [mcpAppTools, setMcpAppTools] = createSignal<Map<string, McpToolInfo & { server_id: string }>>(new Map());
+  // Cache for MCP App UI resource HTML templates (survives session switches).
+  // Key: "serverId::resourceUri", Value: HTML string
+  const [mcpAppHtmlCache, setMcpAppHtmlCache] = createSignal<Map<string, string>>(new Map());
+
+  // ── App-registered tools: bridge registry for routing LLM tool calls to iframes ──
+  type McpAppBridgeRef = import('./components/McpAppBridge').McpAppBridge;
+  type AppToolDef = import('./components/McpAppBridge').AppToolDefinition;
+  const appBridgeRegistry = new Map<string, McpAppBridgeRef>();
+
+  const handleAppBridgeReady = (appInstanceId: string, bridge: McpAppBridgeRef) => {
+    appBridgeRegistry.set(appInstanceId, bridge);
+  };
+
+  const handleAppBridgeDestroy = (appInstanceId: string) => {
+    appBridgeRegistry.delete(appInstanceId);
+    // Unregister tools with daemon
+    const sid = selectedSessionId();
+    const baseUrl = context()?.daemon_url;
+    if (sid && baseUrl) {
+      authFetch(`${baseUrl}/api/v1/mcp/app-tools/unregister`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid, app_instance_id: appInstanceId }),
+      }).catch((e: unknown) => console.warn('[app-tools] unregister failed:', e));
+    }
+  };
+
+  const handleAppToolsChanged = (appInstanceId: string, tools: AppToolDef[]) => {
+    const sid = selectedSessionId();
+    const baseUrl = context()?.daemon_url;
+    if (!sid || !baseUrl) return;
+    // Register/update tools with daemon
+    authFetch(`${baseUrl}/api/v1/mcp/app-tools/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sid,
+        app_instance_id: appInstanceId,
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+        })),
+      }),
+    }).catch((e: unknown) => console.warn('[app-tools] register failed:', e));
+  };
+
+  /** Handle an app-tool-call event from the daemon (LLM wants to call an app tool). */
+  const handleAppToolCallEvent = async (event: {
+    request_id: string;
+    app_instance_id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    session_id: string;
+  }) => {
+    const bridge = appBridgeRegistry.get(event.app_instance_id);
+    const baseUrl = context()?.daemon_url;
+    if (!bridge || !baseUrl) {
+      // Bridge gone — respond with error
+      if (baseUrl) {
+        await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: event.session_id,
+            request_id: event.request_id,
+            result: { content: { error: 'App bridge not available' }, isError: true },
+          }),
+        }).catch(() => {});
+      }
+      return;
+    }
+    try {
+      const result = await bridge.callAppTool(event.tool_name, event.arguments);
+      await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: event.session_id,
+          request_id: event.request_id,
+          result: { content: result ?? {}, isError: false },
+        }),
+      });
+    } catch (err) {
+      await authFetch(`${baseUrl}/api/v1/mcp/app-tools/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: event.session_id,
+          request_id: event.request_id,
+          result: { content: { error: String(err) }, isError: true },
+        }),
+      }).catch(() => {});
+    }
+  };
   const [mcpNotifications, setMcpNotifications] = createSignal<McpNotificationEvent[]>([]);
   const [mcpServerLogs, setMcpServerLogs] = createSignal<McpServerLog[]>([]);
   const [mcpLogsServerId, setMcpLogsServerId] = createSignal<string | null>(null);
@@ -329,7 +428,7 @@ const App = () => {
       stageUnlisten = await listen<{ session_id: string; event: any }>(
         'stage:event',
         (ev) => {
-          if (ev.payload.session_id !== sid) return;
+          if (ev.payload.session_id !== sid || ev.payload.session_id !== selectedSessionId()) return;
           const event = ev.payload.event;
           if (!event?.type) return;
 
@@ -645,19 +744,9 @@ const App = () => {
   };
   const [activities, setActivities] = createSignal<ActivityItem[]>([]);
 
-  // Tool call history: accumulates during streaming, committed per assistant message.
-  type ToolCallRecord = {
-    id: string;
-    tool_id: string;
-    label: string;
-    input?: string;
-    output?: string;
-    isError: boolean;
-    startedAt: number;
-    completedAt?: number;
-  };
-  const [pendingToolCalls, setPendingToolCalls] = createSignal<ToolCallRecord[]>([]);
-  const [toolCallHistory, setToolCallHistory] = createSignal<Record<string, ToolCallRecord[]>>({});
+  // Session-scoped tool call tracker — prevents cross-session contamination.
+  const tcTracker = createToolCallTracker();
+  const { pendingToolCalls, toolCallHistory } = tcTracker;
 
   const pushActivity = (item: Omit<ActivityItem, 'startedAt' | 'done'>) => {
     setActivities(prev => [...prev.filter(a => a.id !== item.id), { ...item, startedAt: Date.now(), done: false }]);
@@ -670,23 +759,11 @@ const App = () => {
   const tryParseJson = (s: string | undefined): any => { try { return s ? JSON.parse(s) : undefined; } catch { return undefined; } };
   const truncate = (s: string | undefined, n: number) => s && s.length > n ? s.slice(0, n) + '…' : s;
 
-  const recordToolCallStart = (activityId: string, tool_id: string, label: string, input?: string) => {
-    setPendingToolCalls(prev => [...prev, { id: activityId, tool_id, label, input, isError: false, startedAt: Date.now() }]);
+  const recordToolCallStart = (sessionId: string, activityId: string, tool_id: string, label: string, input?: string) => {
+    tcTracker.recordStart(sessionId, activityId, tool_id, label, input);
   };
-  const recordToolCallResult = (tool_id: string, output?: string, isError?: boolean) => {
-    setPendingToolCalls(prev => {
-      const idx = prev.findIndex(tc => tc.tool_id === tool_id && !tc.completedAt);
-      if (idx < 0) return prev;
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], output, isError: isError ?? false, completedAt: Date.now() };
-      return updated;
-    });
-  };
-  const commitToolCalls = (messageId: string) => {
-    const calls = pendingToolCalls();
-    if (calls.length === 0) return;
-    setToolCallHistory(prev => ({ ...prev, [messageId]: calls }));
-    setPendingToolCalls([]);
+  const recordToolCallResult = (sessionId: string, tool_id: string, output?: string, isError?: boolean, mcpRaw?: unknown) => {
+    tcTracker.recordResult(sessionId, tool_id, output, isError, mcpRaw);
   };
 
   const clearStreamingState = () => {
@@ -694,7 +771,7 @@ const App = () => {
       setIsStreaming(false);
       setStreamingContent('');
       setActivities([]);
-      setPendingToolCalls([]);
+      tcTracker.clearPending();
     });
   };
 
@@ -703,16 +780,20 @@ const App = () => {
       setIsStreaming(true);
       setStreamingContent('');
       setActivities([]);
-      setPendingToolCalls([]);
+      tcTracker.clearPending();
       pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
     });
   };
+
+  // Monotonic counter: each syncChatState call increments this so that
+  // stale fetch responses (issued earlier but arriving later) are discarded.
+  let chatSyncEpoch = 0;
 
   let streamSyncEpoch = 0;
   const syncChatStateAfterStream = (session_id: string) => {
     // Capture accumulated tool calls before clearing streaming state — the
     // assistant message ID isn't known until the post-sync session arrives.
-    const capturedCalls = pendingToolCalls().slice();
+    const capturedCalls = tcTracker.captureAndClear(session_id);
     const epoch = ++streamSyncEpoch;
     clearStreamingState();
     void syncChatState(session_id).then(() => {
@@ -721,7 +802,7 @@ const App = () => {
         if (s) {
           const lastAssistant = [...s.messages].reverse().find(m => m.role === 'assistant');
           if (lastAssistant) {
-            setToolCallHistory(prev => ({ ...prev, [lastAssistant.id]: capturedCalls }));
+            tcTracker.commitCaptured(session_id, lastAssistant.id, capturedCalls);
           }
         }
       }
@@ -732,9 +813,16 @@ const App = () => {
     });
   };
 
+  let prevSessionIdForToolCache: string | null = null;
   createEffect(() => {
     const sid = selectedSessionId();
     console.debug('[session-switch] clearing questions for session change →', sid);
+    // Delegate session-switch cache management to the tracker
+    tcTracker.switchSession(sid, prevSessionIdForToolCache);
+    // Cancel SSE streams from the previous session to prevent stale events
+    if (sid) {
+      invoke('chat_cancel_other_streams', { keep_session_id: sid }).catch(() => {});
+    }
     setActiveTab('chat');
     setSelectedEntryPath(null);
     setSelectedFilePath(null);
@@ -743,7 +831,7 @@ const App = () => {
     setWorkspaceFiles([]);
     setWorkspaceLoadedForSession(null);
     setAllQuestions([]);
-    setToolCallHistory({});
+    prevSessionIdForToolCache = sid;
   });
 
   createEffect(() => {
@@ -948,9 +1036,41 @@ const App = () => {
   const loadMcpServers = async () => {
     if (!daemonOnline()) {
       setMcpServers([]);
+      setMcpAppTools(new Map());
       return;
     }
-    setMcpServers(await invoke<McpServerSnapshot[]>('mcp_list_servers'));
+    const servers = await invoke<McpServerSnapshot[]>('mcp_list_servers');
+    setMcpServers(servers);
+    // Load MCP App tools from all connected servers for inline rendering
+    try {
+      await loadMcpAppTools(servers);
+    } catch (e) {
+      console.error('[MCP App] loadMcpAppTools crashed:', e);
+    }
+  };
+
+  /** Fetch tools from all enabled MCP servers and index those with ui_meta.
+   *  Uses the API which falls back to the catalog cache for disconnected servers. */
+  const loadMcpAppTools = async (servers: McpServerSnapshot[]) => {
+    const eligible = servers.filter(s => s.enabled);
+    if (eligible.length === 0) { setMcpAppTools(new Map()); return; }
+    const results = await Promise.allSettled(
+      eligible.map(s => invoke<McpToolInfo[]>('mcp_list_tools', { server_id: s.id }).then(tools => ({ server_id: s.id, tools }))),
+    );
+    const map = new Map<string, McpToolInfo & { server_id: string }>();
+    for (const r of results) {
+      if (r.status !== 'fulfilled') {
+        console.warn('[MCP App] failed:', (r as PromiseRejectedResult).reason);
+        continue;
+      }
+      console.log(`[MCP App] "${r.value.server_id}":`, r.value.tools.filter(t => t.ui_meta).length, 'tools with UI');
+      for (const tool of r.value.tools) {
+        if (tool.ui_meta?.resource_uri) {
+          map.set(`${r.value.server_id}::${tool.name}`, { ...tool, server_id: r.value.server_id });
+        }
+      }
+    }
+    setMcpAppTools(map);
   };
 
   const loadMcpNotifications = async () => {
@@ -1190,6 +1310,8 @@ const App = () => {
   };
 
   const syncChatState = async (desiredSessionId?: string | null) => {
+    const myEpoch = ++chatSyncEpoch;
+
     if (!daemonOnline()) {
       clearChatState();
       return;
@@ -1199,6 +1321,11 @@ const App = () => {
     setPendingReviewContent(null);
 
     const list = (await invoke<ChatSessionSummary[] | null>('chat_list_sessions')) ?? [];
+
+    // A newer sync was started while we were awaiting — abandon this one
+    // so we don't overwrite with stale data.
+    if (myEpoch !== chatSyncEpoch) return;
+
     updateSessions(list);
 
     // For auto-selection purposes, only consider non-bot sessions.
@@ -1225,10 +1352,25 @@ const App = () => {
 
     const nextSession = await invoke<ChatSessionSnapshot>('chat_get_session', { session_id: nextId });
 
+    // Stale sync — a newer call started while we were fetching.
+    if (myEpoch !== chatSyncEpoch) return;
+
+    // Freshness guard: never overwrite a newer snapshot with an older one
+    // for the same session (protects against out-of-order completion).
+    const prev = session();
+    if (
+      prev &&
+      prev.id === nextSession.id &&
+      typeof prev.updated_at_ms === 'number' &&
+      typeof nextSession.updated_at_ms === 'number' &&
+      nextSession.updated_at_ms < prev.updated_at_ms
+    ) {
+      return;
+    }
+
     // Avoid replacing the session object when nothing changed — a new object
     // reference causes SolidJS to re-render every message, which kills text
     // selection and any in-progress user interaction.
-    const prev = session();
     const lastPrev = prev && prev.messages.length > 0 ? prev.messages[prev.messages.length - 1] : null;
     const lastNext = nextSession.messages.length > 0 ? nextSession.messages[nextSession.messages.length - 1] : null;
     const changed =
@@ -2246,14 +2388,15 @@ const App = () => {
                   const tool_id = inner.tool_id ?? 'unknown';
                   const actId = `tool:${tool_id}:${Date.now()}`;
                   pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
-                  recordToolCallStart(actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+                  recordToolCallStart(currentSessionId, actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
                   break;
                 }
                 case 'tool_call_completed': {
                   const tool_id = inner.tool_id ?? 'unknown';
                   const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
                   if (match) completeActivity(match.id, inner.is_error);
-                  recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false);
+                  const mcpRaw = inner.output?._mcp_raw;
+                  recordToolCallResult(currentSessionId, tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, mcpRaw);
                   pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
                   break;
                 }
@@ -2289,6 +2432,27 @@ const App = () => {
                     });
                   }
                   break;
+                case 'tool_call_arg_delta': {
+                  // Forward partial tool-call arguments only to the MCP app bridge
+                  // that matches this tool — NOT to all bridges (which would spam
+                  // unrelated apps with e.g. core_ask_user deltas).
+                  const deltaToolName = inner.tool_name ?? '';
+                  const argsSoFar = inner.arguments_so_far ?? '';
+                  if (deltaToolName && argsSoFar) {
+                    for (const bridge of appBridgeRegistry.values()) {
+                      // Match on the full sanitized tool ID pattern:
+                      // MCP server tools: mcp_{serverId}_{toolName}
+                      // App-registered tools: app.{instanceId}.{toolName}
+                      const mcpPrefix = `mcp_${bridge.serverId}_${bridge.toolName}`;
+                      if (deltaToolName === bridge.toolName ||
+                          deltaToolName === mcpPrefix ||
+                          deltaToolName.startsWith(mcpPrefix + '_')) {
+                        bridge.sendToolInputPartial(argsSoFar);
+                      }
+                    }
+                  }
+                  break;
+                }
               }
               break;
             }
@@ -2339,7 +2503,9 @@ const App = () => {
     const setupStreamListeners = async () => {
       streamUnlisten = await listen<{ session_id: string; event: any }>('chat:event', (e) => {
         const { session_id: sid, event } = e.payload;
-        if (sid !== currentSessionId) return;
+        // Double-guard: check both the closure-captured ID and the live signal.
+        // The live signal catches stale listeners that survive the async cleanup race.
+        if (sid !== currentSessionId || sid !== selectedSessionId()) return;
 
         if (event.Token) {
           // If we receive tokens but are not streaming (e.g. after a Done from
@@ -2376,12 +2542,12 @@ const App = () => {
             label,
             detail: isSkill ? undefined : truncate(event.ToolCallStart.input, 80),
           });
-          recordToolCallStart(actId, tool_id, label, event.ToolCallStart.input);
+          recordToolCallStart(sid, actId, tool_id, label, event.ToolCallStart.input);
         } else if (event.ToolCallResult) {
           const tool_id = event.ToolCallResult.tool_id ?? 'unknown';
           const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
           if (match) completeActivity(match.id, event.ToolCallResult.is_error);
-          recordToolCallResult(tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error);
+          recordToolCallResult(sid, tool_id, event.ToolCallResult.output, event.ToolCallResult.is_error, tryParseJson(event.ToolCallResult.output)?._mcp_raw);
           pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
         } else if (event.ModelLoading) {
           pushActivity({
@@ -2428,12 +2594,12 @@ const App = () => {
             const tool_id = inner.tool_id ?? 'unknown';
             const actId = `tool:${tool_id}:${Date.now()}`;
             pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
-            recordToolCallStart(actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+            recordToolCallStart(sid, actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
           } else if (inner.type === 'tool_call_completed') {
             const tool_id = inner.tool_id ?? 'unknown';
             const match = activities().filter(a => a.id.startsWith(`tool:${tool_id}:`) && !a.done).pop();
             if (match) completeActivity(match.id, inner.is_error);
-            recordToolCallResult(tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false);
+            recordToolCallResult(sid, tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, inner.output?._mcp_raw);
             pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
           } else if (inner.type === 'user_interaction_required') {
             completeActivity('inference');
@@ -2474,13 +2640,13 @@ const App = () => {
       });
 
       doneUnlisten = await listen<{ session_id: string }>('chat:done', (e) => {
-        if (e.payload.session_id === currentSessionId) {
+        if (e.payload.session_id === currentSessionId && e.payload.session_id === selectedSessionId()) {
           syncChatStateAfterStream(e.payload.session_id);
         }
       });
 
       errorUnlisten = await listen<{ session_id: string; error: string; kind?: string }>('chat:error', (e) => {
-        if (e.payload.session_id === currentSessionId) {
+        if (e.payload.session_id === currentSessionId && e.payload.session_id === selectedSessionId()) {
           clearStreamingState();
           const kind = e.payload.kind;
           if (kind === 'transport' || kind === 'stream') {
@@ -2671,7 +2837,19 @@ const App = () => {
     // ── MCP push events: refetch servers, notifications & tools on any mcp:event ──
     let mcpUnlisten: UnlistenFn | undefined;
     let mcpDebounce: ReturnType<typeof setTimeout> | undefined;
-    const mcpListenPromise = listen('mcp:event', () => {
+    const mcpListenPromise = listen<string>('mcp:event', (ev) => {
+      // Check for app-tool-call events (route to iframe bridge)
+      try {
+        const envelope = JSON.parse(ev.payload as unknown as string);
+        if (typeof envelope?.topic === 'string' && envelope.topic.startsWith('mcp.app-tool.call-requested.')) {
+          const eventData = envelope.payload ?? envelope.data;
+          if (eventData?.request_id && eventData?.app_instance_id) {
+            void handleAppToolCallEvent(eventData);
+            return; // Don't debounce-refresh for tool call events
+          }
+        }
+      } catch { /* not JSON or not an app-tool event — proceed with normal refresh */ }
+
       if (mcpDebounce) clearTimeout(mcpDebounce);
       mcpDebounce = setTimeout(() => {
         loadMcpServers();
@@ -3354,6 +3532,13 @@ const App = () => {
                   onKillChatWorkflow={killChatWorkflow}
                   onRespondWorkflowGate={respondWorkflowGate}
                   fetchParsedWorkflow={(name) => workflowStore.getDefinitionParsed(name)}
+                  mcpAppTools={mcpAppTools}
+                  mcpAppHtmlCache={mcpAppHtmlCache}
+                  setMcpAppHtmlCache={setMcpAppHtmlCache}
+                  daemonUrl={() => context()?.daemon_url}
+                  onAppBridgeReady={handleAppBridgeReady}
+                  onAppBridgeDestroy={handleAppBridgeDestroy}
+                  onAppToolsChanged={handleAppToolsChanged}
                 />
               </div>
 
@@ -3450,7 +3635,11 @@ const App = () => {
                     modelRouter={modelRouter}
                     pendingQuestions={() => pendingQuestions().filter((q) => q.session_id === session_id)}
                     answeredQuestions={answeredQuestions}
-                    onQuestionAnswered={markQuestionAnswered}
+                    onQuestionAnswered={(request_id, answerText) => {
+                      markQuestionAnswered(request_id, answerText);
+                      const sid = selectedSessionId();
+                      if (sid) void syncChatState(sid);
+                    }}
                     onAgentQuestion={(agent_id, request_id, text, choices, allow_freeform, message, multi_select) => {
                       addPendingQuestion({ request_id, text, choices, allow_freeform, multi_select, agent_id: agent_id, message, session_id });
                     }}

@@ -253,11 +253,19 @@ pub(crate) async fn save_workspace_file(
     Query(query): Query<FilePathQuery>,
     Json(body): Json<SaveFileRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .chat
-        .save_workspace_file(&session_id, &query.path, &body.content)
-        .await
-        .map_err(chat_error)?;
+    if let Some(ref b64) = body.content_base64 {
+        state
+            .chat
+            .save_workspace_file_binary(&session_id, &query.path, b64)
+            .await
+            .map_err(chat_error)?;
+    } else {
+        state
+            .chat
+            .save_workspace_file(&session_id, &query.path, &body.content)
+            .await
+            .map_err(chat_error)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -136,6 +136,7 @@ impl DagObserver {
             ReasoningEvent::UserInteractionRequired { .. } => vec![],
             ReasoningEvent::QuestionAsked { .. } => vec![],
             ReasoningEvent::ModelRetry { .. } => vec![],
+            ReasoningEvent::ToolCallArgDelta { .. } => vec![],
         }
     }
 

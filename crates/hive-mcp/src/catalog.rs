@@ -267,6 +267,7 @@ mod tests {
             name: name.to_string(),
             description: format!("{name} description"),
             input_schema: json!({"type": "object"}),
+            ui_meta: None,
         }
     }
 
