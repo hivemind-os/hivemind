@@ -19,6 +19,60 @@ pub struct WebSearchTool {
 }
 
 impl WebSearchTool {
+    /// Returns the tool definition without creating a backend or synthesizer.
+    /// Used by the tools listing API for UI discovery.
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinitionBuilder::new("web.search", "Web Search")
+            .description(
+                "Search the web for information. Takes a natural language question and \
+                 returns a synthesized answer with citations from multiple web sources. \
+                 Use this to research libraries, frameworks, best practices, APIs, \
+                 documentation, and any other information available on the web.",
+            )
+            .input_schema(json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language search question or topic to research."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of web results to fetch and synthesize (default: 5, max: 10).",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10
+                    }
+                },
+                "required": ["query"]
+            }))
+            .output_schema(json!({
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "type": "string",
+                        "description": "Synthesized answer with inline [N] citations."
+                    },
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "index": { "type": "integer" },
+                                "title": { "type": "string" },
+                                "url": { "type": "string" },
+                                "snippet": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }))
+            .channel_class(ChannelClass::Public)
+            .read_only()
+            .approval(ToolApproval::Auto)
+            .build()
+    }
+
     /// Create a WebSearchTool from a [`WebSearchConfig`].
     ///
     /// Returns `None` if the provider is `"none"` or the API key is missing.
@@ -64,55 +118,7 @@ impl WebSearchTool {
         preferred_models: Option<Vec<String>>,
     ) -> Self {
         Self {
-            definition: ToolDefinitionBuilder::new("web.search", "Web Search")
-                .description(
-                    "Search the web for information. Takes a natural language question and \
-                     returns a synthesized answer with citations from multiple web sources. \
-                     Use this to research libraries, frameworks, best practices, APIs, \
-                     documentation, and any other information available on the web.",
-                )
-                .input_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language search question or topic to research."
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of web results to fetch and synthesize (default: 5, max: 10).",
-                            "default": 5,
-                            "minimum": 1,
-                            "maximum": 10
-                        }
-                    },
-                    "required": ["query"]
-                }))
-                .output_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "answer": {
-                            "type": "string",
-                            "description": "Synthesized answer with inline [N] citations."
-                        },
-                        "sources": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "index": { "type": "integer" },
-                                    "title": { "type": "string" },
-                                    "url": { "type": "string" },
-                                    "snippet": { "type": "string" }
-                                }
-                            }
-                        }
-                    }
-                }))
-                .channel_class(ChannelClass::Public)
-                .read_only()
-                .approval(ToolApproval::Auto)
-                .build(),
+            definition: Self::tool_definition(),
             backend,
             extractor: ContentExtractor::default(),
             synthesizer: SearchSynthesizer::new(router, preferred_models),

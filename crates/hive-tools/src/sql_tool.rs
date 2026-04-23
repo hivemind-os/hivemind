@@ -18,6 +18,75 @@ pub struct DataStoreTool {
 }
 
 impl DataStoreTool {
+    /// Returns the tool definition without opening a database connection.
+    /// Used by the tools listing API for UI discovery.
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "core.data_store".to_string(),
+            name: "Data Store".to_string(),
+            description: concat!(
+                "Execute SQL against a per-session SQLite database for structured data ",
+                "analysis. Use this to create tables, insert/load data, run aggregation ",
+                "queries, filter and join datasets, track todo lists, or any tabular data ",
+                "workflow. The database persists for the lifetime of the session. ",
+                "Supports full SQL: CREATE TABLE, INSERT, SELECT, UPDATE, DELETE, ",
+                "WITH (CTEs), window functions, etc."
+            )
+            .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to execute. Supports all SQLite SQL including DDL, DML, and queries."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Brief description of what this query does (for logging/debugging)."
+                    },
+                    "params": {
+                        "type": "array",
+                        "description": "Optional positional parameters for the query (bound as ?1, ?2, etc.).",
+                        "items": {}
+                    }
+                },
+                "required": ["query"]
+            }),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "columns": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Column names (for SELECT queries)"
+                    },
+                    "rows": {
+                        "type": "array",
+                        "description": "Result rows (for SELECT queries)"
+                    },
+                    "row_count": {
+                        "type": "number",
+                        "description": "Number of rows returned or affected"
+                    },
+                    "truncated": {
+                        "type": "boolean",
+                        "description": "Whether results were truncated due to row limit"
+                    }
+                }
+            })),
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Auto,
+            annotations: ToolAnnotations {
+                title: "Data Store".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(db_path: PathBuf) -> Result<Self, String> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
@@ -33,70 +102,7 @@ impl DataStoreTool {
             .map_err(|e| format!("failed to configure data store: {e}"))?;
 
         Ok(Self {
-            definition: ToolDefinition {
-                id: "core.data_store".to_string(),
-                name: "Data Store".to_string(),
-                description: concat!(
-                    "Execute SQL against a per-session SQLite database for structured data ",
-                    "analysis. Use this to create tables, insert/load data, run aggregation ",
-                    "queries, filter and join datasets, track todo lists, or any tabular data ",
-                    "workflow. The database persists for the lifetime of the session. ",
-                    "Supports full SQL: CREATE TABLE, INSERT, SELECT, UPDATE, DELETE, ",
-                    "WITH (CTEs), window functions, etc."
-                )
-                .to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "SQL query to execute. Supports all SQLite SQL including DDL, DML, and queries."
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Brief description of what this query does (for logging/debugging)."
-                        },
-                        "params": {
-                            "type": "array",
-                            "description": "Optional positional parameters for the query (bound as ?1, ?2, etc.).",
-                            "items": {}
-                        }
-                    },
-                    "required": ["query"]
-                }),
-                output_schema: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "columns": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Column names (for SELECT queries)"
-                        },
-                        "rows": {
-                            "type": "array",
-                            "description": "Result rows (for SELECT queries)"
-                        },
-                        "row_count": {
-                            "type": "number",
-                            "description": "Number of rows returned or affected"
-                        },
-                        "truncated": {
-                            "type": "boolean",
-                            "description": "Whether results were truncated due to row limit"
-                        }
-                    }
-                })),
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Auto,
-                annotations: ToolAnnotations {
-                    title: "Data Store".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(false),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             _db_path: db_path,
             conn: Mutex::new(conn),
         })

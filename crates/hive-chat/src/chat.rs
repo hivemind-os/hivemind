@@ -2712,6 +2712,25 @@ impl ChatService {
         self.web_search_config.store(Arc::new(config));
     }
 
+    /// Returns `true` when web search is configured with a known provider
+    /// and a resolvable API key, i.e. when `WebSearchTool::from_config()`
+    /// would succeed.
+    pub fn web_search_available(&self) -> bool {
+        let config = self.web_search_config.load();
+        matches!(config.provider.as_str(), "brave" | "tavily") && config.resolve_api_key().is_some()
+    }
+
+    /// Returns the web search tool definition if web search is configured.
+    /// This allows the API to include the definition without depending on
+    /// `hive-web-search` directly.
+    pub fn web_search_tool_definition(&self) -> Option<ToolDefinition> {
+        if self.web_search_available() {
+            Some(hive_web_search::WebSearchTool::tool_definition())
+        } else {
+            None
+        }
+    }
+
     fn available_personas(&self) -> Vec<Persona> {
         let mut personas = self.personas.lock().clone();
         personas.retain(|p| !p.archived);

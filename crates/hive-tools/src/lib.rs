@@ -77,8 +77,8 @@ pub use shell_detect::detect_shells;
 
 pub mod workflow_tools;
 pub use workflow_tools::{
-    WorkflowKillTool, WorkflowLaunchTool, WorkflowListTool, WorkflowPauseTool, WorkflowRespondTool,
-    WorkflowResumeTool, WorkflowStatusTool,
+    all_workflow_tool_definitions, WorkflowKillTool, WorkflowLaunchTool, WorkflowListTool,
+    WorkflowPauseTool, WorkflowRespondTool, WorkflowResumeTool, WorkflowStatusTool,
 };
 
 pub mod workflow_author_tools;

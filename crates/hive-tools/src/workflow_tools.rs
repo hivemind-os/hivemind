@@ -17,62 +17,66 @@ pub struct WorkflowLaunchTool {
 }
 
 impl WorkflowLaunchTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.launch".to_string(),
+            name: "Launch Workflow".to_string(),
+            description: "Launch a new workflow instance from a saved definition. \
+                Specify the definition by name or by id. Provide trigger_step_id to select \
+                which trigger to fire when the workflow has multiple triggers."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "definition": {
+                        "type": "string",
+                        "description": "Namespace-qualified name of the workflow definition to launch, e.g. \"user/my-workflow\" (use this or `id`)"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Immutable ID of the workflow definition (alternative to `definition` namespaced name)"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "Version of the definition (uses latest if omitted, only used with `definition`)"
+                    },
+                    "trigger_step_id": {
+                        "type": "string",
+                        "description": "Step ID of the trigger to fire (required when the workflow has multiple triggers)"
+                    },
+                    "inputs": {
+                        "type": "object",
+                        "description": "Trigger input values for the workflow"
+                    }
+                }
+            }),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": { "type": "integer" },
+                    "status": { "type": "string" }
+                }
+            })),
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Ask,
+            annotations: ToolAnnotations {
+                title: "Launch Workflow".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(
         service: Arc<WorkflowService>,
         session_id: Option<String>,
         workspace_path: Option<String>,
     ) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.launch".to_string(),
-                name: "Launch Workflow".to_string(),
-                description: "Launch a new workflow instance from a saved definition. \
-                    Specify the definition by name or by id. Provide trigger_step_id to select \
-                    which trigger to fire when the workflow has multiple triggers."
-                    .to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "definition": {
-                            "type": "string",
-                            "description": "Namespace-qualified name of the workflow definition to launch, e.g. \"user/my-workflow\" (use this or `id`)"
-                        },
-                        "id": {
-                            "type": "string",
-                            "description": "Immutable ID of the workflow definition (alternative to `definition` namespaced name)"
-                        },
-                        "version": {
-                            "type": "string",
-                            "description": "Version of the definition (uses latest if omitted, only used with `definition`)"
-                        },
-                        "trigger_step_id": {
-                            "type": "string",
-                            "description": "Step ID of the trigger to fire (required when the workflow has multiple triggers)"
-                        },
-                        "inputs": {
-                            "type": "object",
-                            "description": "Trigger input values for the workflow"
-                        }
-                    }
-                }),
-                output_schema: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": { "type": "integer" },
-                        "status": { "type": "string" }
-                    }
-                })),
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Ask,
-                annotations: ToolAnnotations {
-                    title: "Launch Workflow".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(false),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
             session_id,
             workspace_path,
@@ -151,34 +155,38 @@ pub struct WorkflowStatusTool {
 }
 
 impl WorkflowStatusTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.status".to_string(),
+            name: "Workflow Status".to_string(),
+            description: "Get the current status and state of a workflow instance.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "integer",
+                        "description": "The workflow instance ID"
+                    }
+                },
+                "required": ["instance_id"]
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: false,
+            approval: ToolApproval::Auto,
+            annotations: ToolAnnotations {
+                title: "Workflow Status".to_string(),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.status".to_string(),
-                name: "Workflow Status".to_string(),
-                description: "Get the current status and state of a workflow instance.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": {
-                            "type": "integer",
-                            "description": "The workflow instance ID"
-                        }
-                    },
-                    "required": ["instance_id"]
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: false,
-                approval: ToolApproval::Auto,
-                annotations: ToolAnnotations {
-                    title: "Workflow Status".to_string(),
-                    read_only_hint: Some(true),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(true),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -220,46 +228,50 @@ pub struct WorkflowListTool {
 }
 
 impl WorkflowListTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.list".to_string(),
+            name: "List Workflows".to_string(),
+            description: "List workflow instances, optionally filtered by status, definition name (namespaced, e.g. \"user/my-workflow\"), definition ID, or session."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status (pending, running, paused, completed, failed, killed)"
+                    },
+                    "definition": {
+                        "type": "string",
+                        "description": "Filter by definition name (namespaced, e.g. \"user/my-workflow\")"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Filter by workflow definition ID"
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Filter by parent session ID"
+                    }
+                }
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: false,
+            approval: ToolApproval::Auto,
+            annotations: ToolAnnotations {
+                title: "List Workflows".to_string(),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.list".to_string(),
-                name: "List Workflows".to_string(),
-                description: "List workflow instances, optionally filtered by status, definition name (namespaced, e.g. \"user/my-workflow\"), definition ID, or session."
-                    .to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by status (pending, running, paused, completed, failed, killed)"
-                        },
-                        "definition": {
-                            "type": "string",
-                            "description": "Filter by definition name (namespaced, e.g. \"user/my-workflow\")"
-                        },
-                        "id": {
-                            "type": "string",
-                            "description": "Filter by workflow definition ID"
-                        },
-                        "session_id": {
-                            "type": "string",
-                            "description": "Filter by parent session ID"
-                        }
-                    }
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: false,
-                approval: ToolApproval::Auto,
-                annotations: ToolAnnotations {
-                    title: "List Workflows".to_string(),
-                    read_only_hint: Some(true),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(true),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -323,34 +335,38 @@ pub struct WorkflowPauseTool {
 }
 
 impl WorkflowPauseTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.pause".to_string(),
+            name: "Pause Workflow".to_string(),
+            description: "Pause a running workflow instance.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "integer",
+                        "description": "The workflow instance ID to pause"
+                    }
+                },
+                "required": ["instance_id"]
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Ask,
+            annotations: ToolAnnotations {
+                title: "Pause Workflow".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.pause".to_string(),
-                name: "Pause Workflow".to_string(),
-                description: "Pause a running workflow instance.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": {
-                            "type": "integer",
-                            "description": "The workflow instance ID to pause"
-                        }
-                    },
-                    "required": ["instance_id"]
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Ask,
-                annotations: ToolAnnotations {
-                    title: "Pause Workflow".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(true),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -386,34 +402,38 @@ pub struct WorkflowResumeTool {
 }
 
 impl WorkflowResumeTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.resume".to_string(),
+            name: "Resume Workflow".to_string(),
+            description: "Resume a paused workflow instance.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "integer",
+                        "description": "The workflow instance ID to resume"
+                    }
+                },
+                "required": ["instance_id"]
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Ask,
+            annotations: ToolAnnotations {
+                title: "Resume Workflow".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.resume".to_string(),
-                name: "Resume Workflow".to_string(),
-                description: "Resume a paused workflow instance.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": {
-                            "type": "integer",
-                            "description": "The workflow instance ID to resume"
-                        }
-                    },
-                    "required": ["instance_id"]
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Ask,
-                annotations: ToolAnnotations {
-                    title: "Resume Workflow".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(true),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -449,34 +469,38 @@ pub struct WorkflowKillTool {
 }
 
 impl WorkflowKillTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.kill".to_string(),
+            name: "Kill Workflow".to_string(),
+            description: "Forcefully kill a running or paused workflow instance.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "integer",
+                        "description": "The workflow instance ID to kill"
+                    }
+                },
+                "required": ["instance_id"]
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Ask,
+            annotations: ToolAnnotations {
+                title: "Kill Workflow".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(true),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.kill".to_string(),
-                name: "Kill Workflow".to_string(),
-                description: "Forcefully kill a running or paused workflow instance.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": {
-                            "type": "integer",
-                            "description": "The workflow instance ID to kill"
-                        }
-                    },
-                    "required": ["instance_id"]
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Ask,
-                annotations: ToolAnnotations {
-                    title: "Kill Workflow".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(true),
-                    idempotent_hint: Some(true),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -512,43 +536,47 @@ pub struct WorkflowRespondTool {
 }
 
 impl WorkflowRespondTool {
+    pub fn tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            id: "workflow.respond".to_string(),
+            name: "Respond to Workflow Gate".to_string(),
+            description: "Respond to a feedback gate or approval step in a workflow. \
+                Provide the instance ID, step ID, and the response value."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "integer",
+                        "description": "The workflow instance ID"
+                    },
+                    "step_id": {
+                        "type": "string",
+                        "description": "The step ID waiting for a response"
+                    },
+                    "response": {
+                        "description": "The response value to provide to the gate"
+                    }
+                },
+                "required": ["instance_id", "step_id", "response"]
+            }),
+            output_schema: None,
+            channel_class: ChannelClass::Internal,
+            side_effects: true,
+            approval: ToolApproval::Ask,
+            annotations: ToolAnnotations {
+                title: "Respond to Workflow Gate".to_string(),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            },
+        }
+    }
+
     pub fn new(service: Arc<WorkflowService>) -> Self {
         Self {
-            definition: ToolDefinition {
-                id: "workflow.respond".to_string(),
-                name: "Respond to Workflow Gate".to_string(),
-                description: "Respond to a feedback gate or approval step in a workflow. \
-                    Provide the instance ID, step ID, and the response value."
-                    .to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "instance_id": {
-                            "type": "integer",
-                            "description": "The workflow instance ID"
-                        },
-                        "step_id": {
-                            "type": "string",
-                            "description": "The step ID waiting for a response"
-                        },
-                        "response": {
-                            "description": "The response value to provide to the gate"
-                        }
-                    },
-                    "required": ["instance_id", "step_id", "response"]
-                }),
-                output_schema: None,
-                channel_class: ChannelClass::Internal,
-                side_effects: true,
-                approval: ToolApproval::Ask,
-                annotations: ToolAnnotations {
-                    title: "Respond to Workflow Gate".to_string(),
-                    read_only_hint: Some(false),
-                    destructive_hint: Some(false),
-                    idempotent_hint: Some(false),
-                    open_world_hint: Some(false),
-                },
-            },
+            definition: Self::tool_definition(),
             service,
         }
     }
@@ -582,4 +610,23 @@ impl Tool for WorkflowRespondTool {
             Ok(ToolResult { output: json!({ "ok": true }), data_class: DataClass::Internal })
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper — all workflow tool definitions (for API discovery)
+// ---------------------------------------------------------------------------
+
+/// Returns the tool definitions for all workflow tools without creating
+/// real tool instances. Used by the tools listing API so the UI can
+/// display workflow tools even though they are only instantiated per-session.
+pub fn all_workflow_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        WorkflowLaunchTool::tool_definition(),
+        WorkflowStatusTool::tool_definition(),
+        WorkflowListTool::tool_definition(),
+        WorkflowPauseTool::tool_definition(),
+        WorkflowResumeTool::tool_definition(),
+        WorkflowKillTool::tool_definition(),
+        WorkflowRespondTool::tool_definition(),
+    ]
 }

@@ -83,6 +83,29 @@ pub(crate) async fn list_tools(
         }
     }
 
+    // Include session-only tools that are registered per-session in
+    // build_session_tools() but not in the static ChatService registry.
+    // We surface their definitions here so the UI (e.g. bot wizard tool
+    // override, settings) can display the full set of available tools.
+
+    // Data store is always available per-session.
+    tools.push(hive_tools::DataStoreTool::tool_definition());
+
+    // Workflow tools are always available (workflow service is always present).
+    tools.extend(hive_tools::all_workflow_tool_definitions());
+
+    // Web search is conditional on provider + API key configuration.
+    if let Some(ws_def) = state.chat.web_search_tool_definition() {
+        tools.push(ws_def);
+    }
+
+    // Deduplicate by tool ID (safety net in case any tool is already
+    // present from the static registry or plugins).
+    {
+        let mut seen = std::collections::HashSet::new();
+        tools.retain(|t| seen.insert(t.id.clone()));
+    }
+
     Json(tools)
 }
 
