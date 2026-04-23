@@ -1080,6 +1080,7 @@ mod tests {
         let svc = NodeEnvDaemonService::new(
             Arc::clone(&mgr),
             Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            hive_core::EventBus::new(16),
         );
 
         svc.start().await.expect("start should succeed");
@@ -1095,6 +1096,7 @@ mod tests {
         let svc = NodeEnvDaemonService::new(
             mgr,
             Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            hive_core::EventBus::new(16),
         );
 
         svc.start().await.expect("start should succeed when disabled");
@@ -1111,6 +1113,7 @@ mod tests {
         let svc = NodeEnvDaemonService::new(
             Arc::clone(&mgr),
             Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            hive_core::EventBus::new(16),
         );
 
         // Initially not installed → Stopped
@@ -1131,7 +1134,7 @@ mod tests {
 
         let mgr = Arc::new(NodeEnvManager::new(tmp.path().to_path_buf(), config));
         let shell_env = Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new()));
-        let svc = NodeEnvDaemonService::new(Arc::clone(&mgr), Arc::clone(&shell_env));
+        let svc = NodeEnvDaemonService::new(Arc::clone(&mgr), Arc::clone(&shell_env), hive_core::EventBus::new(16));
 
         svc.start().await.expect("start should succeed");
         assert_eq!(svc.status(), ServiceStatus::Running);

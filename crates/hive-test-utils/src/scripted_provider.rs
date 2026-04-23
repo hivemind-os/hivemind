@@ -237,7 +237,12 @@ impl ModelProvider for ScriptedProvider {
             finish_reason: Some(finish_reason),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
-        };#[cfg(test)]
+        };
+        Ok(Box::pin(tokio_stream::once(Ok(chunk))))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

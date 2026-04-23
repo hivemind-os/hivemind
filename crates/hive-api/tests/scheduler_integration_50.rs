@@ -687,7 +687,12 @@ async fn t31_tick_executes_due_once_task() {
     let mut rx = bus.subscribe();
     svc.tick().await;
 
-    let env = rx.try_recv().expect("event");
+    // First event: scheduler marks the task as running.
+    let env = rx.try_recv().expect("running event");
+    assert_eq!(env.topic, "scheduler.task.running");
+
+    // Second event: the EmitEvent action fires.
+    let env = rx.try_recv().expect("action event");
     assert_eq!(env.topic, "t31.fire");
     let tasks = svc.list_tasks();
     assert_eq!(tasks[0].status, hive_api::TaskStatus::Completed);
