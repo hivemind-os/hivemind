@@ -761,6 +761,8 @@ pub enum LoopEvent {
     StallWarning { tool_name: String, repeated_count: usize },
     /// The loop is yielding early because a new user message was enqueued.
     Preempted,
+    /// A side-effecting tool call was intercepted in shadow mode.
+    ToolCallIntercepted { tool_id: String, input: String },
     /// Partial tool-call argument snapshot during streaming.
     ToolCallArgDelta {
         index: usize,
@@ -2347,6 +2349,16 @@ async fn execute_tool_call(
                 tool_id = %call.tool_id,
                 "shadow mode: intercepting side-effecting tool call"
             );
+            // Emit an interception event so callers (e.g. workflow test
+            // runner) can record what the agent *would* have done.
+            if let Some(tx) = event_tx {
+                let input_str = serde_json::to_string(&call.input)
+                    .unwrap_or_else(|_| "<unserializable>".to_string());
+                let _ = tx.try_send(LoopEvent::ToolCallIntercepted {
+                    tool_id: call.tool_id.clone(),
+                    input: input_str,
+                });
+            }
             // Return a clean success so the agent continues normally.
             // Do NOT include "shadow" or explanatory messages — the LLM
             // would interpret them as partial failures and retry/re-ask.

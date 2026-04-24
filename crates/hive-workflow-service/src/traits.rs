@@ -2,6 +2,13 @@ use async_trait::async_trait;
 use hive_workflow::types::{PermissionEntry, ScheduleTaskDef, SignalTarget, WorkflowAttachment};
 use serde_json::Value;
 
+/// A tool call that was intercepted in shadow mode.
+#[derive(Debug, Clone)]
+pub struct InterceptedToolCall {
+    pub tool_id: String,
+    pub input: Value,
+}
+
 /// Extension trait for executing tools within workflows.
 /// Implemented in hive-api to avoid circular dependencies.
 #[async_trait]
@@ -50,6 +57,10 @@ pub trait WorkflowAgentRunner: Send + Sync {
     /// `spawn_agent` and `wait_for_agent`.
     /// The `on_spawned` callback is invoked with the agent_id immediately after
     /// spawning but before waiting, allowing callers to persist the mapping.
+    ///
+    /// Returns `(agent_id, result_value, intercepted_tool_calls)` where
+    /// `intercepted_tool_calls` contains tool calls that were intercepted in
+    /// shadow mode (tool_id, input JSON).
     async fn spawn_and_wait_agent(
         &self,
         persona_id: &str,
@@ -63,7 +74,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
         shadow_mode: bool,
-    ) -> Result<(String, Value), String>;
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>), String>;
 
     /// Signal an agent or chat session.
     async fn signal_agent(&self, target: &SignalTarget, content: &str) -> Result<Value, String>;

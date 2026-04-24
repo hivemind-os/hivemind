@@ -143,6 +143,10 @@ impl SessionLogger {
             LoopEvent::ToolCallArgDelta { .. } => {
                 // High-frequency streaming event — not logged.
             }
+            LoopEvent::ToolCallIntercepted { tool_id, input } => {
+                let preview = truncate(input, 300);
+                self.log_loop(&format!("TOOL_INTERCEPTED {tool_id} input={preview}"));
+            }
         }
     }
 
@@ -363,6 +367,10 @@ fn format_reasoning_event(event: &ReasoningEvent) -> String {
         ReasoningEvent::ToolCallArgDelta { .. } => {
             // High-frequency streaming event — not logged to session summary.
             return String::new();
+        }
+        ReasoningEvent::ToolCallIntercepted { tool_id, input } => {
+            let input_str = serde_json::to_string(input).unwrap_or_default();
+            format!("TOOL_INTERCEPTED {} input={}", tool_id, truncate(&input_str, 300))
         }
     }
 }

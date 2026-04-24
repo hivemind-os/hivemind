@@ -1604,7 +1604,7 @@ impl StepExecutor for ServiceStepExecutor {
                             }
                         });
 
-                    let (_agent_id, result) = r
+                    let (_agent_id, result, intercepted_calls) = r
                         .spawn_and_wait_agent(
                             persona_id,
                             task,
@@ -1619,6 +1619,32 @@ impl StepExecutor for ServiceStepExecutor {
                             shadow,
                         )
                         .await?;
+
+                    // Persist intercepted tool calls from shadow-mode agents
+                    for ic in intercepted_calls {
+                        let action = hive_workflow::InterceptedAction {
+                            id: 0,
+                            instance_id: ctx.instance_id,
+                            step_id: ctx.step_id.clone(),
+                            kind: "tool_call".to_string(),
+                            timestamp_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64,
+                            details: serde_json::json!({
+                                "tool_id": ic.tool_id,
+                                "arguments": ic.input,
+                            }),
+                        };
+                        if let Err(e) = self.store.save_intercepted_action(&action) {
+                            tracing::warn!(
+                                instance_id = %ctx.instance_id,
+                                step_id = %ctx.step_id,
+                                tool_id = %ic.tool_id,
+                                "failed to persist intercepted tool call: {e}"
+                            );
+                        }
+                    }
 
                     Ok(result)
                 }

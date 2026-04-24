@@ -905,6 +905,12 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 arguments_so_far,
             }
         }
+        LoopEvent::ToolCallIntercepted { tool_id, input } => {
+            ReasoningEvent::ToolCallIntercepted {
+                tool_id,
+                input: parse_json_or_text(&input),
+            }
+        }
     }
 }
 

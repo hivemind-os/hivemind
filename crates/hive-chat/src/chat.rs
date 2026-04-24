@@ -9294,6 +9294,12 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 arguments_so_far: arguments_so_far.clone(),
             }
         }
+        LoopEvent::ToolCallIntercepted { tool_id, input } => {
+            ReasoningEvent::ToolCallIntercepted {
+                tool_id: tool_id.clone(),
+                input: serde_json::from_str(input).unwrap_or_else(|_| json!(input)),
+            }
+        }
     }
 }
 

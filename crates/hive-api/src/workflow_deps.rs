@@ -21,7 +21,8 @@ use hive_scheduler::SchedulerService;
 use hive_tools::ToolRegistry;
 use hive_workflow::types::{PermissionEntry, ScheduleTaskDef, SignalTarget, WorkflowAttachment};
 use hive_workflow_service::{
-    WorkflowAgentRunner, WorkflowInteractionGate, WorkflowTaskScheduler, WorkflowToolExecutor,
+    InterceptedToolCall, WorkflowAgentRunner, WorkflowInteractionGate, WorkflowTaskScheduler,
+    WorkflowToolExecutor,
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -522,7 +523,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
         shadow_mode: bool,
-    ) -> Result<(String, Value), String> {
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
         // Subscribe to supervisor events BEFORE spawning the agent
@@ -564,6 +565,8 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         let deadline = timeout_secs
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
 
+        let mut intercepted_calls: Vec<InterceptedToolCall> = Vec::new();
+
         loop {
             let event = if let Some(dl) = deadline {
                 match tokio::time::timeout_at(dl, rx.recv()).await {
@@ -584,7 +587,21 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                         "result": result,
                         "status": "completed",
                     });
-                    return Ok((agent_id, val));
+                    return Ok((agent_id, val, intercepted_calls));
+                }
+                // Capture shadow-mode tool interceptions from the agent
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::ToolCallIntercepted {
+                        ref tool_id,
+                        ref input,
+                    },
+                }) if *aid == agent_id => {
+                    intercepted_calls.push(InterceptedToolCall {
+                        tool_id: tool_id.clone(),
+                        input: input.clone(),
+                    });
+                    continue;
                 }
                 Ok(_) => continue,
                 Err(_) => return Err("supervisor event channel closed".to_string()),
