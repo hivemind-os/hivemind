@@ -520,13 +520,20 @@ impl WorkflowService {
         yaml_source: &str,
     ) -> Result<WorkflowDefinition, WorkflowError> {
         let _span = tracing::info_span!("service", service = "workflows").entered();
-        let def: WorkflowDefinition = serde_yaml::from_str(yaml_source)?;
+        let mut def: WorkflowDefinition = serde_yaml::from_str(yaml_source)?;
         validate_definition(&def)?;
 
-        // Validate the name for NEW definitions only — existing plain-name
-        // workflows are grandfathered in.
-        let already_exists = self.store.get_latest_definition(&def.name)?.is_some();
-        if !already_exists {
+        // Pin the definition id to the stable DB external_id for existing
+        // definitions.  The YAML may omit the `id` field, causing
+        // serde(default) to generate a fresh UUID on every save.  The DB
+        // preserves the original external_id via ON CONFLICT, but we need the
+        // returned struct (and persisted JSON) to carry the correct id so that
+        // callers (e.g. trigger registration) can match on it.
+        let existing = self.store.get_latest_definition(&def.name)?;
+        if let Some((existing_def, _yaml)) = &existing {
+            def.id = existing_def.id.clone();
+        } else {
+            // New definition — validate the name.
             WorkflowDefinition::validate_name(&def.name)
                 .map_err(|reason| WorkflowError::ValidationError { reason })?;
         }
