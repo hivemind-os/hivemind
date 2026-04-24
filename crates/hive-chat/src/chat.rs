@@ -6894,6 +6894,16 @@ impl ChatService {
             session.snapshot.active_intent = None;
             session.snapshot.active_thinking = None;
             session.snapshot.updated_at_ms = now_ms();
+            // Broadcast a redundant Done so the frontend can re-sync now
+            // that the snapshot state is Idle.  The loop already sent Done
+            // through the forwarding task, but at that point the state was
+            // still Running, so the frontend's snapshot poll may have seen
+            // stale data and re-entered streaming mode.
+            let _ = session.stream_tx.send(SessionEvent::Loop(LoopEvent::Done {
+                content: String::new(),
+                provider_id: String::new(),
+                model: String::new(),
+            }));
             return None;
         };
 
@@ -11855,5 +11865,61 @@ mod tests {
         assert_eq!(supervisor_final.get_all_agents().len(), 1, "agent must survive app tool unregistration");
 
         supervisor.kill_all().await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn begin_next_message_broadcasts_done_when_queue_empty() {
+        // Regression test for the "stuck thinking badge" bug:
+        // When the processing loop drains the queue, the session transitions
+        // to Idle **and** broadcasts a Done event so the frontend can re-sync.
+        let tempdir = tempdir().expect("tempdir");
+        let service = test_chat_service(tempdir.path().join("graph.db"));
+
+        let session = service
+            .create_session(SessionModality::Linear, None, None)
+            .await
+            .expect("create session");
+
+        // Subscribe to the broadcast stream before modifying state.
+        let mut rx = service
+            .subscribe_stream(&session.id)
+            .await
+            .expect("subscribe stream");
+
+        // Simulate the session being in "processing" + Running state with
+        // an empty queue — this is the state right after finish_message()
+        // runs but before begin_next_message() is called on the next loop
+        // iteration.
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
+            record.snapshot.state = ChatRunState::Running;
+            // Ensure queue is empty.
+            record.queue.clear();
+        }
+
+        // Call begin_next_message — should return None and set Idle.
+        let pending = service.begin_next_message(&session.id).await;
+        assert!(pending.is_none(), "no queued message → should return None");
+
+        // Verify the session is now Idle.
+        {
+            let sessions = service.sessions.read().await;
+            let record = sessions.get(&session.id).expect("session record");
+            assert_eq!(record.snapshot.state, ChatRunState::Idle);
+            assert!(!record.processing);
+        }
+
+        // Verify a Done event was broadcast.
+        let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("should receive event within timeout")
+            .expect("broadcast recv should succeed");
+
+        match event {
+            SessionEvent::Loop(LoopEvent::Done { .. }) => { /* expected */ }
+            other => panic!("expected LoopEvent::Done, got: {other:?}"),
+        }
     }
 }
