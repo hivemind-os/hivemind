@@ -733,13 +733,13 @@ pub(crate) async fn wf_run_tests(
 /// Cancel the currently-running test suite (if any).
 pub(crate) async fn wf_cancel_tests(
     State(state): State<AppState>,
-) -> StatusCode {
+) -> Json<serde_json::Value> {
     let guard = state.test_cancel.lock();
     if let Some(cancel) = guard.as_ref() {
         cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        StatusCode::OK
+        Json(json!({ "cancelled": true }))
     } else {
-        StatusCode::NO_CONTENT
+        Json(json!({ "cancelled": false, "reason": "no test run in progress" }))
     }
 }
 

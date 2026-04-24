@@ -571,6 +571,13 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
 
         let mut intercepted_calls: Vec<InterceptedToolCall> = Vec::new();
 
+        tracing::info!(
+            %agent_id,
+            auto_respond,
+            effective_timeout_secs = ?effective_timeout,
+            "spawn_and_wait_agent: entering event loop"
+        );
+
         loop {
             let event = if let Some(dl) = deadline {
                 match tokio::time::timeout_at(dl, rx.recv()).await {
@@ -589,6 +596,10 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 Ok(SupervisorEvent::AgentCompleted { agent_id: ref completed_id, ref result })
                     if *completed_id == agent_id =>
                 {
+                    tracing::info!(
+                        %agent_id,
+                        "spawn_and_wait_agent: agent completed"
+                    );
                     let val = json!({
                         "agent_id": &agent_id,
                         "result": result,
@@ -678,8 +689,22 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                     }
                     continue;
                 }
-                Ok(_) => continue,
-                Err(_) => return Err("supervisor event channel closed".to_string()),
+                Ok(ref other) => {
+                    tracing::trace!(
+                        %agent_id,
+                        event_type = std::any::type_name_of_val(other),
+                        "spawn_and_wait_agent: ignoring unmatched event"
+                    );
+                    continue;
+                }
+                Err(ref e) => {
+                    tracing::error!(
+                        %agent_id,
+                        error = %e,
+                        "spawn_and_wait_agent: supervisor event channel error"
+                    );
+                    return Err(format!("supervisor event channel error: {e}"));
+                }
             }
         }
     }
