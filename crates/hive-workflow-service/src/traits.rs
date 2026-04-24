@@ -34,6 +34,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         attachments_dir: Option<&str>,
         session_id: Option<&str>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<String, String>;
 
     /// Wait for a previously spawned agent to complete and return its result.
@@ -61,6 +62,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         session_id: Option<&str>,
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<(String, Value), String>;
 
     /// Signal an agent or chat session.

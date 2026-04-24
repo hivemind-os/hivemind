@@ -753,6 +753,7 @@ output:
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();

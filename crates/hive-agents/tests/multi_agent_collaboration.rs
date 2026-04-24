@@ -243,6 +243,7 @@ fn make_spec(id: &str, name: &str, keep_alive: bool) -> AgentSpec {
         tool_limits: None,
         persona_id: None,
         workflow_managed: false,
+                shadow_mode: false,
     }
 }
 

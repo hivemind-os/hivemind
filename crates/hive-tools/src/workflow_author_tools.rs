@@ -701,9 +701,9 @@ impl Default for WfAuthorSubmitWorkflowTool {
                 id: "workflow_author.submit_workflow".to_string(),
                 name: "Submit Workflow".to_string(),
                 description: "Submit the authored or modified workflow YAML and a message to the user. \
-                    This is the final tool call — after calling this, stop and do not call any more tools. \
                     The YAML must be a valid, complete workflow definition with a namespace-qualified name \
-                    (e.g. \"user/my-workflow\"). The message should summarize what was created or changed."
+                    (e.g. \"user/my-workflow\"). The message should summarize what was created or changed. \
+                    After this succeeds, proceed to submit tests and then run them."
                     .to_string(),
                 input_schema: json!({
                     "type": "object",
@@ -824,7 +824,7 @@ impl Tool for WfAuthorSubmitWorkflowTool {
 
                         let _ = yaml_lower; // used for lint checks
 
-                        let mut success_msg = "Workflow submitted successfully. You are done — do NOT call any more tools. Respond to the user with a brief summary of the workflow.".to_string();
+                        let mut success_msg = "Workflow submitted successfully. Now generate test cases and call workflow_author.submit_tests.".to_string();
                         if !lint_warnings.is_empty() {
                             success_msg.push_str("\n\nNote: There are some optional quality suggestions you can mention to the user (these are non-blocking and do NOT require resubmission):");
                             for w in &lint_warnings {
@@ -851,6 +851,367 @@ impl Tool for WfAuthorSubmitWorkflowTool {
                     data_class: DataClass::Internal,
                 }),
             }
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// workflow_author.submit_tests — Submit test cases for a workflow
+// ---------------------------------------------------------------------------
+
+pub struct WfAuthorSubmitTestsTool {
+    definition: ToolDefinition,
+}
+
+impl Default for WfAuthorSubmitTestsTool {
+    fn default() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "workflow_author.submit_tests".to_string(),
+                name: "Submit Workflow Tests".to_string(),
+                description: "Submit test cases for the workflow. Each test case defines trigger inputs, \
+                    expected outcomes, and optional mock outputs for side-effecting steps. \
+                    Call this after submit_workflow, then call workflow_author.run_tests to execute them."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "tests": {
+                            "type": "array",
+                            "description": "Array of test cases to add to the workflow",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Short kebab-case test name (e.g. 'happy-path', 'empty-input')"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "What this test verifies"
+                                    },
+                                    "inputs": {
+                                        "type": "object",
+                                        "description": "Trigger inputs for this test case"
+                                    },
+                                    "shadow_outputs": {
+                                        "type": "object",
+                                        "description": "Per-step output overrides (step_id → mock output object). Use to mock agent or external tool outputs."
+                                    },
+                                    "expectations": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {
+                                                "type": "string",
+                                                "enum": ["completed", "failed"],
+                                                "description": "Expected final workflow status"
+                                            },
+                                            "output": {
+                                                "type": "object",
+                                                "description": "Expected workflow output (partial match — extra keys OK)"
+                                            },
+                                            "steps_completed": {
+                                                "type": "array",
+                                                "items": { "type": "string" },
+                                                "description": "Step IDs that should have completed"
+                                            },
+                                            "steps_not_reached": {
+                                                "type": "array",
+                                                "items": { "type": "string" },
+                                                "description": "Step IDs that should NOT have executed"
+                                            },
+                                            "intercepted_action_counts": {
+                                                "type": "object",
+                                                "description": "Expected counts of intercepted actions (e.g. {\"tool_calls\": 3})"
+                                            }
+                                        }
+                                    }
+                                },
+                                "required": ["name", "inputs", "expectations"]
+                            }
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Summary message for the user about the generated tests"
+                        }
+                    },
+                    "required": ["tests", "message"]
+                }),
+                output_schema: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "count": { "type": "integer" },
+                        "error": { "type": "string" }
+                    }
+                })),
+                channel_class: ChannelClass::Internal,
+                side_effects: true,
+                approval: ToolApproval::Auto,
+                annotations: ToolAnnotations {
+                    title: "Submit Workflow Tests".to_string(),
+                    read_only_hint: Some(false),
+                    destructive_hint: Some(false),
+                    idempotent_hint: Some(false),
+                    open_world_hint: Some(false),
+                },
+            },
+        }
+    }
+}
+
+impl Tool for WfAuthorSubmitTestsTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    fn execute(&self, input: Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let tests = input
+                .get("tests")
+                .ok_or_else(|| ToolError::InvalidInput("tests array is required".to_string()))?;
+
+            let tests_array = tests
+                .as_array()
+                .ok_or_else(|| ToolError::InvalidInput("tests must be an array".to_string()))?;
+
+            // Validate each test case has required fields
+            let mut errors: Vec<String> = Vec::new();
+            for (i, test) in tests_array.iter().enumerate() {
+                if test.get("name").and_then(|v| v.as_str()).is_none() {
+                    errors.push(format!("Test case {} is missing 'name'", i));
+                }
+                if test.get("inputs").is_none() {
+                    errors.push(format!("Test case {} is missing 'inputs'", i));
+                }
+                if test.get("expectations").is_none() {
+                    errors.push(format!("Test case {} is missing 'expectations'", i));
+                }
+            }
+
+            if !errors.is_empty() {
+                return Ok(ToolResult {
+                    output: json!({
+                        "success": false,
+                        "error": format!("Validation errors:\n{}", errors.join("\n"))
+                    }),
+                    data_class: DataClass::Internal,
+                });
+            }
+
+            Ok(ToolResult {
+                output: json!({
+                    "success": true,
+                    "count": tests_array.len(),
+                    "message": format!("{} test case(s) submitted. Now call workflow_author.run_tests with the definition_name to execute them.", tests_array.len())
+                }),
+                data_class: DataClass::Internal,
+            })
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// workflow_author.run_tests — Execute submitted tests and return results
+// ---------------------------------------------------------------------------
+
+pub struct WfAuthorRunTestsTool {
+    definition: ToolDefinition,
+    workflow_service: Arc<WorkflowService>,
+}
+
+impl WfAuthorRunTestsTool {
+    pub fn new(workflow_service: Arc<WorkflowService>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "workflow_author.run_tests".to_string(),
+                name: "Run Workflow Tests".to_string(),
+                description: "Execute the test cases previously submitted via submit_tests. \
+                    Returns pass/fail for each test with failure details. \
+                    Call this after submit_tests to validate the workflow. \
+                    If tests fail, analyze the failures and fix the workflow or tests, then run again (max 2 retries)."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "definition_name": {
+                            "type": "string",
+                            "description": "The workflow definition name (e.g. 'user/my-workflow')"
+                        },
+                        "test_names": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional list of specific test names to run. Omit to run all tests."
+                        }
+                    },
+                    "required": ["definition_name"]
+                }),
+                output_schema: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "all_passed": { "type": "boolean" },
+                        "total": { "type": "integer" },
+                        "passed": { "type": "integer" },
+                        "failed": { "type": "integer" },
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "test_name": { "type": "string" },
+                                    "passed": { "type": "boolean" },
+                                    "duration_ms": { "type": "integer" },
+                                    "actual_status": { "type": "string" },
+                                    "failures": { "type": "array" },
+                                    "step_statuses": { "type": "array" }
+                                }
+                            }
+                        },
+                        "message": { "type": "string" }
+                    }
+                })),
+                channel_class: ChannelClass::Internal,
+                side_effects: false,
+                approval: ToolApproval::Auto,
+                annotations: ToolAnnotations {
+                    title: "Run Workflow Tests".to_string(),
+                    read_only_hint: Some(true),
+                    destructive_hint: Some(false),
+                    idempotent_hint: Some(true),
+                    open_world_hint: Some(false),
+                },
+            },
+            workflow_service,
+        }
+    }
+}
+
+impl Tool for WfAuthorRunTestsTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    fn execute(&self, input: Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let definition_name = input
+                .get("definition_name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ToolError::InvalidInput("definition_name is required".to_string())
+                })?;
+
+            let test_names: Option<Vec<String>> = input
+                .get("test_names")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                });
+
+            let test_names_ref = test_names.as_deref();
+
+            let results = match self
+                .workflow_service
+                .run_tests(definition_name, None, test_names_ref)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        output: json!({
+                            "error": format!("Failed to run tests: {}", e),
+                            "all_passed": false,
+                        }),
+                        data_class: DataClass::Internal,
+                    });
+                }
+            };
+
+            if results.is_empty() {
+                let reason = if test_names_ref.is_some() {
+                    "No tests matched the specified names."
+                } else {
+                    "No tests are defined on this workflow."
+                };
+                return Ok(ToolResult {
+                    output: json!({
+                        "all_passed": false,
+                        "total": 0,
+                        "passed": 0,
+                        "failed": 0,
+                        "results": [],
+                        "message": reason,
+                    }),
+                    data_class: DataClass::Internal,
+                });
+            }
+
+            let total = results.len();
+            let passed_count = results.iter().filter(|r| r.passed).count();
+            let failed_count = total - passed_count;
+            let all_passed = failed_count == 0;
+
+            let compact_results: Vec<Value> = results
+                .iter()
+                .map(|r| {
+                    let mut obj = json!({
+                        "test_name": r.test_name,
+                        "passed": r.passed,
+                        "duration_ms": r.duration_ms,
+                    });
+                    if let Some(status) = &r.actual_status {
+                        obj["actual_status"] = json!(status);
+                    }
+                    if !r.failures.is_empty() {
+                        obj["failures"] = json!(r.failures.iter().map(|f| {
+                            json!({
+                                "expectation": f.expectation,
+                                "expected": f.expected,
+                                "actual": f.actual,
+                            })
+                        }).collect::<Vec<_>>());
+                    }
+                    // Compact step statuses (id + status only, no outputs)
+                    if !r.step_results.is_empty() {
+                        obj["step_statuses"] = json!(r.step_results.iter().map(|s| {
+                            let mut step = json!({
+                                "step_id": s.step_id,
+                                "status": s.status,
+                            });
+                            if let Some(err) = &s.error {
+                                step["error"] = json!(err);
+                            }
+                            step
+                        }).collect::<Vec<_>>());
+                    }
+                    obj
+                })
+                .collect();
+
+            let message = if all_passed {
+                format!(
+                    "All {} test(s) passed. You are done — respond to the user with a summary.",
+                    total
+                )
+            } else {
+                format!(
+                    "{}/{} test(s) failed. Analyze the failures below and fix the workflow or tests, then resubmit and run again.",
+                    failed_count, total
+                )
+            };
+
+            Ok(ToolResult {
+                output: json!({
+                    "all_passed": all_passed,
+                    "total": total,
+                    "passed": passed_count,
+                    "failed": failed_count,
+                    "results": compact_results,
+                    "message": message,
+                }),
+                data_class: DataClass::Internal,
+            })
         })
     }
 }
@@ -1464,6 +1825,8 @@ pub const WORKFLOW_AUTHOR_TOOL_IDS: &[&str] = &[
     "workflow_author.get_template",
     "workflow_author.lint_workflow",
     "workflow_author.submit_workflow",
+    "workflow_author.submit_tests",
+    "workflow_author.run_tests",
 ];
 
 /// Build a default set of well-known event topics.
@@ -1578,9 +1941,11 @@ pub fn create_workflow_author_tools(
         Arc::new(WfAuthorListConnectorsTool::new(connector_registry)),
         Arc::new(WfAuthorListPersonasTool::new(personas)),
         Arc::new(WfAuthorListEventTopicsTool::new(event_topics)),
-        Arc::new(WfAuthorListWorkflowsTool::new(workflow_service)),
+        Arc::new(WfAuthorListWorkflowsTool::new(workflow_service.clone())),
         Arc::new(WfAuthorGetTemplateTool::default()),
         Arc::new(WfAuthorLintWorkflowTool::default()),
         Arc::new(WfAuthorSubmitWorkflowTool::default()),
+        Arc::new(WfAuthorSubmitTestsTool::default()),
+        Arc::new(WfAuthorRunTestsTool::new(workflow_service)),
     ]
 }

@@ -3,9 +3,10 @@
  * Reused in SessionWorkflows, WorkflowsPage, and FlightDeck WorkflowsPanel.
  */
 import { For, Show } from 'solid-js';
-import type { StepState } from '~/types';
+import type { StepState, InterceptedActionPage, ShadowSummary } from '~/types';
 import { highlightYaml } from '../YamlHighlight';
 import { pendingApprovalToasts } from '../AgentApprovalToast';
+import ShadowResultsPanel from '../workflow/ShadowResultsPanel';
 import {
   Bell, Bot, Calendar, GitBranch, Hand, Lock, Radio, RotateCcw,
   Square, Timer, TriangleAlert, Wrench, Zap,
@@ -25,6 +26,8 @@ export const statusDotColors: Record<string, string> = {
   paused: '#fbbf24',
   waiting_on_input: '#fbbf24',
   waiting_on_event: '#fbbf24',
+  waiting_for_delay: '#fbbf24',
+  loop_waiting: '#a78bfa',
   pending: '#94a3b8',
   ready: '#60a5fa',
   skipped: '#94a3b8',
@@ -62,11 +65,16 @@ export interface WorkflowInstanceDetailProps {
     variables?: Record<string, any>;
     output?: any;
     error?: string | null;
+    execution_mode?: string;
   };
   /** Called when user clicks a waiting feedback gate step. */
   onOpenFeedbackGate?: (instanceId: number, step: any, state: StepState) => void;
   /** If true, show loading shimmer instead of content. */
   loading?: boolean;
+  /** Fetch intercepted actions for shadow results panel. */
+  fetchInterceptedActions?: (instanceId: number, limit?: number, offset?: number) => Promise<InterceptedActionPage | null>;
+  /** Fetch shadow summary for shadow results panel. */
+  fetchShadowSummary?: (instanceId: number) => Promise<ShadowSummary | null>;
 }
 
 export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProps) {
@@ -150,6 +158,16 @@ export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProp
             <TriangleAlert size={14} />
             <pre>{props.detail.error}</pre>
           </div>
+        </Show>
+
+        {/* Shadow Results */}
+        <Show when={props.detail.execution_mode === 'shadow' && props.fetchInterceptedActions && props.fetchShadowSummary}>
+          <ShadowResultsPanel
+            instanceId={props.detail.id}
+            executionMode={props.detail.execution_mode}
+            fetchActions={props.fetchInterceptedActions!}
+            fetchSummary={props.fetchShadowSummary!}
+          />
         </Show>
       </Show>
     </div>

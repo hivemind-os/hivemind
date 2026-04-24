@@ -79,6 +79,12 @@ pub struct AgentSpec {
     /// workflow recovery path handles re-spawning them.
     #[serde(default)]
     pub workflow_managed: bool,
+    /// When true, side-effecting tool calls are intercepted and a synthetic
+    /// success response is returned instead of executing the real tool.
+    /// Read-only tools and built-in orchestration tools still pass through.
+    /// Used by the workflow shadow/test-run system.
+    #[serde(default)]
+    pub shadow_mode: bool,
 }
 
 fn default_data_class() -> DataClass {
@@ -343,6 +349,7 @@ impl BotConfig {
             tool_limits: self.tool_limits.clone(),
             persona_id: self.persona_id.clone(),
             workflow_managed: false,
+            shadow_mode: false,
         }
     }
 }

@@ -715,6 +715,7 @@ impl AgentRunner {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(self.spec.data_class.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: self.spec.shadow_mode,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -1014,6 +1015,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(registry),
         );
@@ -1052,6 +1054,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(registry),
         );
@@ -1091,6 +1094,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1122,6 +1126,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1153,6 +1158,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1227,6 +1233,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,
@@ -1268,6 +1275,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,
@@ -1327,6 +1335,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,

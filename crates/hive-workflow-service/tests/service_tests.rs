@@ -2,6 +2,7 @@
 //! lifecycle, gate responses, and child workflow launching.
 
 use hive_workflow::types::*;
+use hive_workflow::ExecutionMode;
 use hive_workflow_service::WorkflowService;
 use serde_json::json;
 
@@ -277,6 +278,7 @@ async fn test_launch_workflow_creates_instance() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -301,6 +303,7 @@ async fn test_list_instances_with_filter() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -314,6 +317,7 @@ async fn test_list_instances_with_filter() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -345,6 +349,7 @@ async fn test_kill_instance() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -370,6 +375,7 @@ async fn test_pause_and_resume_instance() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -429,6 +435,7 @@ async fn test_update_permissions() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -460,6 +467,7 @@ async fn test_delete_instance() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();
@@ -488,7 +496,7 @@ async fn test_respond_to_gate_on_waiting_step() {
     svc.save_definition(feedback_definition_yaml()).await.unwrap();
 
     let id = svc
-        .launch("user/feedback-workflow", Some("1.0"), json!({}), "s1", None, None, None, None)
+        .launch("user/feedback-workflow", Some("1.0"), json!({}), "s1", None, None, None, None, ExecutionMode::Normal)
         .await
         .unwrap();
 
@@ -521,7 +529,7 @@ async fn test_child_workflow_definition_resolved() {
     // from the store. Even if the child workflow instance isn't fully executed,
     // we verify the definition lookup succeeds by checking the parent launched.
     let id = svc
-        .launch("user/parent-workflow", Some("1.0"), json!({}), "s1", None, None, None, None)
+        .launch("user/parent-workflow", Some("1.0"), json!({}), "s1", None, None, None, None, ExecutionMode::Normal)
         .await
         .unwrap();
 
@@ -586,6 +594,7 @@ async fn test_launch_with_permission_overrides() {
             Some(perms.clone()),
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();

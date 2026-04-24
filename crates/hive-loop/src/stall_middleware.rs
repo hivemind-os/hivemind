@@ -183,6 +183,7 @@ mod tests {
                 permissions: Arc::new(parking_lot::Mutex::new(SessionPermissions::default())),
                 workspace_classification: None,
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: crate::legacy::ToolsContext {
                 tools: Arc::new(hive_tools::ToolRegistry::new()),

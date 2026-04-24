@@ -233,6 +233,7 @@ mod tests {
                     DataClass::Public.to_i64() as u8,
                 )),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(hive_tools::ToolRegistry::new()),

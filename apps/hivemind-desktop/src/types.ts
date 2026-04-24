@@ -1138,6 +1138,8 @@ export interface WorkflowDefinitionSummary {
   bundled?: boolean;
   archived?: boolean;
   triggers_paused?: boolean;
+  last_successful_run_at_ms?: number | null;
+  is_untested?: boolean;
 }
 
 export interface WorkflowInstanceSummary {
@@ -1161,6 +1163,7 @@ export interface WorkflowInstanceSummary {
   pending_agent_questions?: number;
   child_agent_ids?: string[];
   archived?: boolean;
+  execution_mode?: 'normal' | 'shadow';
 }
 
 export interface StepState {
@@ -1195,6 +1198,117 @@ export interface WorkflowInstance {
   completed_at_ms: number | null;
   output: any | null;
   error: string | null;
+  execution_mode?: 'normal' | 'shadow';
+}
+
+// ── Workflow Impact Analysis types ───────────────────────────────────────
+
+export interface EstimateRange {
+  min: number;
+  max: number | null;
+  expression: string;
+}
+
+export interface ImpactTotals {
+  external_messages: EstimateRange;
+  http_calls: EstimateRange;
+  agent_invocations: EstimateRange;
+  destructive_ops: EstimateRange;
+  scheduled_tasks: EstimateRange;
+}
+
+export interface StepRiskInfo {
+  step_id: string;
+  risk_level: 'safe' | 'caution' | 'danger' | 'unknown';
+  action_summary: string;
+  multiplier: string | null;
+}
+
+export interface WorkflowImpactEstimate {
+  steps: StepRiskInfo[];
+  totals: ImpactTotals;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface WorkflowTestResult {
+  test_name: string;
+  passed: boolean;
+  instance_id: number;
+  failures: WorkflowTestFailure[];
+  duration_ms: number;
+  actual_status?: string;
+  actual_output?: unknown;
+  step_results?: StepStateSnapshot[];
+  intercepted_actions?: InterceptedActionSnapshot[];
+  intercepted_actions_total?: number;
+}
+
+export interface WorkflowTestFailure {
+  expectation: string;
+  expected: string;
+  actual: string;
+}
+
+export interface StepStateSnapshot {
+  step_id: string;
+  status: string;
+  outputs?: unknown;
+  error?: string;
+}
+
+export interface InterceptedActionSnapshot {
+  step_id: string;
+  kind: string;
+  details: Record<string, unknown>;
+}
+
+export interface WorkflowTestCase {
+  name: string;
+  description?: string;
+  trigger_step_id?: string;
+  inputs: Record<string, unknown>;
+  shadow_outputs?: Record<string, unknown>;
+  /** Per-step simulated tool calls (step_id → list of mock calls). */
+  mock_tool_calls?: Record<string, MockToolCall[]>;
+  expectations: TestExpectations;
+}
+
+export interface MockToolCall {
+  tool_id: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface TestExpectations {
+  status?: string;
+  output?: Record<string, unknown>;
+  steps_completed?: string[];
+  steps_not_reached?: string[];
+  intercepted_action_counts?: Record<string, number>;
+}
+
+// ── Shadow / Intercepted Action types ────────────────────────────────────
+
+export interface InterceptedAction {
+  id: number;
+  instance_id: number;
+  step_id: string;
+  kind: string; // "tool_call" | "agent_invocation" | "workflow_launch" | "scheduled_task" | "agent_signal" | "event_gate"
+  timestamp_ms: number;
+  details: Record<string, unknown>;
+}
+
+export interface InterceptedActionPage {
+  items: InterceptedAction[];
+  total: number;
+}
+
+export interface ShadowSummary {
+  total_intercepted: number;
+  tool_calls_intercepted: number;
+  agent_invocations_intercepted: number;
+  workflow_launches_intercepted: number;
+  scheduled_tasks_intercepted: number;
+  agent_signals_intercepted: number;
 }
 
 // ── Flight Deck types ────────────────────────────────────────────────────

@@ -1337,6 +1337,8 @@ async fn test_loop_state_persistence() {
         item_var: Some("item".to_string()),
         body_step_ids: vec!["body1".to_string(), "body2".to_string()],
         max_iterations: None,
+        preview_paused: false,
+        preview_results: None,
     };
 
     let json = serde_json::to_string(&loop_state).unwrap();

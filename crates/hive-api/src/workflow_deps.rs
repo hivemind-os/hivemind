@@ -220,6 +220,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         attachments_dir: Option<&str>,
         session_id: Option<&str>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<String, String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
@@ -315,6 +316,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 tool_limits: None,
                 persona_id: Some(persona.id.clone()),
                 workflow_managed: true,
+                shadow_mode,
             };
 
             let supervisor = chat
@@ -393,6 +395,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 tool_limits: None,
                 persona_id: Some(persona.id.clone()),
                 workflow_managed: true,
+                shadow_mode,
             };
 
             let ws_override = std::path::PathBuf::from(wp);
@@ -518,6 +521,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         session_id: Option<&str>,
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<(String, Value), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
@@ -546,6 +550,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 attachments_dir,
                 session_id,
                 agent_name,
+                shadow_mode,
             )
             .await?;
 

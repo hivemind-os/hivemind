@@ -249,6 +249,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc,
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(hive_tools::ToolRegistry::new()),

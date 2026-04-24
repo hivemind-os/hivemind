@@ -13,6 +13,7 @@ export interface CanvasNode {
   config: Record<string, any>;
   outputs: Record<string, string>;
   onError?: { strategy: string; max_retries: number; delay_secs: number } | null;
+  riskLevel?: 'safe' | 'caution' | 'danger' | 'unknown';
 }
 
 export interface CanvasEdge {
@@ -1177,6 +1178,18 @@ export class GraphCanvas {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = this.theme.bg;
       ctx.fillText('!', node.x + w - 8, node.y + 8);
+    }
+
+    // Risk level indicator dot (bottom-left)
+    if (node.riskLevel && node.riskLevel !== 'safe') {
+      const riskColor = node.riskLevel === 'danger' ? '#ef4444'
+        : node.riskLevel === 'caution' ? '#f59e0b'
+        : '#94a3b8'; // unknown
+      const dotR = 4 / this.zoom;
+      ctx.beginPath();
+      ctx.arc(node.x + 10, node.y + NODE_H - 6, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = riskColor;
+      ctx.fill();
     }
 
     // Ports

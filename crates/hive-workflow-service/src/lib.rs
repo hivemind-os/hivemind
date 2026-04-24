@@ -53,6 +53,7 @@ impl WorkflowEventEmitter for EventBusEmitter {
                 definition_name,
                 parent_session_id,
                 mode,
+                execution_mode,
             } => (
                 "workflow.instance.created",
                 json!({
@@ -60,6 +61,7 @@ impl WorkflowEventEmitter for EventBusEmitter {
                     "definition_name": definition_name,
                     "parent_session_id": parent_session_id,
                     "mode": mode,
+                    "execution_mode": execution_mode,
                 }),
             ),
             WorkflowEvent::InstanceStarted { instance_id } => {
@@ -834,6 +836,7 @@ impl WorkflowService {
         permission_overrides: Option<Vec<PermissionEntry>>,
         trigger_step_id: Option<&str>,
         workspace_path: Option<&str>,
+        execution_mode: ExecutionMode,
     ) -> Result<i64, WorkflowError> {
         let svc_span = tracing::info_span!("service", service = "workflows");
         let (def, _yaml) = if let Some(v) = version {
@@ -883,6 +886,7 @@ impl WorkflowService {
                 permissions,
                 trigger_step_id.map(String::from),
                 effective_workspace,
+                execution_mode,
             )
             .await?;
 
@@ -1203,6 +1207,53 @@ impl WorkflowService {
         self.engine.respond_to_event(instance_id, step_id, event_data).await
     }
 
+    /// List intercepted actions for a shadow-mode instance.
+    pub async fn list_intercepted_actions(
+        &self,
+        instance_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<InterceptedActionPage, WorkflowError> {
+        self.store.list_intercepted_actions(instance_id, limit, offset)
+    }
+
+    /// Get a summary of intercepted actions for a shadow-mode instance.
+    pub async fn get_shadow_summary(
+        &self,
+        instance_id: i64,
+    ) -> Result<ShadowSummary, WorkflowError> {
+        self.store.get_shadow_summary(instance_id)
+    }
+
+    /// Run workflow unit tests defined on the workflow definition.
+    /// Optionally filter to specific test names.
+    pub async fn run_tests(
+        &self,
+        definition_name: &str,
+        version: Option<&str>,
+        test_names: Option<&[String]>,
+    ) -> Result<Vec<hive_workflow::TestResult>, WorkflowError> {
+        let (def, _yaml) = if let Some(v) = version {
+            self.get_definition(definition_name, v).await?
+        } else {
+            self.get_latest_definition(definition_name).await?
+        };
+        if def.tests.is_empty() {
+            return Ok(vec![]);
+        }
+        let engine = &self.engine;
+        let mut results = Vec::new();
+        for tc in &def.tests {
+            if let Some(filter) = test_names {
+                if !filter.iter().any(|n| n == &tc.name) {
+                    continue;
+                }
+            }
+            results.push(hive_workflow::run_test_case(engine, &def, tc).await?);
+        }
+        Ok(results)
+    }
+
     /// List pending workflow feedback requests for a given parent session.
     /// Returns structured items containing instance_id, step_id, prompt, choices, etc.
     pub async fn list_waiting_feedback_for_session(
@@ -1425,6 +1476,7 @@ impl StepExecutor for ServiceStepExecutor {
         // Use per-step permissions if provided, otherwise fall back to context
         let effective_permissions =
             if step_permissions.is_empty() { &ctx.permissions } else { step_permissions };
+        let shadow = ctx.execution_mode == hive_workflow::types::ExecutionMode::Shadow;
         match runner {
             Some(r) => {
                 // Recovery path: if we have an existing agent from a previous
@@ -1482,6 +1534,7 @@ impl StepExecutor for ServiceStepExecutor {
                             ctx.attachments_dir.as_deref(),
                             session_id,
                             agent_name,
+                            shadow,
                         )
                         .await?;
 
@@ -1556,6 +1609,7 @@ impl StepExecutor for ServiceStepExecutor {
                             session_id,
                             Some(on_spawned),
                             agent_name,
+                            shadow,
                         )
                         .await?;
 
@@ -1682,6 +1736,7 @@ impl StepExecutor for ServiceStepExecutor {
                 ctx.permissions.clone(),
                 None,
                 ctx.workspace_path.clone(),
+                ctx.execution_mode,
             )
             .await
             .map_err(|e| format!("launch child workflow: {e}"))?;

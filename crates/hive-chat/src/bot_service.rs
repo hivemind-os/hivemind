@@ -522,12 +522,23 @@ impl BotService {
                 - Both a `schedule` trigger AND a `manual` trigger for scheduled workflows (for testing)\n\
              6. **Submit and summarize**: Call `workflow_author.submit_workflow` with the complete YAML. \
                 If validation fails, read the error carefully, fix the issues, and resubmit **once**. \
-                After a successful submit, give a brief summary of the workflow structure and STOP. \
-                Do not call any more tools after a successful submit.\n\n\
-             **CRITICAL**: After `workflow_author.submit_workflow` returns `success: true`, you MUST stop \
-             calling tools immediately. Respond with a brief summary and do nothing else. Do NOT attempt \
-             to fix lint warnings by resubmitting — just mention them to the user. \
-             Never call `submit_workflow` more than twice total.\n\n\
+                After a successful submit, generate 2-3 test cases covering: \
+                (a) a happy-path scenario with typical inputs, \
+                (b) an edge case (empty input, boundary values), and \
+                (c) an error scenario if the workflow has error handling. \
+                Then call `workflow_author.submit_tests` with the test cases.\n\
+              7. **Run tests**: After submit_tests succeeds, call `workflow_author.run_tests` with the same \
+                `definition_name` you used in submit_workflow. Review the results:\n\
+                - If all tests pass: STOP and respond with a brief summary of the workflow and test results.\n\
+                - If tests fail: analyze the failures, fix the workflow YAML (call submit_workflow again) \
+                  or fix the test cases (call submit_tests again), then call run_tests again.\n\
+                - Limit yourself to **2 fix-and-rerun cycles** maximum. If tests still fail after 2 attempts, \
+                  STOP and present the remaining failures to the user for guidance.\n\n\
+             **CRITICAL**: After `workflow_author.submit_workflow` returns `success: true`, generate test cases, \
+             call `workflow_author.submit_tests`, then call `workflow_author.run_tests`. \
+             If all tests pass, STOP immediately — respond with a brief summary and do nothing else. \
+             Do NOT attempt to fix lint warnings by resubmitting — just mention them to the user. \
+             Never call `submit_workflow` more than 3 times total.\n\n\
              Important: The YAML you submit must be a complete, valid workflow definition. \
              Always include all required fields (name, triggers, steps). \
              Use template expressions like `{{{{trigger.field}}}}` and `{{{{steps.id.outputs.field}}}}` \

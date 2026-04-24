@@ -345,6 +345,10 @@ pub struct SecurityContext {
     /// Optional connector service handle for resolving output data-class
     /// when enforcing classification on outbound sends.
     pub connector_service: Option<Arc<dyn hive_connectors::ConnectorServiceHandle>>,
+    /// When true, side-effecting external tool calls are intercepted and a
+    /// synthetic success response is returned.  Built-in tools (`core.*`,
+    /// `knowledge.*`) and read-only tools pass through unchanged.
+    pub shadow_mode: bool,
 }
 
 #[derive(Clone)]
@@ -2330,6 +2334,44 @@ async fn execute_tool_call(
         return handle_knowledge_query_tool(&call, context).await;
     }
 
+    // ── Shadow mode interception ──────────────────────────────────────
+    // When shadow_mode is active, intercept external side-effecting tools.
+    // Built-in orchestration tools (core.*, knowledge.*) are handled above
+    // and always pass through.  Read-only tools also pass through so the
+    // agent can reason over real data.
+    if context.security.shadow_mode {
+        let is_read_only = definition.annotations.read_only_hint == Some(true)
+            || !definition.side_effects;
+        if !is_read_only {
+            tracing::info!(
+                tool_id = %call.tool_id,
+                "shadow mode: intercepting side-effecting tool call"
+            );
+            // Return a clean success so the agent continues normally.
+            // Do NOT include "shadow" or explanatory messages — the LLM
+            // would interpret them as partial failures and retry/re-ask.
+            let synthetic_output = serde_json::json!({
+                "success": true,
+            });
+            let result = hive_tools::ToolResult {
+                output: synthetic_output,
+                data_class: DataClass::Internal,
+            };
+            // Still run after_tool_result middleware so classification and
+            // other hooks see the synthetic result.
+            let mut result = result;
+            for hook in middleware {
+                result = hook.after_tool_result(
+                    context,
+                    &call.tool_id,
+                    Some(&call.input),
+                    result,
+                )?;
+            }
+            return Ok(result);
+        }
+    }
+
     // Snapshot the tool input before it's moved into execute()
     let tool_input_snapshot = call.input.clone();
 
@@ -3348,6 +3390,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -3475,6 +3518,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3540,6 +3584,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3605,6 +3650,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3665,6 +3711,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3737,6 +3784,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3802,6 +3850,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3865,6 +3914,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(workspace_classification)),
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -3962,6 +4012,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4154,6 +4205,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4383,6 +4435,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4622,6 +4675,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4804,6 +4858,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: effective_dc,
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4968,6 +5023,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: effective_dc,
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -5177,6 +5233,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -5251,6 +5308,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -5316,6 +5374,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -5575,6 +5634,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -6068,6 +6128,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -6139,6 +6200,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new({

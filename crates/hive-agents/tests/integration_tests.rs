@@ -37,6 +37,7 @@ fn make_spec(id: &str, name: &str, role: AgentRole) -> AgentSpec {
         tool_limits: None,
         persona_id: None,
         workflow_managed: false,
+                shadow_mode: false,
     }
 }
 

@@ -49,6 +49,8 @@ pub(crate) struct WfLaunchRequest {
     trigger_step_id: Option<String>,
     #[serde(default)]
     workspace_path: Option<String>,
+    #[serde(default)]
+    execution_mode: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -93,6 +95,35 @@ pub(crate) struct WfAiAssistRequest {
     prompt: String,
     #[serde(default)]
     agent_id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct WfInterceptedActionsQuery {
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct WfAnalyzeRequest {
+    definition_name: String,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct WfRunTestsRequest {
+    definition_name: String,
+    #[serde(default)]
+    version: Option<String>,
+    /// When set, only run these test names; otherwise run all.
+    #[serde(default)]
+    test_names: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct WfTestRunResponse {
+    results: Vec<hive_workflow::TestResult>,
+    all_passed: bool,
 }
 
 #[derive(Serialize)]
@@ -399,6 +430,18 @@ pub(crate) async fn wf_launch_instance(
         ));
     };
 
+    // Parse execution_mode from request, defaulting to Normal
+    let execution_mode = match req.execution_mode.as_deref() {
+        Some("shadow") => hive_workflow::ExecutionMode::Shadow,
+        Some("normal") | Some("") | None => hive_workflow::ExecutionMode::Normal,
+        Some(invalid) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Invalid execution_mode '{}', must be 'normal' or 'shadow'", invalid),
+            ));
+        }
+    };
+
     let instance_id = state
         .workflows
         .launch(
@@ -410,6 +453,7 @@ pub(crate) async fn wf_launch_instance(
             req.permissions,
             req.trigger_step_id.as_deref(),
             req.workspace_path.as_deref(),
+            execution_mode,
         )
         .await
         .map_err(workflow_error)?;
@@ -579,6 +623,128 @@ pub(crate) async fn wf_respond_to_gate(
         .await
         .map_err(workflow_error)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+pub(crate) async fn wf_intercepted_actions(
+    State(state): State<AppState>,
+    Path(instance_id): Path<i64>,
+    Query(query): Query<WfInterceptedActionsQuery>,
+) -> Result<Json<hive_workflow::InterceptedActionPage>, (StatusCode, String)> {
+    let limit = query.limit.unwrap_or(50).min(500);
+    let offset = query.offset.unwrap_or(0);
+    state
+        .workflows
+        .list_intercepted_actions(instance_id, limit, offset)
+        .await
+        .map(Json)
+        .map_err(workflow_error)
+}
+
+pub(crate) async fn wf_shadow_summary(
+    State(state): State<AppState>,
+    Path(instance_id): Path<i64>,
+) -> Result<Json<hive_workflow::ShadowSummary>, (StatusCode, String)> {
+    state
+        .workflows
+        .get_shadow_summary(instance_id)
+        .await
+        .map(Json)
+        .map_err(workflow_error)
+}
+
+pub(crate) async fn wf_analyze(
+    State(state): State<AppState>,
+    Json(body): Json<WfAnalyzeRequest>,
+) -> Result<Json<hive_workflow::WorkflowImpactEstimate>, (StatusCode, String)> {
+    // Load the definition
+    let (def, _yaml) = if let Some(version) = &body.version {
+        state
+            .workflows
+            .get_definition(&body.definition_name, version)
+            .await
+            .map_err(workflow_error)?
+    } else {
+        state
+            .workflows
+            .get_latest_definition(&body.definition_name)
+            .await
+            .map_err(workflow_error)?
+    };
+
+    // Build tool definitions map from available tools
+    let tools = state.chat.list_tools();
+    let tool_defs: std::collections::HashMap<String, hive_contracts::tools::ToolDefinition> =
+        tools.into_iter().map(|t| (t.id.clone(), t)).collect();
+
+    let estimate = hive_workflow::analyze_workflow(&def, &tool_defs);
+    Ok(Json(estimate))
+}
+
+/// Run unit tests defined on a workflow definition.
+pub(crate) async fn wf_run_tests(
+    State(state): State<AppState>,
+    Json(body): Json<WfRunTestsRequest>,
+) -> Result<Json<WfTestRunResponse>, (StatusCode, String)> {
+    let test_names = body.test_names.as_deref();
+    let results = state
+        .workflows
+        .run_tests(&body.definition_name, body.version.as_deref(), test_names)
+        .await
+        .map_err(workflow_error)?;
+    let all_passed = results.iter().all(|r| r.passed);
+    Ok(Json(WfTestRunResponse {
+        results,
+        all_passed,
+    }))
+}
+
+// ── Trigger simulation ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub(crate) struct WfSimulateTriggerRequest {
+    /// Workflow definition name (e.g. "user/my-workflow")
+    definition_name: String,
+    /// Optional version (uses latest if omitted)
+    #[serde(default)]
+    version: Option<String>,
+    /// Which trigger step to simulate
+    trigger_step_id: String,
+    /// Simulated payload/inputs for the trigger
+    #[serde(default)]
+    payload: serde_json::Value,
+    /// Execution mode: "shadow" (default) or "normal"
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+/// Launch a workflow by simulating a trigger (e.g. incoming message, event, schedule).
+/// Defaults to shadow mode. Does NOT affect trigger dedup state or event bus.
+pub(crate) async fn wf_simulate_trigger(
+    State(state): State<AppState>,
+    Json(body): Json<WfSimulateTriggerRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    let mode = match body.mode.as_deref() {
+        Some("normal") => hive_workflow::ExecutionMode::Normal,
+        _ => hive_workflow::ExecutionMode::Shadow,
+    };
+
+    let instance_id = state
+        .workflows
+        .launch(
+            &body.definition_name,
+            body.version.as_deref(),
+            body.payload,
+            "trigger-simulation",
+            None,
+            None,
+            Some(&body.trigger_step_id),
+            None,
+            mode,
+        )
+        .await
+        .map_err(workflow_error)?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "instance_id": instance_id }))))
 }
 
 // ── Event stream / topics / triggers ─────────────────────────────────────

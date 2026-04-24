@@ -45,6 +45,7 @@ export interface DesignerNode {
   config: Record<string, any>;
   outputs: Record<string, string>;
   onError: { strategy: string; max_retries?: number; delay_secs?: number; fallback_step?: string } | null;
+  riskLevel?: 'safe' | 'caution' | 'danger' | 'unknown';
 }
 
 export interface DesignerEdge {

@@ -1,7 +1,7 @@
 import { createSignal, createMemo, untrack } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { WorkflowDefinitionSummary, WorkflowInstanceSummary, WorkflowInstance, WorkflowStatus, WorkflowMode } from '../types';
+import type { WorkflowDefinitionSummary, WorkflowInstanceSummary, WorkflowInstance, WorkflowStatus, WorkflowMode, WorkflowImpactEstimate, InterceptedActionPage, ShadowSummary } from '../types';
 
 /** Query parameters for the workflow_list_instances command. */
 interface WorkflowListParams {
@@ -265,13 +265,14 @@ export function createWorkflowStore() {
     }
   }
 
-  async function launchWorkflow(definition: string, inputs: Record<string, unknown> = {}, parentSessionId: string, triggerStepId?: string) {
+  async function launchWorkflow(definition: string, inputs: Record<string, unknown> = {}, parentSessionId: string, triggerStepId?: string, executionMode?: string) {
     try {
       const result = await invoke<{ instance_id: number }>('workflow_launch', {
         definition,
         inputs,
         parent_session_id: parentSessionId,
         trigger_step_id: triggerStepId ?? null,
+        execution_mode: executionMode ?? null,
       });
       await loadInstances();
       return result.instance_id;
@@ -301,6 +302,85 @@ export function createWorkflowStore() {
       return result.instance_id;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e) || 'Failed to launch chat workflow');
+      return null;
+    }
+  }
+
+  async function analyzeWorkflow(definitionName: string, version?: string): Promise<WorkflowImpactEstimate | null> {
+    try {
+      const result = await invoke<WorkflowImpactEstimate>('workflow_analyze', {
+        definition_name: definitionName,
+        version: version ?? null,
+      });
+      return result;
+    } catch (e) {
+      console.warn('Failed to analyze workflow:', e);
+      return null;
+    }
+  }
+
+  async function runTests(
+    definitionName: string,
+    version?: string,
+    testNames?: string[],
+  ): Promise<{ results: WorkflowTestResult[]; all_passed: boolean } | null> {
+    try {
+      return await invoke<{ results: WorkflowTestResult[]; all_passed: boolean }>('workflow_run_tests', {
+        definition_name: definitionName,
+        version: version ?? null,
+        test_names: testNames ?? null,
+      });
+    } catch (e) {
+      console.warn('Failed to run workflow tests:', e);
+      return null;
+    }
+  }
+
+  async function simulateTrigger(
+    definitionName: string,
+    triggerStepId: string,
+    payload: Record<string, unknown>,
+    version?: string,
+    mode?: 'shadow' | 'normal',
+  ): Promise<{ instance_id: number } | null> {
+    try {
+      const result = await invoke<{ instance_id: number }>('workflow_simulate_trigger', {
+        definition_name: definitionName,
+        trigger_step_id: triggerStepId,
+        payload,
+        version: version ?? null,
+        mode: mode ?? null,
+      });
+      await loadInstances();
+      return result;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e) || 'Failed to simulate trigger');
+      return null;
+    }
+  }
+
+  async function fetchInterceptedActions(
+    instanceId: number,
+    limit?: number,
+    offset?: number,
+  ): Promise<InterceptedActionPage | null> {
+    try {
+      return await invoke<InterceptedActionPage>('workflow_intercepted_actions', {
+        instance_id: instanceId,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+      });
+    } catch (e) {
+      console.warn('Failed to fetch intercepted actions:', e);
+      return null;
+    }
+  }
+
+  async function fetchShadowSummary(instanceId: number): Promise<ShadowSummary | null> {
+    try {
+      return await invoke<ShadowSummary>('workflow_shadow_summary', { instance_id: instanceId });
+    } catch (e) {
+      console.warn('Failed to fetch shadow summary:', e);
       return null;
     }
   }
@@ -614,7 +694,9 @@ export function createWorkflowStore() {
     saveDefinition, deleteDefinition, resetDefinition, archiveDefinition, setTriggersPaused, checkDefinitionDependents, getDefinitionYaml, getDefinitionParsed,
     openDesigner, saveFromDesigner, copyDefinition, aiAssist,
     uploadAttachment, deleteAttachment, copyAttachments,
-    launchWorkflow, launchChatWorkflow, pauseInstance, resumeInstance, killInstance, archiveInstance,
+    launchWorkflow, launchChatWorkflow, analyzeWorkflow, runTests, simulateTrigger,
+    fetchInterceptedActions, fetchShadowSummary,
+    pauseInstance, resumeInstance, killInstance, archiveInstance,
     respondToGate, refresh,
     subscribeEvents, unsubscribeEvents,
     setSelectedInstance, setError,

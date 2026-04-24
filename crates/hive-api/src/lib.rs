@@ -2474,6 +2474,26 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/workflows/instances/{instance_id}/steps/{step_id}/respond",
             post(workflows::wf_respond_to_gate),
         )
+        .route(
+            "/api/v1/workflows/instances/{instance_id}/intercepted-actions",
+            get(workflows::wf_intercepted_actions),
+        )
+        .route(
+            "/api/v1/workflows/instances/{instance_id}/shadow-summary",
+            get(workflows::wf_shadow_summary),
+        )
+        .route(
+            "/api/v1/workflows/analyze",
+            post(workflows::wf_analyze),
+        )
+        .route(
+            "/api/v1/workflows/test",
+            post(workflows::wf_run_tests),
+        )
+        .route(
+            "/api/v1/workflows/simulate-trigger",
+            post(workflows::wf_simulate_trigger),
+        )
         .route("/api/v1/workflows/events", get(workflows::wf_event_stream))
         .route("/api/v1/workflows/topics", get(workflows::wf_list_topics))
         .route("/api/v1/workflows/triggers/active", get(workflows::wf_list_active_triggers))
@@ -2924,6 +2944,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,
@@ -3925,6 +3946,7 @@ mod tests {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         }
     }
 
@@ -4024,6 +4046,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch workflow 1");
@@ -4038,6 +4061,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch workflow 2");
@@ -4106,6 +4130,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf A");
@@ -4120,6 +4145,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf B");
@@ -4195,6 +4221,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf");

@@ -979,6 +979,7 @@ pub(crate) fn agent_spec_from_persona(persona: &Persona) -> AgentSpec {
         tool_limits: None,
         persona_id: Some(persona.id.clone()),
         workflow_managed: false,
+                shadow_mode: false,
     }
 }
 
@@ -2803,6 +2804,7 @@ impl ChatService {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(data_class.to_i64() as u8)),
                 connector_service: self.connector_service.clone(),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::clone(&self.tools),
@@ -6445,6 +6447,7 @@ impl ChatService {
                     // session even if no sensitive file has been touched.
                     effective_data_class: Arc::new(AtomicU8::new(DataClass::Public.to_i64() as u8)),
                     connector_service: self.connector_service.clone(),
+                shadow_mode: false,
                 },
                 tools_ctx: ToolsContext {
                     tools: session_tools,
@@ -10088,6 +10091,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,
@@ -11501,6 +11505,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             status: "blocked".to_string(),
             original_task: Some("plan feature".to_string()),
@@ -11789,6 +11794,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,

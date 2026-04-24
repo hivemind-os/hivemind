@@ -8,6 +8,7 @@ use hive_workflow::store::WorkflowPersistence;
 use hive_workflow::types::{
     InstanceFilter, StepStatus, StepType, TaskDef, TriggerType, WorkflowDefinition, WorkflowStatus,
 };
+use hive_workflow::ExecutionMode;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -810,7 +811,7 @@ impl TriggerManager {
             drop(svc_guard);
 
             match svc
-                .launch(name, version, inputs.clone(), "trigger-manager", None, None, None, None)
+                .launch(name, version, inputs.clone(), "trigger-manager", None, None, None, None, ExecutionMode::Normal)
                 .await
             {
                 Ok(id) => {
@@ -1458,6 +1459,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: hive_workflow::types::WorkflowMode::default(),
             bundled: false,
             archived: false,

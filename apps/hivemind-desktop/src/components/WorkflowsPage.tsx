@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js';
 import type { WorkflowStore } from '../stores/workflowStore';
-import type { WorkflowStatus, StepStatus, WorkflowInstanceSummary, WorkflowDefinitionSummary, StepState, ToolDefinition, Persona } from '../types';
+import type { WorkflowStatus, StepStatus, WorkflowInstanceSummary, WorkflowDefinitionSummary, StepState, ToolDefinition, Persona, WorkflowImpactEstimate } from '../types';
 import type { InteractionStore } from '../stores/interactionStore';
 import WorkflowDesigner from './WorkflowDesigner';
 import { YamlBlock } from './YamlHighlight';
@@ -12,7 +12,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useAbortableEffect } from '~/lib/useAbortableEffect';
 import { renderMarkdown } from '~/utils';
 import { EmptyState } from '~/ui/empty-state';
-import { Bell, Wrench, Bot, Hand, Timer, Radio, RotateCcw, Calendar, GitBranch, Square, Play, PenTool, RefreshCw, Trash2, EyeOff, ClipboardList, Plus, ChevronRight, ChevronDown, Pause, CircleStop, TriangleAlert, Lock, HelpCircle, Rocket, Hourglass, Check, Zap, ArrowRight, ArrowLeft, Filter, Archive, ArchiveRestore, Package } from 'lucide-solid';
+import { Bell, Wrench, Bot, Hand, Timer, Radio, RotateCcw, Calendar, GitBranch, Square, Play, PenTool, RefreshCw, Trash2, EyeOff, ClipboardList, Plus, ChevronRight, ChevronDown, Pause, CircleStop, TriangleAlert, Lock, HelpCircle, Rocket, Hourglass, Check, Zap, ArrowRight, ArrowLeft, Filter, Archive, ArchiveRestore, Package, Mail, Clock } from 'lucide-solid';
 import WorkflowCreationWizard from './WorkflowCreationWizard';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '~/ui/dialog';
 import { ConfirmDialog } from '~/ui/confirm-dialog';
@@ -127,9 +127,10 @@ interface TriggerInput {
   xUi?: { widget?: string; [key: string]: any };
 }
 
-interface ManualTriggerOption {
+interface TriggerOption {
   stepId: string;
   label: string;
+  triggerType: string;  // 'manual' | 'incoming_message' | 'event_pattern' | 'schedule' | etc.
   schema: TriggerInput[];
 }
 
@@ -143,8 +144,10 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
   const [launchError, setLaunchError] = createSignal<string | null>(null);
   const [launchSchema, setLaunchSchema] = createSignal<TriggerInput[]>([]);
   const [launchValues, setLaunchValues] = createSignal<Record<string, any>>({});
-  const [manualTriggers, setManualTriggers] = createSignal<ManualTriggerOption[]>([]);
-  const [selectedTrigger, setSelectedTrigger] = createSignal<ManualTriggerOption | null>(null);
+  const [triggerOptions, setTriggerOptions] = createSignal<TriggerOption[]>([]);
+  const [selectedTrigger, setSelectedTrigger] = createSignal<TriggerOption | null>(null);
+  const [testRunEnabled, setTestRunEnabled] = createSignal(false);
+  const [impactEstimate, setImpactEstimate] = createSignal<WorkflowImpactEstimate | null>(null);
   const [confirmKill, setConfirmKill] = createSignal<number | null>(null);
   const [confirmReset, setConfirmReset] = createSignal<string | null>(null);
   const [confirmDelete, setConfirmDelete] = createSignal<{ name: string; version: string; triggers: any[]; scheduledTasks: any[] } | null>(null);
@@ -228,84 +231,69 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     }
   }
 
+  function triggerTypeIcon(type: string): JSX.Element {
+    switch (type) {
+      case 'incoming_message': return <Mail size={18} />;
+      case 'event_pattern': case 'event': return <Zap size={18} />;
+      case 'schedule': return <Clock size={18} />;
+      case 'mcp_notification': return <Bell size={18} />;
+      default: return <Hand size={18} />;
+    }
+  }
+
+  function triggerTypeLabel(type: string): string {
+    switch (type) {
+      case 'incoming_message': return 'Incoming Message';
+      case 'event_pattern': case 'event': return 'Event';
+      case 'schedule': return 'Schedule';
+      case 'mcp_notification': return 'MCP Notification';
+      case 'manual': return 'Manual';
+      default: return type;
+    }
+  }
+
   async function loadLaunchSchema(defName: string) {
     try {
       const result = await store.getDefinitionParsed(defName);
-      if (!result) { setLaunchSchema([]); setLaunchValues({}); setManualTriggers([]); setSelectedTrigger(null); return; }
+      if (!result) { setLaunchSchema([]); setLaunchValues({}); setTriggerOptions([]); setSelectedTrigger(null); return; }
       const def = result.definition;
       const steps: any[] = (def.steps as any[]) || [];
 
-      // Find all manual trigger steps and their schemas
-      const options: ManualTriggerOption[] = [];
+      const options: TriggerOption[] = [];
       for (const step of steps) {
         if (step.type !== 'trigger') continue;
         const trigDef = step.trigger;
-        if (!trigDef || trigDef.type !== 'manual') continue;
+        if (!trigDef) continue;
 
-        // Build schema from input_schema (preferred) or legacy inputs
+        const trigType: string = trigDef.type || 'manual';
         let inputFields: TriggerInput[] = [];
-        if (trigDef.input_schema && typeof trigDef.input_schema === 'object' && trigDef.input_schema.properties) {
-          const schemaProps = trigDef.input_schema.properties;
-          const schemaRequired: string[] = trigDef.input_schema.required || [];
-          for (const [pName, pDef] of Object.entries(schemaProps as Record<string, any>)) {
-            inputFields.push({
-              name: pName,
-              input_type: pDef?.type || 'string',
-              required: schemaRequired.includes(pName),
-              default: pDef?.default,
-              description: pDef?.description,
-              enum: Array.isArray(pDef?.enum) ? pDef.enum : undefined,
-              minLength: pDef?.minLength,
-              maxLength: pDef?.maxLength,
-              minimum: pDef?.minimum,
-              maximum: pDef?.maximum,
-              pattern: pDef?.pattern,
-              xUi: pDef?.['x-ui'] && typeof pDef['x-ui'] === 'object' ? pDef['x-ui'] : undefined,
-            });
-          }
+
+        if (trigType === 'manual') {
+          inputFields = buildManualTriggerFields(trigDef, def);
+        } else if (trigType === 'incoming_message') {
+          inputFields = buildIncomingMessageFields(trigDef);
+        } else if (trigType === 'event_pattern' || trigType === 'event') {
+          inputFields = buildEventPatternFields();
+        } else if (trigType === 'schedule') {
+          // Schedule triggers need no user input — scheduled_time is auto-injected
+          inputFields = [];
+        } else if (trigType === 'mcp_notification') {
+          inputFields = buildMcpNotificationFields();
         } else {
-          // Fall back to legacy inputs
-          inputFields = (trigDef.inputs || []).map((inp: any) => ({
-            name: inp.name,
-            input_type: inp.input_type || 'string',
-            required: inp.required || false,
-            default: inp.default,
-            description: inp.description,
-            enum: inp.enum,
-            minLength: inp.minLength,
-            maxLength: inp.maxLength,
-            minimum: inp.minimum,
-            maximum: inp.maximum,
-            pattern: inp.pattern,
-          }));
-          // Merge schema from variables definition into trigger inputs (legacy behavior)
-          const vars = def.variables as { properties?: Record<string, any> } | undefined;
-          if (vars?.properties) {
-            for (const inp of inputFields) {
-              const varSchema = vars.properties[inp.name];
-              if (varSchema) {
-                if (!inp.description && varSchema.description) inp.description = varSchema.description;
-                if (!inp.enum && varSchema.enum) inp.enum = varSchema.enum;
-                if (inp.minimum == null && varSchema.minimum != null) inp.minimum = varSchema.minimum;
-                if (inp.maximum == null && varSchema.maximum != null) inp.maximum = varSchema.maximum;
-                if (inp.minLength == null && varSchema.minLength != null) inp.minLength = varSchema.minLength;
-                if (inp.maxLength == null && varSchema.maxLength != null) inp.maxLength = varSchema.maxLength;
-                if (inp.pattern == null && varSchema.pattern) inp.pattern = varSchema.pattern;
-              }
-            }
-          }
+          // Unknown trigger type — show a raw JSON textarea
+          inputFields = [{ name: 'payload', input_type: 'string', required: false, description: `Payload for ${trigType} trigger (JSON)` }];
         }
 
         options.push({
           stepId: step.id,
           label: step.id,
+          triggerType: trigType,
           schema: inputFields,
         });
       }
 
-      setManualTriggers(options);
+      setTriggerOptions(options);
 
-      // Auto-select first (or only) trigger
       if (options.length > 0) {
         selectTriggerOption(options[0]);
       } else {
@@ -316,12 +304,95 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     } catch {
       setLaunchSchema([]);
       setLaunchValues({});
-      setManualTriggers([]);
+      setTriggerOptions([]);
       setSelectedTrigger(null);
     }
   }
 
-  function selectTriggerOption(opt: ManualTriggerOption) {
+  /** Build input fields for manual triggers from input_schema or legacy inputs. */
+  function buildManualTriggerFields(trigDef: any, def: any): TriggerInput[] {
+    if (trigDef.input_schema && typeof trigDef.input_schema === 'object' && trigDef.input_schema.properties) {
+      const schemaProps = trigDef.input_schema.properties;
+      const schemaRequired: string[] = trigDef.input_schema.required || [];
+      return Object.entries(schemaProps as Record<string, any>).map(([pName, pDef]) => ({
+        name: pName,
+        input_type: pDef?.type || 'string',
+        required: schemaRequired.includes(pName),
+        default: pDef?.default,
+        description: pDef?.description,
+        enum: Array.isArray(pDef?.enum) ? pDef.enum : undefined,
+        minLength: pDef?.minLength,
+        maxLength: pDef?.maxLength,
+        minimum: pDef?.minimum,
+        maximum: pDef?.maximum,
+        pattern: pDef?.pattern,
+        xUi: pDef?.['x-ui'] && typeof pDef['x-ui'] === 'object' ? pDef['x-ui'] : undefined,
+      }));
+    }
+
+    // Fall back to legacy inputs
+    const fields: TriggerInput[] = (trigDef.inputs || []).map((inp: any) => ({
+      name: inp.name,
+      input_type: inp.input_type || 'string',
+      required: inp.required || false,
+      default: inp.default,
+      description: inp.description,
+      enum: inp.enum,
+      minLength: inp.minLength,
+      maxLength: inp.maxLength,
+      minimum: inp.minimum,
+      maximum: inp.maximum,
+      pattern: inp.pattern,
+    }));
+    // Merge schema from variables definition into trigger inputs (legacy behavior)
+    const vars = def.variables as { properties?: Record<string, any> } | undefined;
+    if (vars?.properties) {
+      for (const inp of fields) {
+        const varSchema = vars.properties[inp.name];
+        if (varSchema) {
+          if (!inp.description && varSchema.description) inp.description = varSchema.description;
+          if (!inp.enum && varSchema.enum) inp.enum = varSchema.enum;
+          if (inp.minimum == null && varSchema.minimum != null) inp.minimum = varSchema.minimum;
+          if (inp.maximum == null && varSchema.maximum != null) inp.maximum = varSchema.maximum;
+          if (inp.minLength == null && varSchema.minLength != null) inp.minLength = varSchema.minLength;
+          if (inp.maxLength == null && varSchema.maxLength != null) inp.maxLength = varSchema.maxLength;
+          if (inp.pattern == null && varSchema.pattern) inp.pattern = varSchema.pattern;
+        }
+      }
+    }
+    return fields;
+  }
+
+  /** Build structured fields for incoming_message triggers. */
+  function buildIncomingMessageFields(trigDef: any): TriggerInput[] {
+    // Pre-fill channel_id from the trigger definition if available
+    const channelId = trigDef.channel_id || trigDef.channel || '';
+    return [
+      { name: 'from', input_type: 'string', required: false, description: 'Sender address or name' },
+      { name: 'to', input_type: 'string', required: false, description: 'Recipient address' },
+      { name: 'subject', input_type: 'string', required: false, description: 'Message subject' },
+      { name: 'body', input_type: 'string', required: false, description: 'Message body', xUi: { widget: 'textarea' } },
+      { name: 'channel_id', input_type: 'string', required: false, description: 'Channel identifier', default: channelId || undefined },
+      { name: 'external_id', input_type: 'string', required: false, description: 'External message ID (optional)' },
+    ];
+  }
+
+  /** Build fields for event_pattern triggers — a single JSON editor for the event payload. */
+  function buildEventPatternFields(): TriggerInput[] {
+    return [
+      { name: '_event_payload', input_type: 'string', required: false, description: 'Event payload (JSON object)', xUi: { widget: 'code-editor' } },
+    ];
+  }
+
+  /** Build fields for mcp_notification triggers. */
+  function buildMcpNotificationFields(): TriggerInput[] {
+    return [
+      { name: 'method', input_type: 'string', required: false, description: 'Notification method' },
+      { name: '_notification_params', input_type: 'string', required: false, description: 'Parameters (JSON object)', xUi: { widget: 'code-editor' } },
+    ];
+  }
+
+  function selectTriggerOption(opt: TriggerOption) {
     setSelectedTrigger(opt);
     setLaunchSchema(opt.schema);
     const defaults: Record<string, any> = {};
@@ -339,8 +410,31 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     if (defName) {
       setWizardStep(0);
       setLaunchError(null);
+      setImpactEstimate(null);
       void loadLaunchSchema(defName).then(() => {
         if (signal.aborted) return;
+      });
+      // Fetch impact estimate for the launch dialog
+      void store.analyzeWorkflow(defName).then((est) => {
+        if (signal.aborted) return;
+        setImpactEstimate(est);
+        // Auto-default test run ON for high-volume or untested workflows
+        const defSummary = store.definitions().find(d => d.name === defName);
+        const isUntested = defSummary?.is_untested ?? false;
+        if (isUntested) {
+          setTestRunEnabled(true);
+        }
+        if (est) {
+          const totalDanger = (est.totals.external_messages.min || 0)
+            + (est.totals.http_calls.min || 0)
+            + (est.totals.destructive_ops.min || 0);
+          const hasLoopMultiplier = est.totals.external_messages.max === null
+            || est.totals.http_calls.max === null
+            || est.totals.destructive_ops.max === null;
+          if (hasLoopMultiplier || totalDanger > 100) {
+            setTestRunEnabled(true);
+          }
+        }
       });
     }
   });
@@ -360,10 +454,19 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
   async function handleLaunch() {
     const def = launchDef();
     if (!def || launching()) return;
-    console.log('[workflow] handleLaunch called for:', def);
+
+    const trigger = selectedTrigger();
+    if (!trigger) {
+      setLaunchError('No trigger selected. This workflow may not have any launchable triggers.');
+      return;
+    }
+
+    console.log('[workflow] handleLaunch called for:', def, 'trigger:', trigger.stepId, 'type:', trigger.triggerType);
     setLaunching(true);
     setLaunchResult(null);
     setLaunchError(null);
+
+    // Build inputs from form values
     let inputs: any = {};
     const schema = launchSchema();
     if (schema.length > 0) {
@@ -371,11 +474,49 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     } else {
       try { inputs = JSON.parse(launchInputs()); } catch { /* empty */ }
     }
-    const triggerStepId = selectedTrigger()?.stepId;
-    console.log('[workflow] launching with inputs:', inputs, 'triggerStepId:', triggerStepId);
+
+    // For event_pattern: parse the _event_payload JSON field into a flat object
+    if (trigger.triggerType === 'event_pattern' || trigger.triggerType === 'event') {
+      const raw = inputs._event_payload;
+      delete inputs._event_payload;
+      if (raw && typeof raw === 'string') {
+        try { inputs = { ...inputs, ...JSON.parse(raw) }; } catch { /* leave as-is */ }
+      }
+    }
+
+    // For mcp_notification: parse the _notification_params JSON field
+    if (trigger.triggerType === 'mcp_notification') {
+      const raw = inputs._notification_params;
+      delete inputs._notification_params;
+      if (raw && typeof raw === 'string') {
+        try { inputs = { ...inputs, ...JSON.parse(raw) }; } catch { /* leave as-is */ }
+      }
+    }
+
+    // For schedule: inject scheduled_time
+    if (trigger.triggerType === 'schedule') {
+      inputs.scheduled_time = new Date().toISOString();
+    }
+
+    // Auto-fill timestamp for incoming_message if not provided
+    if (trigger.triggerType === 'incoming_message' && !inputs.timestamp_ms) {
+      inputs.timestamp_ms = Date.now();
+    }
+
+    const executionMode = testRunEnabled() ? 'shadow' : 'normal';
+    const isSimulated = trigger.triggerType !== 'manual';
+
+    console.log('[workflow] launching with inputs:', inputs, 'triggerStepId:', trigger.stepId, 'simulated:', isSimulated);
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-      const launchPromise = store.launchWorkflow(def, inputs, 'manual', triggerStepId);
+      let launchPromise: Promise<number | null>;
+      if (isSimulated) {
+        // Non-manual triggers use the simulate-trigger API
+        launchPromise = store.simulateTrigger(def, trigger.stepId, inputs, undefined, executionMode as any)
+          .then(r => r?.instance_id ?? null);
+      } else {
+        launchPromise = store.launchWorkflow(def, inputs, 'manual', trigger.stepId, executionMode === 'shadow' ? 'shadow' : undefined);
+      }
       const timeoutPromise = new Promise<null>((resolve) => {
         timeoutId = setTimeout(() => resolve(null), 30_000);
       });
@@ -407,8 +548,9 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
     setLaunchError(null);
     setLaunchSchema([]);
     setLaunchValues({});
-    setManualTriggers([]);
+    setTriggerOptions([]);
     setSelectedTrigger(null);
+    setTestRunEnabled(false);
   }
 
   async function handleKillConfirmed(id: number) {
@@ -846,6 +988,9 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                           <span class={statusPill(inst.status)} style="font-size:0.68em;flex-shrink:0;">
                             {statusLabel(inst.status)}
                           </span>
+                          <Show when={(inst as any).execution_mode === 'shadow'}>
+                            <span class="wf-test-badge">TEST</span>
+                          </Show>
                           <Show when={inst.status === 'waiting_on_input'}>
                             <Bell size={13} style="color:#fbbf24;animation:pulse 2s infinite;" />
                           </Show>
@@ -931,6 +1076,8 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                             <WorkflowInstanceDetail
                               detail={detail()}
                               onOpenFeedbackGate={openFeedbackGate}
+                              fetchInterceptedActions={store.fetchInterceptedActions}
+                              fetchShadowSummary={store.fetchShadowSummary}
                             />
                           </div>
                         );
@@ -1016,28 +1163,37 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
               {/* Step 0: Trigger selection (skip if only one) */}
               <Show when={wizardStep() === 0}>
                 <div class="wf-wizard-body">
-                  <Show when={manualTriggers().length > 1} fallback={
-                    <div>
-                      <h3>Ready to configure inputs</h3>
-                      <p class="text-sm text-muted-foreground">
-                        {launchSchema().length > 0
-                          ? `This workflow has ${launchSchema().length} input${launchSchema().length > 1 ? 's' : ''} to configure.`
-                          : 'This workflow has no required inputs.'}
-                      </p>
-                    </div>
+                  <Show when={triggerOptions().length > 1} fallback={
+                    <Show when={triggerOptions().length === 1} fallback={
+                      <div>
+                        <h3>No triggers found</h3>
+                        <p class="text-sm text-muted-foreground">This workflow has no triggers configured.</p>
+                      </div>
+                    }>
+                      <div>
+                        <h3>{triggerTypeLabel(triggerOptions()[0].triggerType)} trigger</h3>
+                        <p class="text-sm text-muted-foreground">
+                          {launchSchema().length > 0
+                            ? `Configure ${launchSchema().length} input${launchSchema().length > 1 ? 's' : ''} for this trigger.`
+                            : triggerOptions()[0].triggerType === 'schedule'
+                              ? 'This will simulate a scheduled trigger firing now.'
+                              : 'This workflow has no required inputs.'}
+                        </p>
+                      </div>
+                    </Show>
                   }>
                     <h3>Choose a trigger</h3>
                     <div class="wf-trigger-cards">
-                      <For each={manualTriggers()}>
+                      <For each={triggerOptions()}>
                         {(opt) => (
                           <button
                             class={`wf-trigger-card${selectedTrigger()?.stepId === opt.stepId ? ' selected' : ''}`}
                             onClick={() => selectTriggerOption(opt)}
                           >
-                            <div class="wf-trigger-card-icon"><Hand size={18} /></div>
+                            <div class="wf-trigger-card-icon">{triggerTypeIcon(opt.triggerType)}</div>
                             <div>
                               <div class="font-semibold">{opt.label}</div>
-                              <div class="text-xs text-muted-foreground">{opt.schema.length} input{opt.schema.length !== 1 ? 's' : ''}</div>
+                              <div class="text-xs text-muted-foreground">{triggerTypeLabel(opt.triggerType)}{opt.schema.length > 0 ? ` · ${opt.schema.length} field${opt.schema.length !== 1 ? 's' : ''}` : ''}</div>
                             </div>
                           </button>
                         )}
@@ -1152,7 +1308,7 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                     <Show when={selectedTrigger()}>
                       <div class="wf-wizard-review-row">
                         <span class="review-key">Trigger</span>
-                        <span class="review-val">{selectedTrigger()!.label}</span>
+                        <span class="review-val">{selectedTrigger()!.label} ({triggerTypeLabel(selectedTrigger()!.triggerType)})</span>
                       </div>
                     </Show>
                     <Show when={launchSchema().length > 0}>
@@ -1165,6 +1321,85 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                         )}
                       </For>
                     </Show>
+                  </div>
+
+                  {/* Impact Estimate Preview */}
+                  <Show when={impactEstimate()}>
+                    {(est) => {
+                      const totals = est().totals;
+                      const hasImpact = totals.external_messages.min > 0
+                        || totals.http_calls.min > 0
+                        || totals.agent_invocations.min > 0
+                        || totals.destructive_ops.min > 0
+                        || totals.scheduled_tasks.min > 0;
+                      const hasLoopMultiplier = totals.external_messages.max === null
+                        || totals.http_calls.max === null
+                        || totals.destructive_ops.max === null;
+                      const isHighVolume = hasLoopMultiplier
+                        || (totals.external_messages.min + totals.http_calls.min + totals.destructive_ops.min) > 100;
+                      return (
+                        <Show when={hasImpact}>
+                          <div class={`wf-impact-preview ${isHighVolume ? 'wf-impact-warning' : ''}`}>
+                            <div class="wf-impact-header">📊 Impact Estimate</div>
+                            <div class="wf-impact-items">
+                              <Show when={totals.external_messages.min > 0}>
+                                <div class="wf-impact-row">
+                                  <span>📧</span>
+                                  <span>{totals.external_messages.max != null ? `${totals.external_messages.min}` : `${totals.external_messages.min}+`} messages</span>
+                                  <Show when={totals.external_messages.max === null}>
+                                    <span class="wf-impact-expr">({totals.external_messages.expression})</span>
+                                  </Show>
+                                </div>
+                              </Show>
+                              <Show when={totals.http_calls.min > 0}>
+                                <div class="wf-impact-row">
+                                  <span>🌐</span>
+                                  <span>{totals.http_calls.max != null ? `${totals.http_calls.min}` : `${totals.http_calls.min}+`} HTTP calls</span>
+                                </div>
+                              </Show>
+                              <Show when={totals.agent_invocations.min > 0}>
+                                <div class="wf-impact-row">
+                                  <span>🤖</span>
+                                  <span>{totals.agent_invocations.min} agent invocation{totals.agent_invocations.min > 1 ? 's' : ''}</span>
+                                </div>
+                              </Show>
+                              <Show when={totals.destructive_ops.min > 0}>
+                                <div class="wf-impact-row">
+                                  <span>⚠️</span>
+                                  <span>{totals.destructive_ops.min} destructive op{totals.destructive_ops.min > 1 ? 's' : ''}</span>
+                                </div>
+                              </Show>
+                              <Show when={totals.scheduled_tasks.min > 0}>
+                                <div class="wf-impact-row">
+                                  <span>⏰</span>
+                                  <span>{totals.scheduled_tasks.min} scheduled task{totals.scheduled_tasks.min > 1 ? 's' : ''}</span>
+                                </div>
+                              </Show>
+                            </div>
+                            <Show when={isHighVolume}>
+                              <div class="wf-impact-warn-text">⚠️ High volume — test run recommended</div>
+                            </Show>
+                          </div>
+                        </Show>
+                      );
+                    }}
+                  </Show>
+
+                  {/* Untested workflow banner */}
+                  <Show when={store.definitions().find(d => d.name === launchDef())?.is_untested}>
+                    <div class="wf-untested-banner">
+                      <TriangleAlert size={14} />
+                      <span>Modified since last successful run — test run recommended</span>
+                    </div>
+                  </Show>
+
+                  {/* Test Run Toggle */}
+                  <div class="wf-test-run-toggle">
+                    <Switch checked={testRunEnabled()} onChange={setTestRunEnabled} disabled={launching()} class="flex items-center gap-2">
+                      <SwitchControl><SwitchThumb /></SwitchControl>
+                      <SwitchLabel class="wf-test-run-label">🧪 Test Run</SwitchLabel>
+                    </Switch>
+                    <p class="wf-test-run-hint">Intercepts emails, HTTP calls, and other side effects. No real actions are performed.</p>
                   </div>
                 </div>
               </Show>
@@ -1196,7 +1431,13 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
                     onClick={() => void handleLaunch()}
                     disabled={launching() || (launchSchema().length > 0 && !canLaunch())}
                   >
-                    {launching() ? <><Hourglass size={14} /> Launching…</> : <><Rocket size={14} /> Launch</>}
+                    {launching()
+                      ? <><Hourglass size={14} /> Launching…</>
+                      : testRunEnabled()
+                        ? <>🧪 Launch Test Run</>
+                        : selectedTrigger()?.triggerType !== 'manual'
+                          ? <><Rocket size={14} /> Simulate & Launch</>
+                          : <><Rocket size={14} /> Launch</>}
                   </button>
                 }>
                   <button class="wf-btn-next" onClick={() => setWizardStep(s => s + 1)}>

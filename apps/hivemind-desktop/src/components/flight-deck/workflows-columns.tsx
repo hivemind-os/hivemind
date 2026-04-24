@@ -129,9 +129,13 @@ export function createWorkflowColumns(callbacks?: WorkflowColumnCallbacks): Colu
       minSize: 60,
       cell: (info) => {
         const status = info.getValue() as WorkflowStatus;
+        const wf = info.row.original.workflow;
         return (
           <span class={`flight-deck-status ${status}`}>
             {status.replace(/_/g, ' ')}
+            {wf.execution_mode === 'shadow' && (
+              <span class="wf-test-badge" style="margin-left:4px;">TEST</span>
+            )}
           </span>
         );
       },

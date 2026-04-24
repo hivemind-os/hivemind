@@ -294,6 +294,7 @@ impl SchedulerAgentRunner for SchedulerAgentRunnerImpl {
             tool_limits: None,
             persona_id: Some(persona.id.clone()),
             workflow_managed: false,
+                shadow_mode: false,
         };
 
         let agent_id = supervisor

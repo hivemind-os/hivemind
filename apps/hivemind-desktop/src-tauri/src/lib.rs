@@ -4685,6 +4685,7 @@ async fn workflow_launch(
     permissions: Option<serde_json::Value>,
     trigger_step_id: Option<String>,
     workspace_path: Option<String>,
+    execution_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     async_post_json::<serde_json::Value, serde_json::Value>(
@@ -4699,6 +4700,66 @@ async fn workflow_launch(
             "permissions": permissions,
             "trigger_step_id": trigger_step_id,
             "workspace_path": workspace_path,
+            "execution_mode": execution_mode,
+        }),
+    )
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn workflow_analyze(
+    definition_name: String,
+    version: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    async_post_json::<serde_json::Value, serde_json::Value>(
+        &base_url,
+        "/api/v1/workflows/analyze",
+        serde_json::json!({
+            "definition_name": definition_name,
+            "version": version,
+        }),
+    )
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn workflow_run_tests(
+    definition_name: String,
+    version: Option<String>,
+    test_names: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    async_post_json::<serde_json::Value, serde_json::Value>(
+        &base_url,
+        "/api/v1/workflows/test",
+        serde_json::json!({
+            "definition_name": definition_name,
+            "version": version,
+            "test_names": test_names,
+        }),
+    )
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn workflow_simulate_trigger(
+    definition_name: String,
+    trigger_step_id: String,
+    payload: serde_json::Value,
+    version: Option<String>,
+    mode: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    async_post_json::<serde_json::Value, serde_json::Value>(
+        &base_url,
+        "/api/v1/workflows/simulate-trigger",
+        serde_json::json!({
+            "definition_name": definition_name,
+            "trigger_step_id": trigger_step_id,
+            "payload": payload,
+            "version": version,
+            "mode": mode,
         }),
     )
     .await
@@ -4748,6 +4809,32 @@ async fn workflow_get_instance(instance_id: i64) -> Result<serde_json::Value, St
     async_get_json::<serde_json::Value>(
         &base_url,
         &format!("/api/v1/workflows/instances/{instance_id}"),
+    )
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn workflow_intercepted_actions(
+    instance_id: i64,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    let lim = limit.unwrap_or(50);
+    let off = offset.unwrap_or(0);
+    async_get_json::<serde_json::Value>(
+        &base_url,
+        &format!("/api/v1/workflows/instances/{instance_id}/intercepted-actions?limit={lim}&offset={off}"),
+    )
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn workflow_shadow_summary(instance_id: i64) -> Result<serde_json::Value, String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    async_get_json::<serde_json::Value>(
+        &base_url,
+        &format!("/api/v1/workflows/instances/{instance_id}/shadow-summary"),
     )
     .await
 }
@@ -5673,8 +5760,13 @@ pub fn run() {
             workflow_set_triggers_paused,
             workflow_check_definition_dependents,
             workflow_launch,
+            workflow_analyze,
+            workflow_run_tests,
+            workflow_simulate_trigger,
             workflow_list_instances,
             workflow_get_instance,
+            workflow_intercepted_actions,
+            workflow_shadow_summary,
             workflow_pause,
             workflow_resume,
             workflow_kill,
