@@ -113,22 +113,31 @@ pub struct WorkflowTestCase {
     /// step's output.  Useful for stubbing agents or external calls.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub shadow_outputs: HashMap<String, serde_json::Value>,
-    /// Per-step simulated tool calls.  For mocked agent steps, this records
-    /// tool calls the agent "would have made" so that intercepted_action_counts
-    /// assertions still work.  Map of step_id → list of simulated calls.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mock_tool_calls: HashMap<String, Vec<MockToolCall>>,
+    /// Per-step expected tool calls.  For agent steps that run in shadow
+    /// mode, these assert against the real intercepted tool calls recorded
+    /// during execution.  Map of step_id → list of expected calls.
+    /// Uses partial matching on arguments: only specified keys are checked.
+    ///
+    /// NOTE: Cannot be used on the same step as `shadow_outputs` — a mocked
+    /// step skips execution and produces no real intercepted actions.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty", alias = "mock_tool_calls")]
+    pub expected_tool_calls: HashMap<String, Vec<ExpectedToolCall>>,
     /// What to assert after the workflow completes.
     #[serde(default)]
     pub expectations: TestExpectations,
 }
 
-/// A simulated tool call for a mocked agent step in a test case.
+/// An expected tool call for asserting agent behavior in test cases.
+/// When a workflow test runs an agent step in shadow mode, the agent's
+/// side-effecting tool calls are intercepted and recorded.  This struct
+/// defines what we expect the agent to have called.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MockToolCall {
+pub struct ExpectedToolCall {
     pub tool_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<serde_json::Value>,
+    /// Expected arguments (partial match).  Only specified keys are checked;
+    /// the real call may have additional keys.  If `None`, any arguments match.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "parameters")]
+    pub arguments: Option<serde_json::Value>,
 }
 
 /// Assertions applied to the completed workflow instance.

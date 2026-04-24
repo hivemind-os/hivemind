@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::{
     WorkflowDefinition, WorkflowEngine, WorkflowError, WorkflowTestCase, TestExpectations,
     TestFailure, TestResult, StepStateSnapshot, InterceptedActionSnapshot, WorkflowStatus,
+    ExpectedToolCall,
 };
 
 /// Run **all** test cases defined on a workflow definition.
@@ -42,30 +43,15 @@ pub async fn run_test_case(
         )
         .await?;
 
-    // Inject synthetic intercepted actions for mock_tool_calls.
-    // These represent tool calls that mocked agent steps "would have made".
-    for (step_id, calls) in &test_case.mock_tool_calls {
-        for call in calls {
-            let mut details = serde_json::json!({
-                "tool_id": call.tool_id,
-                "shadow": true,
-                "message": format!("Simulated tool call '{}' from mocked step", call.tool_id),
-            });
-            if let Some(params) = &call.parameters {
-                details["parameters"] = params.clone();
-            }
-            let action = crate::InterceptedAction {
-                id: 0,
-                instance_id,
-                step_id: step_id.clone(),
-                kind: "tool_call".to_string(),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-                details,
-            };
-            engine.store().save_intercepted_action(&action)?;
+    // Validate: expected_tool_calls must not overlap with shadow_outputs
+    // (a mocked step skips execution — no real intercepted actions are produced).
+    for step_id in test_case.expected_tool_calls.keys() {
+        if test_case.shadow_outputs.contains_key(step_id) {
+            return Err(WorkflowError::Other(format!(
+                "Test case '{}': expected_tool_calls and shadow_outputs both set for step '{}'. \
+                 A mocked step produces no real intercepted actions, so assertions cannot match.",
+                test_case.name, step_id,
+            )));
         }
     }
 
@@ -80,7 +66,13 @@ pub async fn run_test_case(
     let duration_ms = start.elapsed().as_millis() as u64;
 
     // Compare expectations.
-    let failures = evaluate_expectations(&test_case.expectations, &inst, engine, instance_id)?;
+    let failures = evaluate_expectations(
+        &test_case.expectations,
+        &test_case.expected_tool_calls,
+        &inst,
+        engine,
+        instance_id,
+    )?;
 
     // Gather actual step states in definition order.
     let step_results: Vec<StepStateSnapshot> = definition
@@ -161,6 +153,7 @@ async fn wait_for_terminal(
 /// Evaluate all expectations and return the list of failures.
 fn evaluate_expectations(
     expect: &TestExpectations,
+    expected_tool_calls: &std::collections::HashMap<String, Vec<ExpectedToolCall>>,
     inst: &crate::WorkflowInstance,
     engine: &WorkflowEngine,
     instance_id: i64,
@@ -256,7 +249,136 @@ fn evaluate_expectations(
         }
     }
 
+    // -- expected_tool_calls (bipartite matching) ---------------------------
+    if !expected_tool_calls.is_empty() {
+        // Load ALL intercepted actions for this instance.
+        let page = engine.store().list_intercepted_actions(instance_id, 10000, 0)?;
+        let all_actions = if page.total as usize > page.items.len() {
+            // Re-fetch with full size.
+            engine.store().list_intercepted_actions(instance_id, page.total as usize, 0)?.items
+        } else {
+            page.items
+        };
+
+        for (step_id, expected) in expected_tool_calls {
+            let actual_for_step: Vec<_> = all_actions
+                .iter()
+                .filter(|a| a.step_id == *step_id && a.kind == "tool_call")
+                .collect();
+
+            if actual_for_step.is_empty() && !expected.is_empty() {
+                failures.push(TestFailure {
+                    expectation: format!("expected_tool_calls.{step_id}"),
+                    expected: format!("{} tool call(s)", expected.len()),
+                    actual: "no intercepted tool calls for this step".into(),
+                });
+                continue;
+            }
+
+            if actual_for_step.len() != expected.len() {
+                failures.push(TestFailure {
+                    expectation: format!("expected_tool_calls.{step_id}.count"),
+                    expected: expected.len().to_string(),
+                    actual: actual_for_step.len().to_string(),
+                });
+                // Still try to match what we can.
+            }
+
+            // Build compatibility matrix for bipartite matching.
+            let n = expected.len();
+            let m = actual_for_step.len();
+            let compatible: Vec<Vec<bool>> = expected
+                .iter()
+                .map(|exp| {
+                    actual_for_step
+                        .iter()
+                        .map(|act| expected_matches_actual(exp, act))
+                        .collect()
+                })
+                .collect();
+
+            let matching = bipartite_match(n, m, &compatible);
+
+            for (i, slot) in matching.iter().enumerate() {
+                if slot.is_none() {
+                    let exp = &expected[i];
+                    let args_preview = exp
+                        .arguments
+                        .as_ref()
+                        .map(|a| serde_json::to_string(a).unwrap_or_default())
+                        .unwrap_or_else(|| "(any)".into());
+                    failures.push(TestFailure {
+                        expectation: format!("expected_tool_calls.{step_id}[{i}]"),
+                        expected: format!("{}({})", exp.tool_id, args_preview),
+                        actual: format!(
+                            "no matching call among {} intercepted actions",
+                            actual_for_step.len()
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
     Ok(failures)
+}
+
+/// Check whether an expected tool call matches an actual intercepted action.
+fn expected_matches_actual(exp: &ExpectedToolCall, act: &crate::InterceptedAction) -> bool {
+    let actual_tool_id = act.details.get("tool_id").and_then(|v| v.as_str());
+    if actual_tool_id != Some(&exp.tool_id) {
+        return false;
+    }
+    match &exp.arguments {
+        None => true, // no arguments specified → match any
+        Some(expected_args) => {
+            let actual_args = act.details.get("arguments").unwrap_or(&Value::Null);
+            partial_match(expected_args, actual_args)
+        }
+    }
+}
+
+/// Bipartite matching using augmenting paths (Hopcroft-Karp simplified).
+///
+/// `compatible[i][j]` is true if expected[i] can match actual[j].
+/// Returns a vector where `result[i] = Some(j)` means expected[i] matched
+/// actual[j], or `None` if no match found.
+fn bipartite_match(n: usize, m: usize, compatible: &[Vec<bool>]) -> Vec<Option<usize>> {
+    let mut match_right: Vec<Option<usize>> = vec![None; m];
+
+    for i in 0..n {
+        let mut visited = vec![false; m];
+        augment(i, compatible, &mut match_right, &mut visited);
+    }
+
+    // Build left→right result from right→left mapping.
+    let mut result = vec![None; n];
+    for (j, &matched_left) in match_right.iter().enumerate() {
+        if let Some(i) = matched_left {
+            result[i] = Some(j);
+        }
+    }
+    result
+}
+
+fn augment(
+    u: usize,
+    compatible: &[Vec<bool>],
+    match_right: &mut [Option<usize>],
+    visited: &mut [bool],
+) -> bool {
+    for v in 0..match_right.len() {
+        if compatible[u][v] && !visited[v] {
+            visited[v] = true;
+            if match_right[v].is_none()
+                || augment(match_right[v].unwrap(), compatible, match_right, visited)
+            {
+                match_right[v] = Some(u);
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Partial deep-equal: every key/value in `expected` must be present (and
@@ -326,5 +448,113 @@ mod tests {
     fn partial_match_scalars() {
         assert!(partial_match(&json!("hello"), &json!("hello")));
         assert!(!partial_match(&json!("hello"), &json!("world")));
+    }
+
+    // -- bipartite_match tests ----------------------------------------------
+
+    #[test]
+    fn bipartite_match_empty() {
+        let result = bipartite_match(0, 0, &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn bipartite_match_perfect() {
+        // 1:1 mapping — each expected matches exactly one actual
+        let compat = vec![
+            vec![true, false],
+            vec![false, true],
+        ];
+        let result = bipartite_match(2, 2, &compat);
+        assert_eq!(result, vec![Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn bipartite_match_ambiguous_resolves() {
+        // Rubber-duck case: broad + specific expected, both could match actual[0]
+        // expected[0] = broad (matches both), expected[1] = specific (matches only actual[0])
+        let compat = vec![
+            vec![true, true],   // broad: matches actual[0] and actual[1]
+            vec![true, false],  // specific: matches only actual[0]
+        ];
+        let result = bipartite_match(2, 2, &compat);
+        // Correct: specific gets actual[0], broad gets actual[1]
+        assert!(result[0].is_some());
+        assert!(result[1].is_some());
+        assert_ne!(result[0], result[1]); // no double-matching
+    }
+
+    #[test]
+    fn bipartite_match_unmatched() {
+        let compat = vec![
+            vec![false, false], // expected[0] matches nothing
+            vec![false, true],  // expected[1] matches actual[1]
+        ];
+        let result = bipartite_match(2, 2, &compat);
+        assert_eq!(result[0], None);
+        assert_eq!(result[1], Some(1));
+    }
+
+    #[test]
+    fn bipartite_match_more_expected_than_actual() {
+        let compat = vec![
+            vec![true],
+            vec![true],  // both want actual[0] but only one can have it
+        ];
+        let result = bipartite_match(2, 1, &compat);
+        let matched = result.iter().filter(|r| r.is_some()).count();
+        assert_eq!(matched, 1); // only one can match
+    }
+
+    // -- expected_matches_actual tests --------------------------------------
+
+    #[test]
+    fn expected_matches_tool_id_only() {
+        let exp = ExpectedToolCall { tool_id: "comm.send_email".into(), arguments: None };
+        let act = crate::InterceptedAction {
+            id: 1, instance_id: 1, step_id: "s1".into(),
+            kind: "tool_call".into(), timestamp_ms: 0,
+            details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com"}}),
+        };
+        assert!(expected_matches_actual(&exp, &act));
+    }
+
+    #[test]
+    fn expected_matches_with_partial_args() {
+        let exp = ExpectedToolCall {
+            tool_id: "comm.send_email".into(),
+            arguments: Some(json!({"to": "a@b.com"})),
+        };
+        let act = crate::InterceptedAction {
+            id: 1, instance_id: 1, step_id: "s1".into(),
+            kind: "tool_call".into(), timestamp_ms: 0,
+            details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com", "subject": "Hi", "body": "..."}}),
+        };
+        assert!(expected_matches_actual(&exp, &act));
+    }
+
+    #[test]
+    fn expected_rejects_wrong_tool_id() {
+        let exp = ExpectedToolCall { tool_id: "comm.send_email".into(), arguments: None };
+        let act = crate::InterceptedAction {
+            id: 1, instance_id: 1, step_id: "s1".into(),
+            kind: "tool_call".into(), timestamp_ms: 0,
+            details: json!({"tool_id": "http.request", "arguments": {}}),
+        };
+        assert!(!expected_matches_actual(&exp, &act));
+    }
+
+    #[test]
+    fn expected_rejects_mismatched_args() {
+        let exp = ExpectedToolCall {
+            tool_id: "comm.send_email".into(),
+            arguments: Some(json!({"to": "wrong@addr.com"})),
+        };
+        let act = crate::InterceptedAction {
+            id: 1, instance_id: 1, step_id: "s1".into(),
+            kind: "tool_call".into(), timestamp_ms: 0,
+            details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com"}}),
+        };
+        assert!(!expected_matches_actual(&exp, &act));
     }
 }

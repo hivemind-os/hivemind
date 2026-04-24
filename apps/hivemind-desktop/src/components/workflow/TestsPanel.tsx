@@ -1,5 +1,5 @@
 import { createSignal, createMemo, For, Index, Show } from 'solid-js';
-import type { WorkflowTestCase, TestExpectations, WorkflowTestResult, WorkflowTestFailure, MockToolCall } from '~/types';
+import type { WorkflowTestCase, TestExpectations, WorkflowTestResult, WorkflowTestFailure, ExpectedToolCall } from '~/types';
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle, Button } from '~/ui';
 import TestResultDetailsDialog from './TestResultDetails';
 
@@ -168,7 +168,7 @@ export function TestsPanel(props: TestsPanelProps) {
   const [editInputs, setEditInputs] = createSignal('{}');
   const [editShadowOutputs, setEditShadowOutputs] = createSignal('');
   // Per-step mock data: stepId → { enabled, value (JSON for step output), toolCalls (for agent steps) }
-  const [editStepMocks, setEditStepMocks] = createSignal<Record<string, { enabled: boolean; value: string; toolCalls?: MockToolCall[] }>>({});
+  const [editStepMocks, setEditStepMocks] = createSignal<Record<string, { enabled: boolean; value: string; toolCalls?: ExpectedToolCall[] }>>({});
   const [editExpStatus, setEditExpStatus] = createSignal('completed');
   const [editExpOutput, setEditExpOutput] = createSignal('');
   const [editExpStepsCompleted, setEditExpStepsCompleted] = createSignal('');
@@ -287,26 +287,27 @@ export function TestsPanel(props: TestsPanelProps) {
     setEditTriggerId(tc.trigger_step_id ?? '');
     setEditInputs(prettyJson(tc.inputs));
     setEditShadowOutputs(tc.shadow_outputs ? prettyJson(tc.shadow_outputs) : '');
-    // Hydrate per-step mocks from shadow_outputs + mock_tool_calls
-    const mocks: Record<string, { enabled: boolean; value: string; toolCalls?: MockToolCall[] }> = {};
+    // Hydrate per-step mocks from shadow_outputs + expected_tool_calls
+    const mocks: Record<string, { enabled: boolean; value: string; toolCalls?: ExpectedToolCall[] }> = {};
     const subtypes = ctx()?.taskStepSubtypes ?? {};
     if (tc.shadow_outputs) {
       for (const [stepId, val] of Object.entries(tc.shadow_outputs)) {
         const sub = subtypes[stepId] ?? 'call_tool';
-        const toolCalls = tc.mock_tool_calls?.[stepId];
         if (sub === 'invoke_agent' || sub === 'invoke_prompt') {
           const v = val as Record<string, unknown>;
-          mocks[stepId] = { enabled: true, value: typeof v === 'object' && v !== null ? prettyJson(v) : String(v), toolCalls };
+          mocks[stepId] = { enabled: true, value: typeof v === 'object' && v !== null ? prettyJson(v) : String(v) };
         } else {
           mocks[stepId] = { enabled: true, value: prettyJson(val) };
         }
       }
     }
-    // Also hydrate mock_tool_calls for steps that have tool calls but no shadow_output
-    if (tc.mock_tool_calls) {
-      for (const [stepId, toolIds] of Object.entries(tc.mock_tool_calls)) {
+    // Hydrate expected_tool_calls for steps that have assertions (cannot overlap with shadow_outputs)
+    if (tc.expected_tool_calls) {
+      for (const [stepId, calls] of Object.entries(tc.expected_tool_calls)) {
         if (!mocks[stepId]) {
-          mocks[stepId] = { enabled: true, value: '', toolCalls: toolIds };
+          mocks[stepId] = { enabled: false, value: '', toolCalls: calls };
+        } else {
+          // shadow_outputs already set — expected_tool_calls not applicable, skip
         }
       }
     }
@@ -350,8 +351,8 @@ export function TestsPanel(props: TestsPanelProps) {
     if (typeof inputs !== 'object' || Array.isArray(inputs)) { setFormError('Test data must be a JSON object'); return; }
 
     let shadow_outputs: Record<string, unknown> | undefined;
-    let mock_tool_calls: Record<string, MockToolCall[]> | undefined;
-    // Build shadow_outputs and mock_tool_calls from per-step mocks
+    let expected_tool_calls: Record<string, ExpectedToolCall[]> | undefined;
+    // Build shadow_outputs and expected_tool_calls from per-step mocks
     const mocks = editStepMocks();
     const hasMocks = Object.values(mocks).some(m => m.enabled && (m.value.trim() || (m.toolCalls && m.toolCalls.length > 0)));
     if (hasMocks) {
@@ -362,11 +363,16 @@ export function TestsPanel(props: TestsPanelProps) {
           const parsed = safeJsonParse(mock.value);
           if (parsed === undefined) { setFormError(`Mock for step "${stepId}" must be valid JSON`); return; }
           shadow_outputs[stepId] = parsed;
+          // Validate: cannot have expected_tool_calls on a mocked step
+          if (mock.toolCalls && mock.toolCalls.length > 0) {
+            setFormError(`Step "${stepId}": expected tool calls cannot be set on a mocked step (has shadow output)`);
+            return;
+          }
         }
         if (mock.toolCalls && mock.toolCalls.length > 0) {
-          if (!mock_tool_calls) mock_tool_calls = {};
+          if (!expected_tool_calls) expected_tool_calls = {};
           const valid = mock.toolCalls.filter(c => c.tool_id.trim());
-          if (valid.length > 0) mock_tool_calls[stepId] = valid;
+          if (valid.length > 0) expected_tool_calls[stepId] = valid;
         }
       }
       if (Object.keys(shadow_outputs).length === 0) shadow_outputs = undefined;
@@ -417,7 +423,7 @@ export function TestsPanel(props: TestsPanelProps) {
     if (editDesc()) tc.description = editDesc();
     if (editTriggerId()) tc.trigger_step_id = editTriggerId();
     if (shadow_outputs) tc.shadow_outputs = shadow_outputs;
-    if (mock_tool_calls) tc.mock_tool_calls = mock_tool_calls;
+    if (expected_tool_calls) tc.expected_tool_calls = expected_tool_calls;
 
     const mode = dialogMode();
     if (mode === 'new') {
@@ -768,7 +774,7 @@ export function TestsPanel(props: TestsPanelProps) {
                           const value = () => mock()?.value ?? '';
                           const toolCalls = () => mock()?.toolCalls ?? [];
 
-                          function setMock(partial: { enabled?: boolean; value?: string; toolCalls?: MockToolCall[] }) {
+                          function setMock(partial: { enabled?: boolean; value?: string; toolCalls?: ExpectedToolCall[] }) {
                             setEditStepMocks(prev => ({
                               ...prev,
                               [stepId]: {
@@ -844,7 +850,7 @@ export function TestsPanel(props: TestsPanelProps) {
                           }
 
                           return (
-                            <div class={`rounded border ${enabled() ? 'border-primary/40 bg-primary/5' : 'border-border bg-background'} p-2`}>
+                            <div class={`rounded border ${enabled() ? 'border-primary/40 bg-primary/5' : toolCalls().length > 0 ? 'border-accent/40 bg-accent/5' : 'border-border bg-background'} p-2`}>
                               <div class="flex items-center gap-2 cursor-pointer" onClick={toggleEnabled}>
                                 <input type="checkbox" checked={enabled()} class="accent-[hsl(var(--primary))]" />
                                 <span class="text-xs font-mono font-semibold">{stepId}</span>
@@ -852,6 +858,7 @@ export function TestsPanel(props: TestsPanelProps) {
                                   {isAgent() ? '🤖 agent' : '🔧 tool'}
                                 </span>
                               </div>
+                              {/* Mock output section — only when step is mocked */}
                               <Show when={enabled()}>
                                 <div class="mt-2 space-y-2">
                                   <Show when={isAgent()} fallback={
@@ -887,136 +894,161 @@ export function TestsPanel(props: TestsPanelProps) {
                                         <option value="spawned">Spawned (asynchronous)</option>
                                       </select>
                                     </div>
-                                    <div>
-                                      <div class="flex items-center gap-1 mb-1">
-                                        <label class="text-[11px] text-muted-foreground font-medium">Tool calls this agent would make</label>
-                                        <button
-                                          type="button"
-                                          class="ml-auto text-[10px] text-primary hover:text-primary/80 font-medium"
-                                          onClick={addToolCall}
-                                        >
-                                          + Add
-                                        </button>
-                                      </div>
-                                      <Show when={toolCalls().length === 0}>
-                                        <p class="text-[10px] text-muted-foreground/60 italic">None — click + Add if this agent calls tools</p>
-                                      </Show>
-                                      <Index each={toolCalls()}>
-                                        {(tc, idx) => {
-                                          const toolDefs = () => ctx()?.toolDefinitions ?? [];
-                                          const selectedTool = () => toolDefs().find(t => t.id === tc().tool_id);
-                                          const inputSchema = () => selectedTool()?.input_schema as Record<string, any> | undefined;
-                                          const schemaProps = () => {
-                                            const s = inputSchema();
-                                            return s?.properties ? Object.entries(s.properties as Record<string, any>) : [];
-                                          };
-                                          const requiredFields = () => {
-                                            const s = inputSchema();
-                                            return Array.isArray(s?.required) ? s.required as string[] : [];
-                                          };
-                                          function updateParams(paramName: string, paramValue: string) {
-                                            const updated = [...toolCalls()];
-                                            const existing = updated[idx]?.parameters ?? {};
-                                            updated[idx] = { ...updated[idx], parameters: { ...existing as Record<string, unknown>, [paramName]: paramValue } };
-                                            setMock({ toolCalls: updated });
-                                          }
-                                          return (
-                                            <div class="rounded border border-border/60 p-2 mb-1.5 bg-background">
-                                              <div class="flex items-center gap-1 mb-1">
-                                                <Show when={toolDefs().length > 0} fallback={
-                                                  <input
-                                                    type="text"
-                                                    class={`${inputCls} text-xs`}
-                                                    value={tc().tool_id}
-                                                    onInput={e => updateToolCall(idx, e.currentTarget.value)}
-                                                    placeholder="e.g. connector.email.send"
-                                                  />
-                                                }>
-                                                  <select
-                                                    class={`${inputCls} text-xs`}
-                                                    value={tc().tool_id}
-                                                    onChange={e => {
-                                                      const updated = [...toolCalls()];
-                                                      updated[idx] = { tool_id: e.currentTarget.value };
-                                                      setMock({ toolCalls: updated });
-                                                    }}
-                                                  >
-                                                    <option value="">— select tool —</option>
-                                                    <For each={toolDefs()}>
-                                                      {(td) => <option value={td.id}>{td.name || td.id}</option>}
-                                                    </For>
-                                                  </select>
-                                                </Show>
-                                                <button
-                                                  type="button"
-                                                  class="text-muted-foreground hover:text-destructive text-xs px-1 shrink-0"
-                                                  onClick={() => removeToolCall(idx)}
-                                                  title="Remove"
-                                                >
-                                                  ×
-                                                </button>
-                                              </div>
-                                              {/* Parameter fields from tool's input_schema */}
-                                              <Show when={tc().tool_id && schemaProps().length > 0}>
-                                                <div class="pl-2 mt-1 space-y-1 border-l-2 border-primary/20">
-                                                  <For each={schemaProps()}>
-                                                    {([pName, pDef]) => {
-                                                      const isRequired = () => requiredFields().includes(pName);
-                                                      const paramVal = () => {
-                                                        const p = tc().parameters as Record<string, unknown> | undefined;
-                                                        return p?.[pName] != null ? String(p[pName]) : '';
-                                                      };
-                                                      return (
-                                                        <div>
-                                                          <label class="text-[10px] text-muted-foreground">
-                                                            {pName}
-                                                            <Show when={isRequired()}><span class="text-destructive ml-0.5">*</span></Show>
-                                                            <Show when={pDef.description}><span class="ml-1 opacity-60">— {pDef.description}</span></Show>
-                                                          </label>
-                                                          <Show when={pDef.type === 'boolean'} fallback={
-                                                            <Show when={Array.isArray(pDef.enum)} fallback={
-                                                              <input
-                                                                type={pDef.type === 'number' || pDef.type === 'integer' ? 'number' : 'text'}
-                                                                class={`${inputCls} text-xs`}
-                                                                value={paramVal()}
-                                                                onInput={e => updateParams(pName, e.currentTarget.value)}
-                                                                placeholder={pDef.default != null ? `default: ${pDef.default}` : pName}
-                                                              />
-                                                            }>
-                                                              <select
-                                                                class={`${inputCls} text-xs`}
-                                                                value={paramVal()}
-                                                                onChange={e => updateParams(pName, e.currentTarget.value)}
-                                                              >
-                                                                <option value="">—</option>
-                                                                <For each={pDef.enum as string[]}>
-                                                                  {(ev) => <option value={ev}>{ev}</option>}
-                                                                </For>
-                                                              </select>
-                                                            </Show>
-                                                          }>
-                                                            <select
-                                                              class={`${inputCls} text-xs`}
-                                                              value={paramVal()}
-                                                              onChange={e => updateParams(pName, e.currentTarget.value)}
-                                                            >
-                                                              <option value="">—</option>
-                                                              <option value="true">true</option>
-                                                              <option value="false">false</option>
-                                                            </select>
-                                                          </Show>
-                                                        </div>
-                                                      );
-                                                    }}
-                                                  </For>
-                                                </div>
-                                              </Show>
-                                            </div>
-                                          );
-                                        }}
-                                      </Index>
-                                    </div>
+                                    <p class="text-[10px] text-muted-foreground/60 italic">
+                                      ⓘ Mocked steps skip execution — use Expected Tool Calls on non-mocked agent steps to assert tool usage.
+                                    </p>
                                   </Show>
+                                </div>
+                              </Show>
+                              {/* Expected Tool Calls — only for non-mocked agent steps */}
+                              <Show when={!enabled() && isAgent()}>
+                                <div class="mt-2">
+                                  <div class="flex items-center gap-1 mb-1">
+                                    <label class="text-[11px] text-muted-foreground font-medium">Expected Tool Calls</label>
+                                    <button
+                                      type="button"
+                                      class="ml-auto text-[10px] text-primary hover:text-primary/80 font-medium"
+                                      onClick={addToolCall}
+                                    >
+                                      + Add
+                                    </button>
+                                  </div>
+                                  <Show when={toolCalls().length === 0}>
+                                    <p class="text-[10px] text-muted-foreground/60 italic">None — click + Add to assert tool calls the agent should make</p>
+                                  </Show>
+                                  <Index each={toolCalls()}>
+                                    {(tc, idx) => {
+                                      const toolDefs = () => ctx()?.toolDefinitions ?? [];
+                                      const toolGroups = createMemo(() => {
+                                        const groups = new Map<string, { id: string; name?: string }[]>();
+                                        for (const t of toolDefs()) {
+                                          const dot = t.id.indexOf('.');
+                                          const prefix = dot > 0 ? t.id.substring(0, dot) : 'other';
+                                          if (!groups.has(prefix)) groups.set(prefix, []);
+                                          groups.get(prefix)!.push({ id: t.id, name: t.name });
+                                        }
+                                        return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                                      });
+                                      const selectedTool = () => toolDefs().find(t => t.id === tc().tool_id);
+                                      const inputSchema = () => selectedTool()?.input_schema as Record<string, any> | undefined;
+                                      const schemaProps = () => {
+                                        const s = inputSchema();
+                                        return s?.properties ? Object.entries(s.properties as Record<string, any>) : [];
+                                      };
+                                      const requiredFields = () => {
+                                        const s = inputSchema();
+                                        return Array.isArray(s?.required) ? s.required as string[] : [];
+                                      };
+                                      function updateParams(paramName: string, paramValue: string) {
+                                        const updated = [...toolCalls()];
+                                        const existing = updated[idx]?.arguments as Record<string, unknown> ?? {};
+                                        updated[idx] = { ...updated[idx], arguments: { ...existing, [paramName]: paramValue } };
+                                        setMock({ toolCalls: updated });
+                                      }
+                                      return (
+                                        <div class="rounded border border-border/60 p-2 mb-1.5 bg-background">
+                                          <div class="flex items-center gap-1 mb-1">
+                                            <Show when={toolDefs().length > 0} fallback={
+                                              <input
+                                                type="text"
+                                                class={`${inputCls} text-xs`}
+                                                value={tc().tool_id}
+                                                onInput={e => updateToolCall(idx, e.currentTarget.value)}
+                                                placeholder="e.g. connector.email.send"
+                                              />
+                                            }>
+                                              <select
+                                                class={`${inputCls} text-xs`}
+                                                value={tc().tool_id}
+                                                onChange={e => {
+                                                  const updated = [...toolCalls()];
+                                                  updated[idx] = { tool_id: e.currentTarget.value };
+                                                  setMock({ toolCalls: updated });
+                                                }}
+                                              >
+                                                <option value="">— select tool —</option>
+                                                <For each={toolGroups()}>
+                                                  {([prefix, tools]) => (
+                                                    <optgroup label={prefix}>
+                                                      <For each={tools}>
+                                                        {(td) => <option value={td.id}>{td.name || td.id}</option>}
+                                                      </For>
+                                                    </optgroup>
+                                                  )}
+                                                </For>
+                                              </select>
+                                            </Show>
+                                            <button
+                                              type="button"
+                                              class="text-muted-foreground hover:text-destructive text-xs px-1 shrink-0"
+                                              onClick={() => removeToolCall(idx)}
+                                              title="Remove"
+                                            >
+                                              ×
+                                            </button>
+                                          </div>
+                                          {/* Parameter fields from tool's input_schema */}
+                                          <Show when={tc().tool_id && schemaProps().length > 0}>
+                                            <div class="pl-2 mt-1 space-y-1 border-l-2 border-primary/20">
+                                              <p class="text-[10px] text-muted-foreground/50 italic">
+                                                Partial match — only specified fields are checked
+                                              </p>
+                                              <For each={schemaProps()}>
+                                                {([pName, pDef]) => {
+                                                  const isRequired = () => requiredFields().includes(pName);
+                                                  const paramVal = () => {
+                                                    const p = tc().arguments as Record<string, unknown> | undefined;
+                                                    return p?.[pName] != null ? String(p[pName]) : '';
+                                                  };
+                                                  return (
+                                                    <div>
+                                                      <label class="text-[10px] text-muted-foreground">
+                                                        {pName}
+                                                        <Show when={isRequired()}><span class="text-destructive ml-0.5">*</span></Show>
+                                                        <Show when={pDef.description}><span class="ml-1 opacity-60">— {pDef.description}</span></Show>
+                                                      </label>
+                                                      <Show when={pDef.type === 'boolean'} fallback={
+                                                        <Show when={Array.isArray(pDef.enum)} fallback={
+                                                          <input
+                                                            type={pDef.type === 'number' || pDef.type === 'integer' ? 'number' : 'text'}
+                                                            class={`${inputCls} text-xs`}
+                                                            value={paramVal()}
+                                                            onInput={e => updateParams(pName, e.currentTarget.value)}
+                                                            placeholder={pDef.default != null ? `default: ${pDef.default}` : `(leave empty to skip)`}
+                                                          />
+                                                        }>
+                                                          <select
+                                                            class={`${inputCls} text-xs`}
+                                                            value={paramVal()}
+                                                            onChange={e => updateParams(pName, e.currentTarget.value)}
+                                                          >
+                                                            <option value="">—</option>
+                                                            <For each={pDef.enum as string[]}>
+                                                              {(ev) => <option value={ev}>{ev}</option>}
+                                                            </For>
+                                                          </select>
+                                                        </Show>
+                                                      }>
+                                                        <select
+                                                          class={`${inputCls} text-xs`}
+                                                          value={paramVal()}
+                                                          onChange={e => updateParams(pName, e.currentTarget.value)}
+                                                        >
+                                                          <option value="">—</option>
+                                                          <option value="true">true</option>
+                                                          <option value="false">false</option>
+                                                        </select>
+                                                      </Show>
+                                                    </div>
+                                                  );
+                                                }}
+                                              </For>
+                                            </div>
+                                          </Show>
+                                        </div>
+                                      );
+                                    }}
+                                  </Index>
                                 </div>
                               </Show>
                             </div>

@@ -1268,14 +1268,17 @@ export interface WorkflowTestCase {
   trigger_step_id?: string;
   inputs: Record<string, unknown>;
   shadow_outputs?: Record<string, unknown>;
-  /** Per-step simulated tool calls (step_id → list of mock calls). */
-  mock_tool_calls?: Record<string, MockToolCall[]>;
+  /** Per-step expected tool calls (step_id → list of expected calls).
+   *  Asserts against real intercepted actions from shadow-mode agents.
+   *  Uses partial matching on arguments: only specified keys are checked. */
+  expected_tool_calls?: Record<string, ExpectedToolCall[]>;
   expectations: TestExpectations;
 }
 
-export interface MockToolCall {
+export interface ExpectedToolCall {
   tool_id: string;
-  parameters?: Record<string, unknown>;
+  /** Expected arguments (partial match). Only specified keys are checked. */
+  arguments?: unknown;
 }
 
 export interface TestExpectations {
