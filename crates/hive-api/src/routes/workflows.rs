@@ -133,6 +133,11 @@ pub(crate) struct WfRunTestsRequest {
 pub(crate) struct WfTestRunResponse {
     results: Vec<hive_workflow::TestResult>,
     all_passed: bool,
+    /// True if the run was cancelled before all tests completed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    cancelled: bool,
+    /// Total number of tests that were requested to run.
+    total_requested: usize,
 }
 
 #[derive(Serialize)]
@@ -695,16 +700,47 @@ pub(crate) async fn wf_run_tests(
     Json(body): Json<WfRunTestsRequest>,
 ) -> Result<Json<WfTestRunResponse>, (StatusCode, String)> {
     let test_names = body.test_names.as_deref();
-    let results = state
+
+    // Create a fresh cancel token for this run.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut guard = state.test_cancel.lock();
+        *guard = Some(cancel.clone());
+    }
+
+    let (results, total_requested) = state
         .workflows
-        .run_tests(&body.definition_name, body.version.as_deref(), test_names, body.auto_respond)
+        .run_tests(&body.definition_name, body.version.as_deref(), test_names, body.auto_respond, Some(cancel))
         .await
         .map_err(workflow_error)?;
-    let all_passed = results.iter().all(|r| r.passed);
+
+    // Clear the cancel token now that the run is finished.
+    {
+        let mut guard = state.test_cancel.lock();
+        *guard = None;
+    }
+
+    let cancelled = results.len() < total_requested;
+    let all_passed = !cancelled && results.iter().all(|r| r.passed);
     Ok(Json(WfTestRunResponse {
         results,
         all_passed,
+        cancelled,
+        total_requested,
     }))
+}
+
+/// Cancel the currently-running test suite (if any).
+pub(crate) async fn wf_cancel_tests(
+    State(state): State<AppState>,
+) -> StatusCode {
+    let guard = state.test_cancel.lock();
+    if let Some(cancel) = guard.as_ref() {
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        StatusCode::OK
+    } else {
+        StatusCode::NO_CONTENT
+    }
 }
 
 // ── Trigger simulation ───────────────────────────────────────────────────

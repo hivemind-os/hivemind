@@ -1258,14 +1258,15 @@ impl WorkflowService {
         version: Option<&str>,
         test_names: Option<&[String]>,
         auto_respond: bool,
-    ) -> Result<Vec<hive_workflow::TestResult>, WorkflowError> {
+        cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Result<(Vec<hive_workflow::TestResult>, usize), WorkflowError> {
         let (def, _yaml) = if let Some(v) = version {
             self.get_definition(definition_name, v).await?
         } else {
             self.get_latest_definition(definition_name).await?
         };
         if def.tests.is_empty() {
-            return Ok(vec![]);
+            return Ok((vec![], 0));
         }
         let engine = &self.engine;
 
@@ -1281,6 +1282,14 @@ impl WorkflowService {
 
         let mut results = Vec::new();
         for (idx, tc) in cases.iter().enumerate() {
+            // Check cancellation before starting next test.
+            if let Some(ref flag) = cancel {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info!(definition_name, test_name = %tc.name, "test run cancelled before test {}/{}", idx + 1, total);
+                    break;
+                }
+            }
+
             // Emit "test started" progress event.
             engine
                 .emit_event(hive_workflow::WorkflowEvent::TestCaseStarted {
@@ -1310,16 +1319,21 @@ impl WorkflowService {
 
         // Emit "all done" event.
         let passed = results.iter().filter(|r| r.passed).count();
+        let cancelled = results.len() < total;
         engine
             .emit_event(hive_workflow::WorkflowEvent::TestRunCompleted {
                 definition_name: definition_name.to_string(),
                 total,
                 passed,
-                failed: total - passed,
+                failed: results.iter().filter(|r| !r.passed).count(),
             })
             .await;
 
-        Ok(results)
+        if cancelled {
+            tracing::info!(definition_name, completed = results.len(), total, "test run cancelled");
+        }
+
+        Ok((results, total))
     }
 
     /// List pending workflow feedback requests for a given parent session.

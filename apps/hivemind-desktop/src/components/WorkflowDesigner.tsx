@@ -1776,6 +1776,14 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
     }
   }
 
+  async function handleCancelTests(): Promise<void> {
+    try {
+      await invoke('workflow_cancel_tests');
+    } catch {
+      // Best-effort
+    }
+  }
+
   function handleKeyDown(e: KeyboardEvent): void {
     // Ctrl+S: save (works even from inputs)
     if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
@@ -3363,6 +3371,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
             onTestCasesChange={(tests) => { setWfTests(tests); }}
             onRunTests={() => handleRunTests()}
             onRunTest={(name) => handleRunTests([name])}
+            onCancelTests={() => handleCancelTests()}
             testResults={testResults()}
             running={runningTests()}
             testProgress={testProgress()}

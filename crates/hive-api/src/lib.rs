@@ -58,6 +58,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use tokio::sync::Notify;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -269,6 +270,8 @@ pub struct AppState {
     pub local_models: Option<Arc<LocalModelService>>,
     pub scheduler: Arc<SchedulerService>,
     pub workflows: Arc<hive_workflow_service::WorkflowService>,
+    /// Cancel token for the currently-running test suite (if any).
+    pub test_cancel: Arc<parking_lot::Mutex<Option<Arc<AtomicBool>>>>,
     pub trigger_manager: Arc<hive_workflow_service::TriggerManager>,
     pub knowledge_graph_path: Arc<PathBuf>,
     pub entity_graph: Arc<hive_core::EntityGraph>,
@@ -1091,6 +1094,7 @@ impl AppState {
             local_models: Some(local_models),
             scheduler,
             workflows,
+            test_cancel: Arc::new(parking_lot::Mutex::new(None)),
             trigger_manager,
             knowledge_graph_path,
             entity_graph,
@@ -1814,6 +1818,7 @@ impl AppState {
             local_models: None,
             scheduler,
             workflows,
+            test_cancel: Arc::new(parking_lot::Mutex::new(None)),
             knowledge_graph_path: Arc::new(PathBuf::from("test-kg.db")),
             entity_graph,
             runtime_manager: None,
@@ -2489,6 +2494,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/workflows/test",
             post(workflows::wf_run_tests),
+        )
+        .route(
+            "/api/v1/workflows/test/cancel",
+            post(workflows::wf_cancel_tests),
         )
         .route(
             "/api/v1/workflows/simulate-trigger",

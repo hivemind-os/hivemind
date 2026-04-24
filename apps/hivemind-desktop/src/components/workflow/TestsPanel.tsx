@@ -32,6 +32,7 @@ export interface TestsPanelProps {
   onTestCasesChange: (tests: WorkflowTestCase[]) => void;
   onRunTests: () => Promise<void>;
   onRunTest: (name: string) => Promise<void>;
+  onCancelTests?: () => void;
   testResults: WorkflowTestResult[];
   running: boolean;
   /** Per-test progress from live workflow events (test_name → state). */
@@ -588,7 +589,7 @@ export function TestsPanel(props: TestsPanelProps) {
           {(tc, idx) => {
             const result = () => resultFor(tc.name);
             return (
-              <div style={cardBase}>
+              <div style={{ ...cardBase, ...(result() ? { cursor: 'pointer' } : {}) }} onClick={() => { if (result()) openDetails(tc.name); }}>
                 <div style={{ display: 'flex', 'align-items': 'center', gap: '6px', 'margin-bottom': '4px' }}>
                   <span style={{ 'font-weight': '600', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{tc.name}</span>
                   <Show when={result()}>
@@ -618,6 +619,20 @@ export function TestsPanel(props: TestsPanelProps) {
                   </Show>
                 </div>
 
+                {/* Brief result summary (steps, actions, duration) */}
+                <Show when={result()}>
+                  {(r) => (
+                    <div style={{ color: 'hsl(var(--muted-foreground))', 'font-size': '0.75em', 'margin-top': '3px' }}>
+                      {[
+                        r().step_results?.length ? `${r().step_results!.length} steps` : null,
+                        (r().intercepted_actions_total ?? r().intercepted_actions?.length) ? `${r().intercepted_actions_total ?? r().intercepted_actions!.length} actions` : null,
+                        r().duration_ms != null ? `${r().duration_ms}ms` : null,
+                      ].filter(Boolean).join(' · ') || '—'}
+                      <span style={{ 'margin-left': '6px', color: 'hsl(var(--primary))' }}>click for details</span>
+                    </div>
+                  )}
+                </Show>
+
                 <Show when={result() && !result()!.passed}>
                   <div style={{ 'margin-top': '6px', 'border-top': '1px solid hsl(var(--border))', 'padding-top': '6px' }}>
                     <For each={result()!.failures}>
@@ -633,7 +648,7 @@ export function TestsPanel(props: TestsPanelProps) {
                 </Show>
 
                 <Show when={!props.readOnly}>
-                  <div style={{ display: 'flex', gap: '6px', 'margin-top': '6px', 'justify-content': 'flex-end', 'align-items': 'center' }}>
+                  <div style={{ display: 'flex', gap: '6px', 'margin-top': '6px', 'justify-content': 'flex-end', 'align-items': 'center' }} onClick={(e: MouseEvent) => e.stopPropagation()}>
                     <button
                       style={{ ...btnSm, background: props.running ? 'hsl(var(--muted))' : 'hsl(var(--primary))', color: props.running ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary-foreground))', 'border-color': 'transparent' }}
                       onClick={() => props.onRunTest(tc.name)}
@@ -682,13 +697,27 @@ export function TestsPanel(props: TestsPanelProps) {
           <Show when={!props.readOnly}>
             <button style={btnSm} onClick={openNew}>+ Add Test</button>
           </Show>
+          <Show when={props.running && props.onCancelTests}>
+            <button
+              style={{
+                ...btnSm,
+                background: 'hsl(0 84% 60% / 0.15)',
+                color: 'hsl(0 84% 60%)',
+                'border-color': 'hsl(0 84% 60% / 0.3)',
+                'margin-left': 'auto',
+                'margin-right': '4px',
+              }}
+              onClick={() => props.onCancelTests?.()}
+              title="Stop after current test finishes"
+            >⏹ Stop</button>
+          </Show>
           <button
             style={{
               ...btnSm,
               background: props.running ? 'hsl(var(--muted))' : 'hsl(var(--primary))',
               color: props.running ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary-foreground))',
               'border-color': 'transparent',
-              'margin-left': 'auto',
+              'margin-left': props.running && props.onCancelTests ? undefined : 'auto',
             }}
             onClick={props.onRunTests}
             disabled={props.running || props.testCases.length === 0}

@@ -1111,9 +1111,9 @@ impl Tool for WfAuthorRunTestsTool {
 
             let test_names_ref = test_names.as_deref();
 
-            let results = match self
+            let (results, _total_requested) = match self
                 .workflow_service
-                .run_tests(definition_name, None, test_names_ref, true)
+                .run_tests(definition_name, None, test_names_ref, true, None)
                 .await
             {
                 Ok(r) => r,

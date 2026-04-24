@@ -4745,6 +4745,17 @@ async fn workflow_run_tests(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn workflow_cancel_tests() -> Result<(), String> {
+    let base_url = daemon_url(None).map_err(|e| e.to_string())?;
+    async_post_empty::<serde_json::Value>(
+        &base_url,
+        "/api/v1/workflows/test/cancel",
+    )
+    .await
+    .map(|_| ())
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn workflow_simulate_trigger(
     definition_name: String,
     trigger_step_id: String,
@@ -5764,6 +5775,7 @@ pub fn run() {
             workflow_launch,
             workflow_analyze,
             workflow_run_tests,
+            workflow_cancel_tests,
             workflow_simulate_trigger,
             workflow_list_instances,
             workflow_get_instance,
