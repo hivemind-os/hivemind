@@ -808,6 +808,10 @@ pub struct WorkflowInstance {
     /// provided value as the step's output.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub shadow_overrides: HashMap<String, serde_json::Value>,
+    /// When true, agent interactions (ask_user, tool approvals) are
+    /// automatically responded to.  Used by the test runner.
+    #[serde(default)]
+    pub auto_respond_interactions: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -984,6 +988,29 @@ pub enum WorkflowEvent {
     EventGateResolved {
         instance_id: i64,
         step_id: String,
+    },
+    /// A test case is about to run.
+    TestCaseStarted {
+        definition_name: String,
+        test_name: String,
+        index: usize,
+        total: usize,
+    },
+    /// A test case finished (pass or fail).
+    TestCaseCompleted {
+        definition_name: String,
+        test_name: String,
+        passed: bool,
+        duration_ms: u64,
+        index: usize,
+        total: usize,
+    },
+    /// All requested test cases have finished.
+    TestRunCompleted {
+        definition_name: String,
+        total: usize,
+        passed: usize,
+        failed: usize,
     },
 }
 

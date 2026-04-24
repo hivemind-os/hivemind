@@ -11,6 +11,7 @@ import { Button } from '~/ui/button';
 import { useTimerCleanup } from '~/lib/useTimerCleanup';
 import yaml from 'js-yaml';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // Extracted workflow sub-components
 import {
@@ -1145,6 +1146,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
   const [wfTests, setWfTests] = createSignal<WorkflowTestCase[]>([]);
   const [testResults, setTestResults] = createSignal<WorkflowTestResult[]>([]);
   const [runningTests, setRunningTests] = createSignal(false);
+  const [testProgress, setTestProgress] = createSignal<Record<string, { state: 'running' | 'passed' | 'failed'; index: number; total: number }>>({});
   // ── Viewport (synced from GraphCanvas for UI display) ──
   const [panX, setPanX] = createSignal(0);
   const [panY, setPanY] = createSignal(0);
@@ -1727,11 +1729,33 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
 
     setRunningTests(true);
     if (!testNames) setTestResults([]);
+
+    // Subscribe to workflow test progress events so the UI updates
+    // incrementally while the blocking invoke is in-flight.
+    let progressUnlisten: UnlistenFn | null = null;
+    try {
+      progressUnlisten = await listen<any>('workflow:event', (e) => {
+        const topic: string = e.payload?.topic ?? '';
+        const payload = e.payload?.payload;
+        if (!payload || typeof payload !== 'object') return;
+        // Only handle test events for this definition
+        if (payload.definition_name !== name) return;
+        if (topic === 'workflow.test.case_started') {
+          setTestProgress(prev => ({ ...prev, [payload.test_name]: { state: 'running' as const, index: payload.index, total: payload.total } }));
+        } else if (topic === 'workflow.test.case_completed') {
+          setTestProgress(prev => ({ ...prev, [payload.test_name]: { state: payload.passed ? 'passed' as const : 'failed' as const, index: payload.index, total: payload.total } }));
+        }
+      });
+    } catch {
+      // Non-critical — progress just won't show
+    }
+
     try {
       const result = await invoke<{ results: WorkflowTestResult[]; all_passed: boolean }>('workflow_run_tests', {
         definition_name: name,
         version: null,
         test_names: testNames ?? null,
+        auto_respond: true,
       });
       if (testNames) {
         // Merge single-test results into existing results
@@ -1747,6 +1771,8 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
       setToast({ text: `Test error: ${e?.message ?? e}`, type: 'error' });
     } finally {
       setRunningTests(false);
+      setTestProgress({});
+      if (progressUnlisten) progressUnlisten();
     }
   }
 
@@ -3339,6 +3365,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
             onRunTest={(name) => handleRunTests([name])}
             testResults={testResults()}
             running={runningTests()}
+            testProgress={testProgress()}
             sectionHeaderStyle={sectionHeaderStyle}
             readOnly={props.readOnly}
             context={testContext()}

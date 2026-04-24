@@ -16,10 +16,11 @@ use crate::{
 pub async fn run_all_tests(
     engine: &WorkflowEngine,
     definition: &WorkflowDefinition,
+    auto_respond: bool,
 ) -> Result<Vec<TestResult>, WorkflowError> {
     let mut results = Vec::with_capacity(definition.tests.len());
     for tc in &definition.tests {
-        results.push(run_test_case(engine, definition, tc).await?);
+        results.push(run_test_case(engine, definition, tc, auto_respond).await?);
     }
     Ok(results)
 }
@@ -29,6 +30,7 @@ pub async fn run_test_case(
     engine: &WorkflowEngine,
     definition: &WorkflowDefinition,
     test_case: &WorkflowTestCase,
+    auto_respond: bool,
 ) -> Result<TestResult, WorkflowError> {
     let start = std::time::Instant::now();
 
@@ -40,6 +42,7 @@ pub async fn run_test_case(
             "test-runner".into(),
             test_case.trigger_step_id.clone(),
             test_case.shadow_outputs.clone(),
+            auto_respond,
         )
         .await?;
 
@@ -132,7 +135,8 @@ async fn wait_for_terminal(
     engine: &WorkflowEngine,
     instance_id: i64,
 ) -> Result<(), WorkflowError> {
-    for _ in 0..400 {
+    // 4800 × 25ms = 120s — long enough for agent invocations with auto-respond.
+    for _ in 0..4800 {
         let inst = engine
             .store()
             .get_instance(instance_id)?
@@ -146,7 +150,7 @@ async fn wait_for_terminal(
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     Err(WorkflowError::Other(format!(
-        "Test instance {instance_id} did not reach terminal state within 10 s"
+        "Test instance {instance_id} did not reach terminal state within 120 s"
     )))
 }
 

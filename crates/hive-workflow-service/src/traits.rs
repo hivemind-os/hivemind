@@ -61,6 +61,10 @@ pub trait WorkflowAgentRunner: Send + Sync {
     /// Returns `(agent_id, result_value, intercepted_tool_calls)` where
     /// `intercepted_tool_calls` contains tool calls that were intercepted in
     /// shadow mode (tool_id, input JSON).
+    ///
+    /// When `auto_respond` is true, any `ask_user` questions and tool approval
+    /// requests from the agent are automatically answered, preventing the agent
+    /// from blocking indefinitely (used by the workflow test runner).
     async fn spawn_and_wait_agent(
         &self,
         persona_id: &str,
@@ -74,6 +78,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
         shadow_mode: bool,
+        auto_respond: bool,
     ) -> Result<(String, Value, Vec<InterceptedToolCall>), String>;
 
     /// Signal an agent or chat session.

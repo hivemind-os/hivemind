@@ -121,6 +121,18 @@ impl WorkflowEventEmitter for EventBusEmitter {
                 "workflow.event_gate.resolved",
                 json!({ "instance_id": instance_id, "step_id": step_id }),
             ),
+            WorkflowEvent::TestCaseStarted { definition_name, test_name, index, total } => (
+                "workflow.test.case_started",
+                json!({ "definition_name": definition_name, "test_name": test_name, "index": index, "total": total }),
+            ),
+            WorkflowEvent::TestCaseCompleted { definition_name, test_name, passed, duration_ms, index, total } => (
+                "workflow.test.case_completed",
+                json!({ "definition_name": definition_name, "test_name": test_name, "passed": passed, "duration_ms": duration_ms, "index": index, "total": total }),
+            ),
+            WorkflowEvent::TestRunCompleted { definition_name, total, passed, failed } => (
+                "workflow.test.run_completed",
+                json!({ "definition_name": definition_name, "total": total, "passed": passed, "failed": failed }),
+            ),
         };
         if let Err(e) = self.bus.publish(topic, "hive-workflow", payload) {
             tracing::warn!("failed to publish workflow event: {e}");
@@ -1245,6 +1257,7 @@ impl WorkflowService {
         definition_name: &str,
         version: Option<&str>,
         test_names: Option<&[String]>,
+        auto_respond: bool,
     ) -> Result<Vec<hive_workflow::TestResult>, WorkflowError> {
         let (def, _yaml) = if let Some(v) = version {
             self.get_definition(definition_name, v).await?
@@ -1255,15 +1268,57 @@ impl WorkflowService {
             return Ok(vec![]);
         }
         let engine = &self.engine;
+
+        // Collect the test cases to run (respecting optional filter).
+        let cases: Vec<&hive_workflow::WorkflowTestCase> = def
+            .tests
+            .iter()
+            .filter(|tc| {
+                test_names.map_or(true, |filter| filter.iter().any(|n| n == &tc.name))
+            })
+            .collect();
+        let total = cases.len();
+
         let mut results = Vec::new();
-        for tc in &def.tests {
-            if let Some(filter) = test_names {
-                if !filter.iter().any(|n| n == &tc.name) {
-                    continue;
-                }
-            }
-            results.push(hive_workflow::run_test_case(engine, &def, tc).await?);
+        for (idx, tc) in cases.iter().enumerate() {
+            // Emit "test started" progress event.
+            engine
+                .emit_event(hive_workflow::WorkflowEvent::TestCaseStarted {
+                    definition_name: definition_name.to_string(),
+                    test_name: tc.name.clone(),
+                    index: idx,
+                    total,
+                })
+                .await;
+
+            let result = hive_workflow::run_test_case(engine, &def, tc, auto_respond).await?;
+
+            // Emit "test completed" progress event.
+            engine
+                .emit_event(hive_workflow::WorkflowEvent::TestCaseCompleted {
+                    definition_name: definition_name.to_string(),
+                    test_name: tc.name.clone(),
+                    passed: result.passed,
+                    duration_ms: result.duration_ms,
+                    index: idx,
+                    total,
+                })
+                .await;
+
+            results.push(result);
         }
+
+        // Emit "all done" event.
+        let passed = results.iter().filter(|r| r.passed).count();
+        engine
+            .emit_event(hive_workflow::WorkflowEvent::TestRunCompleted {
+                definition_name: definition_name.to_string(),
+                total,
+                passed,
+                failed: total - passed,
+            })
+            .await;
+
         Ok(results)
     }
 
@@ -1624,6 +1679,7 @@ impl StepExecutor for ServiceStepExecutor {
                             Some(on_spawned),
                             agent_name,
                             shadow,
+                            ctx.auto_respond_interactions,
                         )
                         .await?;
 

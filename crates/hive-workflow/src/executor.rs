@@ -141,6 +141,10 @@ pub struct ExecutionContext {
     pub selected_attachments: Vec<WorkflowAttachment>,
     /// Execution mode: Normal (real) or Shadow (intercepted side effects).
     pub execution_mode: ExecutionMode,
+    /// When true, agent interactions (ask_user, tool approvals) are
+    /// automatically responded to. Used by the test runner so tests
+    /// don't block waiting for human input.
+    pub auto_respond_interactions: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +322,11 @@ impl WorkflowEngine {
         &self.store
     }
 
+    /// Emit a workflow event through the engine's event emitter.
+    pub async fn emit_event(&self, event: WorkflowEvent) {
+        self.event_emitter.emit(event).await;
+    }
+
     /// Create a lightweight clone of this engine by sharing all Arc-wrapped
     /// internal state. Used for spawning background tasks that need their own
     /// owned engine reference.
@@ -419,6 +428,7 @@ impl WorkflowEngine {
         parent_session_id: String,
         trigger_step_id: Option<String>,
         shadow_overrides: HashMap<String, serde_json::Value>,
+        auto_respond: bool,
     ) -> Result<i64, WorkflowError> {
         let mut instance = self
             .setup_instance(
@@ -433,6 +443,7 @@ impl WorkflowEngine {
             )
             .await?;
         instance.shadow_overrides = shadow_overrides;
+        instance.auto_respond_interactions = auto_respond;
         // Persist the overrides so they survive re-entry
         self.store.update_instance(&instance)?;
         let id = instance.id;
@@ -614,6 +625,7 @@ impl WorkflowEngine {
             active_loops: HashMap::new(),
             execution_mode,
             shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         };
 
         // Persist and get the auto-assigned ID
@@ -1574,6 +1586,7 @@ impl WorkflowEngine {
                 }),
                 selected_attachments: instance.definition.attachments.clone(),
                 execution_mode: instance.execution_mode,
+                auto_respond_interactions: instance.auto_respond_interactions,
             };
 
             let mut handles = Vec::new();

@@ -10,6 +10,10 @@ use std::convert::Infallible;
 
 use crate::{chat_error, workflow_error, AppState};
 
+fn default_true() -> bool {
+    true
+}
+
 // ── Types ────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, Default)]
@@ -118,6 +122,11 @@ pub(crate) struct WfRunTestsRequest {
     /// When set, only run these test names; otherwise run all.
     #[serde(default)]
     test_names: Option<Vec<String>>,
+    /// When true, agent interactions (ask_user, tool approvals) are
+    /// automatically responded to, preventing test hangs.
+    /// Defaults to true for frictionless test execution.
+    #[serde(default = "default_true")]
+    auto_respond: bool,
 }
 
 #[derive(Serialize)]
@@ -688,7 +697,7 @@ pub(crate) async fn wf_run_tests(
     let test_names = body.test_names.as_deref();
     let results = state
         .workflows
-        .run_tests(&body.definition_name, body.version.as_deref(), test_names)
+        .run_tests(&body.definition_name, body.version.as_deref(), test_names, body.auto_respond)
         .await
         .map_err(workflow_error)?;
     let all_passed = results.iter().all(|r| r.passed);

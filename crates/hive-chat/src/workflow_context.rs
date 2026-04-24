@@ -447,6 +447,7 @@ mod tests {
             active_loops: HashMap::new(),
             execution_mode: ExecutionMode::default(),
             shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         }
     }
 

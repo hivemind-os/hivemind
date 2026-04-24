@@ -454,6 +454,7 @@ mod tests {
             attachments_dir: None,
             selected_attachments: vec![],
             execution_mode: ExecutionMode::Shadow,
+            auto_respond_interactions: false,
         }
     }
 
@@ -527,6 +528,7 @@ mod tests {
             active_loops: HashMap::new(),
             execution_mode: ExecutionMode::Shadow,
             shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         };
         // Instance gets ID 1, which matches test_ctx().instance_id
         store.create_instance(&instance).unwrap();
@@ -744,6 +746,7 @@ mod tests {
             active_loops: HashMap::new(),
             execution_mode: ExecutionMode::Shadow,
             shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         };
         let id = store.create_instance(&instance).unwrap();
 
@@ -758,6 +761,7 @@ mod tests {
             attachments_dir: None,
             selected_attachments: vec![],
             execution_mode: ExecutionMode::Shadow,
+            auto_respond_interactions: false,
         };
 
         // Make a few intercepted calls

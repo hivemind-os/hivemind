@@ -34,6 +34,8 @@ export interface TestsPanelProps {
   onRunTest: (name: string) => Promise<void>;
   testResults: WorkflowTestResult[];
   running: boolean;
+  /** Per-test progress from live workflow events (test_name → state). */
+  testProgress?: Record<string, { state: 'running' | 'passed' | 'failed'; index: number; total: number }>;
   sectionHeaderStyle: Record<string, string>;
   readOnly?: boolean;
   context?: WorkflowTestContext;
@@ -592,6 +594,14 @@ export function TestsPanel(props: TestsPanelProps) {
                   <Show when={result()}>
                     {(r) => <span style={r().passed ? passBadge : failBadge}>{r().passed ? '✅ Pass' : '❌ Fail'}</span>}
                   </Show>
+                  <Show when={!result() && props.testProgress?.[tc.name]}>
+                    {(_p) => {
+                      const p = () => props.testProgress?.[tc.name];
+                      return <span style={{ ...passBadge, background: 'hsl(210 80% 50% / 0.15)', color: 'hsl(210 80% 50%)' }}>
+                        {p()?.state === 'running' ? '⏳ Running…' : p()?.state === 'passed' ? '✅ Pass' : '❌ Fail'}
+                      </span>;
+                    }}
+                  </Show>
                 </div>
 
                 <Show when={tc.description}>
@@ -683,7 +693,19 @@ export function TestsPanel(props: TestsPanelProps) {
             onClick={props.onRunTests}
             disabled={props.running || props.testCases.length === 0}
           >
-            {props.running ? '⏳ Running…' : props.unsavedChanges ? '💾 Save & Run All' : '▶ Run All'}
+            {(() => {
+              if (props.running) {
+                const prog = props.testProgress ?? {};
+                const entries = Object.values(prog);
+                if (entries.length > 0) {
+                  const done = entries.filter(e => e.state !== 'running').length;
+                  const total = entries[0]?.total ?? entries.length;
+                  return `⏳ ${done}/${total}`;
+                }
+                return '⏳ Running…';
+              }
+              return props.unsavedChanges ? '💾 Save & Run All' : '▶ Run All';
+            })()}
           </button>
         </div>
       </div>

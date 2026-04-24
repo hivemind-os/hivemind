@@ -523,6 +523,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
         shadow_mode: bool,
+        auto_respond: bool,
     ) -> Result<(String, Value, Vec<InterceptedToolCall>), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
@@ -561,8 +562,11 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
             cb(agent_id.clone());
         }
 
-        // Wait for completion using the pre-subscribed receiver
-        let deadline = timeout_secs
+        // Wait for completion using the pre-subscribed receiver.
+        // In test/auto_respond mode, apply a safety-net deadline even if
+        // the step definition didn't specify a timeout.
+        let effective_timeout = timeout_secs.or_else(|| if auto_respond { Some(120) } else { None });
+        let deadline = effective_timeout
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
 
         let mut intercepted_calls: Vec<InterceptedToolCall> = Vec::new();
@@ -572,7 +576,10 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 match tokio::time::timeout_at(dl, rx.recv()).await {
                     Ok(ev) => ev,
                     Err(_) => {
-                        return Err(format!("agent timed out after {}s", timeout_secs.unwrap()));
+                        return Err(format!(
+                            "agent timed out after {}s",
+                            effective_timeout.unwrap()
+                        ));
                     }
                 }
             } else {
@@ -601,6 +608,74 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                         tool_id: tool_id.clone(),
                         input: input.clone(),
                     });
+                    continue;
+                }
+                // Auto-respond to agent questions (ask_user) when in test mode.
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::QuestionAsked {
+                        ref request_id,
+                        ref choices,
+                        ..
+                    },
+                }) if *aid == agent_id && auto_respond => {
+                    tracing::info!(
+                        agent_id = %aid,
+                        request_id = %request_id,
+                        "auto-responding to agent question in test mode"
+                    );
+                    let payload = if choices.is_empty() {
+                        hive_contracts::InteractionResponsePayload::Answer {
+                            selected_choice: None,
+                            selected_choices: None,
+                            text: Some("proceed".to_string()),
+                        }
+                    } else {
+                        hive_contracts::InteractionResponsePayload::Answer {
+                            selected_choice: Some(0),
+                            selected_choices: None,
+                            text: None,
+                        }
+                    };
+                    let response = hive_contracts::UserInteractionResponse {
+                        request_id: request_id.clone(),
+                        payload,
+                    };
+                    if let Err(e) = supervisor.respond_to_agent_interaction(aid, response) {
+                        tracing::warn!(
+                            agent_id = %aid,
+                            "failed to auto-respond to question: {e}"
+                        );
+                    }
+                    continue;
+                }
+                // Auto-approve tool approvals when in test mode.
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::UserInteractionRequired {
+                        ref request_id,
+                        ..
+                    },
+                }) if *aid == agent_id && auto_respond => {
+                    tracing::info!(
+                        agent_id = %aid,
+                        request_id = %request_id,
+                        "auto-approving tool in test mode"
+                    );
+                    let response = hive_contracts::UserInteractionResponse {
+                        request_id: request_id.clone(),
+                        payload: hive_contracts::InteractionResponsePayload::ToolApproval {
+                            approved: true,
+                            allow_session: false,
+                            allow_agent: false,
+                        },
+                    };
+                    if let Err(e) = supervisor.respond_to_agent_interaction(aid, response) {
+                        tracing::warn!(
+                            agent_id = %aid,
+                            "failed to auto-approve tool: {e}"
+                        );
+                    }
                     continue;
                 }
                 Ok(_) => continue,

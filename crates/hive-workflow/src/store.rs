@@ -1304,6 +1304,7 @@ impl WorkflowPersistence for SqliteWorkflowStore {
             active_loops,
             execution_mode,
             shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         }))
     }
 
@@ -2735,6 +2736,7 @@ mod tests {
             active_loops: std::collections::HashMap::new(),
             execution_mode: ExecutionMode::default(),
             shadow_overrides: std::collections::HashMap::new(),
+            auto_respond_interactions: false,
         }
     }
 

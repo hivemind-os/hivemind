@@ -4728,6 +4728,7 @@ async fn workflow_run_tests(
     definition_name: String,
     version: Option<String>,
     test_names: Option<Vec<String>>,
+    auto_respond: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     async_post_json::<serde_json::Value, serde_json::Value>(
@@ -4737,6 +4738,7 @@ async fn workflow_run_tests(
             "definition_name": definition_name,
             "version": version,
             "test_names": test_names,
+            "auto_respond": auto_respond.unwrap_or(true),
         }),
     )
     .await

@@ -1113,7 +1113,7 @@ impl Tool for WfAuthorRunTestsTool {
 
             let results = match self
                 .workflow_service
-                .run_tests(definition_name, None, test_names_ref)
+                .run_tests(definition_name, None, test_names_ref, true)
                 .await
             {
                 Ok(r) => r,
