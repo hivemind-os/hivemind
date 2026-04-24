@@ -211,15 +211,15 @@ fn make_request(prompt_chars: usize, messages: Vec<CompletionMessage>) -> Comple
 }
 
 fn user_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "user".into(), content: content.into(), content_parts: vec![] }
+    CompletionMessage { role: "user".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
 }
 
 fn assistant_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "assistant".into(), content: content.into(), content_parts: vec![] }
+    CompletionMessage { role: "assistant".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
 }
 
 fn system_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "system".into(), content: content.into(), content_parts: vec![] }
+    CompletionMessage { role: "system".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
 }
 
 /// Build N user/assistant turn pairs, each with `chars_per_msg` characters.
@@ -537,6 +537,7 @@ fn recursive_compaction_merges_summaries() {
             role: "system".into(),
             content: "[Compaction Summary #1 — 5 messages compacted]\n\nOld summary.".into(),
             content_parts: vec![],
+            blocks: vec![],
         },
     ];
     for i in 0..15 {

@@ -156,6 +156,37 @@ pub enum ContentPart {
     Image { media_type: String, data: String },
 }
 
+/// A structured content block for multi-turn tool conversations.
+///
+/// Providers that support native tool calling translate these blocks into
+/// their wire format (e.g. OpenAI `tool_calls` / `tool` messages, Anthropic
+/// `tool_use` / `tool_result` content blocks).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageBlock {
+    /// Plain text content.
+    Text { text: String },
+    /// An assistant-issued tool call.
+    ToolUse {
+        /// Provider-assigned call ID (e.g. `call_abc123`).
+        id: String,
+        /// Tool name.
+        name: String,
+        /// Tool input arguments.
+        input: serde_json::Value,
+    },
+    /// A tool execution result.
+    ToolResult {
+        /// Matches the `ToolUse::id` this result responds to.
+        tool_use_id: String,
+        /// Serialized tool output.
+        content: String,
+        /// Whether the tool call errored.
+        #[serde(default)]
+        is_error: bool,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompletionMessage {
     pub role: String,
@@ -163,12 +194,18 @@ pub struct CompletionMessage {
     /// When non-empty, providers should use these parts instead of `content`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_parts: Vec<ContentPart>,
+    /// Structured content blocks for multi-turn tool conversations.
+    /// When non-empty, these take precedence over `content` and `content_parts`
+    /// for providers that support native tool calling.
+    /// For backward compatibility: if empty, providers use `content`/`content_parts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<MessageBlock>,
 }
 
 impl CompletionMessage {
     /// Create a text-only completion message.
     pub fn text(role: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { role: role.into(), content: content.into(), content_parts: vec![] }
+        Self { role: role.into(), content: content.into(), content_parts: vec![], blocks: vec![] }
     }
 }
 
@@ -662,6 +699,11 @@ impl ModelRouter {
 
     pub fn provider_display_name(&self, provider_id: &str) -> String {
         self.provider_name(provider_id).unwrap_or_else(|| provider_id.to_string())
+    }
+
+    /// Look up the [`ProviderKind`] for a given provider ID.
+    pub fn provider_kind(&self, provider_id: &str) -> Option<ProviderKind> {
+        self.providers.get(provider_id).map(|p| p.descriptor().kind.clone())
     }
 
     pub fn provider_descriptors(&self) -> Vec<ProviderDescriptor> {
@@ -1516,34 +1558,101 @@ fn format_tools_ollama(tools: &[ToolDefinition]) -> Option<Vec<serde_json::Value
 }
 
 fn openai_messages_from_request(request: &CompletionRequest) -> Vec<OpenAiMessage> {
-    let mut messages = request
-        .messages
-        .iter()
-        .map(|message| OpenAiMessage {
-            role: message.role.clone(),
-            content: openai_content_from_completion(message),
-        })
-        .collect::<Vec<_>>();
-    // Final user message: use prompt_content_parts when present (multimodal).
-    let prompt_content = if request.prompt_content_parts.is_empty() {
-        OpenAiContent::Text(request.prompt.clone())
-    } else {
-        OpenAiContent::Parts(
-            request
-                .prompt_content_parts
-                .iter()
-                .map(|part| match part {
-                    ContentPart::Text { text } => OpenAiContentPart::Text { text: text.clone() },
-                    ContentPart::Image { media_type, data } => OpenAiContentPart::ImageUrl {
-                        image_url: OpenAiImageUrl {
-                            url: format!("data:{media_type};base64,{data}"),
-                        },
+    let mut messages: Vec<OpenAiMessage> = Vec::with_capacity(request.messages.len() + 1);
+
+    for message in &request.messages {
+        if !message.blocks.is_empty() {
+            // Multi-turn tool conversation: translate blocks to OpenAI wire format.
+            if message.role == "assistant" {
+                // Collect text content and tool calls from blocks.
+                let mut text_parts = Vec::new();
+                let mut tool_calls = Vec::new();
+                for block in &message.blocks {
+                    match block {
+                        MessageBlock::Text { text } => text_parts.push(text.clone()),
+                        MessageBlock::ToolUse { id, name, input } => {
+                            tool_calls.push(OpenAiToolCallOut {
+                                id: id.clone(),
+                                call_type: "function".to_string(),
+                                function: OpenAiToolCallFnOut {
+                                    name: sanitize_tool_name(name),
+                                    arguments: serde_json::to_string(input)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                },
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                let content_text = text_parts.join("\n");
+                messages.push(OpenAiMessage {
+                    role: "assistant".to_string(),
+                    content: if content_text.is_empty() {
+                        None
+                    } else {
+                        Some(OpenAiContent::Text(content_text))
                     },
-                })
-                .collect(),
-        )
-    };
-    messages.push(OpenAiMessage { role: "user".to_string(), content: prompt_content });
+                    tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                    tool_call_id: None,
+                    name: None,
+                });
+            } else {
+                // Tool result messages: one OpenAI "tool" message per ToolResult block.
+                for block in &message.blocks {
+                    if let MessageBlock::ToolResult { tool_use_id, content, .. } = block {
+                        messages.push(OpenAiMessage {
+                            role: "tool".to_string(),
+                            content: Some(OpenAiContent::Text(content.clone())),
+                            tool_calls: None,
+                            tool_call_id: Some(tool_use_id.clone()),
+                            name: None,
+                        });
+                    }
+                }
+            }
+        } else {
+            // Legacy path: plain content message.
+            messages.push(OpenAiMessage {
+                role: message.role.clone(),
+                content: Some(openai_content_from_completion(message)),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+    }
+
+    // Final user message from prompt (skip if prompt is empty — multi-turn
+    // mode puts everything in messages).
+    if !request.prompt.is_empty() {
+        let prompt_content = if request.prompt_content_parts.is_empty() {
+            OpenAiContent::Text(request.prompt.clone())
+        } else {
+            OpenAiContent::Parts(
+                request
+                    .prompt_content_parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => {
+                            OpenAiContentPart::Text { text: text.clone() }
+                        }
+                        ContentPart::Image { media_type, data } => OpenAiContentPart::ImageUrl {
+                            image_url: OpenAiImageUrl {
+                                url: format!("data:{media_type};base64,{data}"),
+                            },
+                        },
+                    })
+                    .collect(),
+            )
+        };
+        messages.push(OpenAiMessage {
+            role: "user".to_string(),
+            content: Some(prompt_content),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
     messages
 }
 
@@ -1556,37 +1665,96 @@ fn anthropic_messages_from_request(
         request.messages.iter().filter(|m| m.role == "system").map(|m| m.content.clone()).collect();
     let system = if system_parts.is_empty() { None } else { Some(system_parts.join("\n\n")) };
 
-    let mut messages: Vec<AnthropicMessage> = request
-        .messages
-        .iter()
-        .filter(|m| m.role != "system")
-        .map(|message| AnthropicMessage {
-            role: message.role.clone(),
-            content: anthropic_content_from_completion(message),
-        })
-        .collect();
-    // Final user message: use prompt_content_parts when present (multimodal).
-    let prompt_content = if request.prompt_content_parts.is_empty() {
-        AnthropicContent::Text(request.prompt.clone())
-    } else {
-        AnthropicContent::Parts(
-            request
-                .prompt_content_parts
-                .iter()
-                .map(|part| match part {
-                    ContentPart::Text { text } => AnthropicContentPart::Text { text: text.clone() },
-                    ContentPart::Image { media_type, data } => AnthropicContentPart::Image {
-                        source: AnthropicImageSource {
-                            source_type: "base64".to_string(),
-                            media_type: media_type.clone(),
-                            data: data.clone(),
+    let mut messages: Vec<AnthropicMessage> = Vec::new();
+
+    for message in request.messages.iter().filter(|m| m.role != "system") {
+        if !message.blocks.is_empty() {
+            if message.role == "assistant" {
+                // Translate blocks to Anthropic content blocks.
+                let parts: Vec<AnthropicContentPart> = message
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        MessageBlock::Text { text } => {
+                            Some(AnthropicContentPart::Text { text: text.clone() })
+                        }
+                        MessageBlock::ToolUse { id, name, input } => {
+                            Some(AnthropicContentPart::ToolUse {
+                                id: id.clone(),
+                                name: name.clone(),
+                                input: input.clone(),
+                            })
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    messages.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content: AnthropicContent::Parts(parts),
+                    });
+                }
+            } else {
+                // Tool result blocks → Anthropic requires these as a "user" message
+                // with tool_result content blocks.
+                let parts: Vec<AnthropicContentPart> = message
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        MessageBlock::ToolResult { tool_use_id, content, is_error } => {
+                            Some(AnthropicContentPart::ToolResult {
+                                tool_use_id: tool_use_id.clone(),
+                                content: content.clone(),
+                                is_error: if *is_error { Some(true) } else { None },
+                            })
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    // Anthropic requires tool results in a "user" message.
+                    messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: AnthropicContent::Parts(parts),
+                    });
+                }
+            }
+        } else {
+            // Legacy path: plain content message.
+            messages.push(AnthropicMessage {
+                role: message.role.clone(),
+                content: anthropic_content_from_completion(message),
+            });
+        }
+    }
+
+    // Final user message from prompt (skip if prompt is empty).
+    if !request.prompt.is_empty() {
+        let prompt_content = if request.prompt_content_parts.is_empty() {
+            AnthropicContent::Text(request.prompt.clone())
+        } else {
+            AnthropicContent::Parts(
+                request
+                    .prompt_content_parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => {
+                            AnthropicContentPart::Text { text: text.clone() }
+                        }
+                        ContentPart::Image { media_type, data } => AnthropicContentPart::Image {
+                            source: AnthropicImageSource {
+                                source_type: "base64".to_string(),
+                                media_type: media_type.clone(),
+                                data: data.clone(),
+                            },
                         },
-                    },
-                })
-                .collect(),
-        )
-    };
-    messages.push(AnthropicMessage { role: "user".to_string(), content: prompt_content });
+                    })
+                    .collect(),
+            )
+        };
+        messages.push(AnthropicMessage { role: "user".to_string(), content: prompt_content });
+    }
+
     (system, messages)
 }
 
@@ -1641,7 +1809,30 @@ struct OpenAiChatRequest {
 #[derive(Debug, Serialize)]
 struct OpenAiMessage {
     role: String,
-    content: OpenAiContent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<OpenAiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<OpenAiToolCallOut>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// Outgoing tool call on an assistant message (OpenAI format).
+#[derive(Debug, Serialize)]
+struct OpenAiToolCallOut {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: OpenAiToolCallFnOut,
+}
+
+/// Function name + arguments for an outgoing tool call.
+#[derive(Debug, Serialize)]
+struct OpenAiToolCallFnOut {
+    name: String,
+    arguments: String,
 }
 
 /// OpenAI message content: either a plain string or an array of content parts.
@@ -1723,6 +1914,17 @@ enum AnthropicContent {
 enum AnthropicContentPart {
     Text { text: String },
     Image { source: AnthropicImageSource },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -2613,11 +2815,13 @@ mod tests {
                             role: "system".to_string(),
                             content: "You are helpful".to_string(),
                             content_parts: vec![],
+                            blocks: vec![],
                         },
                         CompletionMessage {
                             role: "assistant".to_string(),
                             content: "Previous reply".to_string(),
                             content_parts: vec![],
+                            blocks: vec![],
                         },
                     ],
                     required_capabilities: [Capability::Chat].into_iter().collect(),

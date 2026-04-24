@@ -570,11 +570,13 @@ async fn t08_history_messages_included() {
             role: "user".into(),
             content: "first message".into(),
             content_parts: vec![],
+            blocks: vec![],
         },
         CompletionMessage {
             role: "assistant".into(),
             content: "first reply".into(),
             content_parts: vec![],
+            blocks: vec![],
         },
     ];
 

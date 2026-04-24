@@ -365,14 +365,18 @@ export default function WorkflowsPage(props: WorkflowsPageProps) {
 
   /** Build structured fields for incoming_message triggers. */
   function buildIncomingMessageFields(trigDef: any): TriggerInput[] {
-    // Pre-fill channel_id from the trigger definition if available
+    // Pre-fill channel_id and provider from the trigger definition if available
     const channelId = trigDef.channel_id || trigDef.channel || '';
+    // Derive provider from the channels list if we know the channel_id
+    const channel = channelId ? props.channels?.find(c => c.id === channelId) : undefined;
+    const provider = channel?.provider || '';
     return [
       { name: 'from', input_type: 'string', required: false, description: 'Sender address or name' },
       { name: 'to', input_type: 'string', required: false, description: 'Recipient address' },
       { name: 'subject', input_type: 'string', required: false, description: 'Message subject' },
       { name: 'body', input_type: 'string', required: false, description: 'Message body', xUi: { widget: 'textarea' } },
       { name: 'channel_id', input_type: 'string', required: false, description: 'Channel identifier', default: channelId || undefined },
+      { name: 'provider', input_type: 'string', required: false, description: 'Connector provider (e.g. microsoft, discord)', default: provider || undefined },
       { name: 'external_id', input_type: 'string', required: false, description: 'External message ID (optional)' },
     ];
   }

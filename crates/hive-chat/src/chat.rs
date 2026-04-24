@@ -1559,6 +1559,7 @@ impl ChatService {
             bot_configs: Arc::clone(&bot_configs),
             bot_workspace: Arc::clone(&bot_workspace_path),
             bot_stream_tx: bot_stream_tx.clone(),
+            bot_loggers: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             loop_executor: Arc::clone(&loop_executor),
             model_router: Arc::clone(&model_router_swap),
             personas: Arc::new(Mutex::new(Vec::new())),
@@ -6118,6 +6119,7 @@ impl ChatService {
                             role: "system".to_string(),
                             content: spatial_context,
                             content_parts: vec![],
+                            blocks: vec![],
                         },
                     );
                 }
@@ -6130,6 +6132,7 @@ impl ChatService {
                         role: "system".to_string(),
                         content: pending.persona.system_prompt.clone(),
                         content_parts: vec![],
+                        blocks: vec![],
                     },
                 );
             }
@@ -6156,6 +6159,7 @@ impl ChatService {
                     role: "system".to_string(),
                     content: context_map,
                     content_parts: vec![],
+                    blocks: vec![],
                 });
             }
 
@@ -6201,6 +6205,7 @@ impl ChatService {
                         role: "system".to_string(),
                         content: wf_context,
                         content_parts: vec![],
+                        blocks: vec![],
                     });
                 }
             }
@@ -8617,7 +8622,7 @@ fn build_conversation_history(messages: &[ChatMessage]) -> Vec<CompletionMessage
             ChatMessageRole::Notification | ChatMessageRole::System => continue,
         };
         let content_parts = build_content_parts(&content, &msg.attachments);
-        history.push(CompletionMessage { role: role.to_string(), content, content_parts });
+        history.push(CompletionMessage { role: role.to_string(), content, content_parts, blocks: vec![] });
         total_chars += msg.content.len();
     }
 

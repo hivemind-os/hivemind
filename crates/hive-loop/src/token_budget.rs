@@ -30,8 +30,38 @@ fn estimate_tokens(text: &str) -> usize {
 /// Estimate the total token count for a [`CompletionRequest`].
 pub fn estimate_request_tokens(request: &CompletionRequest) -> usize {
     let prompt_tokens = estimate_tokens(&request.prompt);
-    let history_tokens: usize =
-        request.messages.iter().map(|m| estimate_tokens(&m.content) + 4).sum();
+    let history_tokens: usize = request
+        .messages
+        .iter()
+        .map(|m| {
+            let base = estimate_tokens(&m.content) + 4; // role overhead
+            if m.blocks.is_empty() {
+                return base;
+            }
+            // When blocks are present, estimate from them instead of content.
+            let block_tokens: usize = m
+                .blocks
+                .iter()
+                .map(|b| match b {
+                    hive_model::MessageBlock::Text { text } => estimate_tokens(text),
+                    hive_model::MessageBlock::ToolUse { id, name, input } => {
+                        let args =
+                            serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
+                        estimate_tokens(id)
+                            + estimate_tokens(name)
+                            + estimate_tokens(&args)
+                            + 10 // structural overhead
+                    }
+                    hive_model::MessageBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => estimate_tokens(tool_use_id) + estimate_tokens(content) + 10,
+                })
+                .sum();
+            block_tokens + 4 // role overhead
+        })
+        .sum();
     let tools_tokens: usize = request
         .tools
         .iter()
@@ -134,6 +164,7 @@ impl LoopMiddleware for TokenBudgetMiddleware {
                             "[{dropped_count} earlier conversation messages were omitted to fit within the model's context window]"
                         ),
                         content_parts: vec![],
+                        blocks: vec![],
                     },
                 );
 
@@ -264,6 +295,7 @@ mod tests {
                 role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
                 content: "y".repeat(400), // ~100 tokens each
                 content_parts: vec![],
+                blocks: vec![],
             })
             .collect();
         CompletionRequest {
@@ -299,6 +331,7 @@ mod tests {
                 role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
                 content: "y".repeat(2000), // ~500 tokens each
                 content_parts: vec![],
+                blocks: vec![],
             })
             .collect();
         let req = CompletionRequest {

@@ -590,12 +590,14 @@ impl AgentRunner {
                 role: "user".to_string(),
                 content: content.to_string(),
                 content_parts: vec![],
+                blocks: vec![],
             });
             if let Ok(ref response) = result {
                 self.conversation_history.push(CompletionMessage {
                     role: "assistant".to_string(),
                     content: response.clone(),
                     content_parts: vec![],
+                    blocks: vec![],
                 });
             }
         }
@@ -656,6 +658,7 @@ impl AgentRunner {
                 role: "system".to_string(),
                 content: system_parts.join("\n\n"),
                 content_parts: vec![],
+                blocks: vec![],
             }]
         };
 

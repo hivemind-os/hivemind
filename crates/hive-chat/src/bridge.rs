@@ -304,12 +304,13 @@ fn completion_request_parts(messages: &[Message]) -> (String, Vec<CompletionMess
             MessageRole::System => "system",
             MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
-            MessageRole::Tool => return (messages_to_prompt(messages), Vec::new()),
+            MessageRole::Tool => "tool",
         };
         completion_messages.push(CompletionMessage {
             role: role.to_string(),
             content: message.content.clone(),
             content_parts: vec![],
+            blocks: vec![],
         });
     }
 

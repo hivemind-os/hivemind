@@ -24,6 +24,7 @@ use crate::chat::{
     normalize_workspace_relative_path, open_graph, read_workspace_file_at, with_default_persona,
     ApprovalStreamEvent, ChatServiceError, SessionEvent,
 };
+use crate::session_log::SessionLogger;
 
 /// Manages the bot supervisor, bot CRUD, bot persistence, and bot workspace.
 #[derive(Clone)]
@@ -33,6 +34,7 @@ pub(crate) struct BotService {
     pub(crate) bot_configs: Arc<RwLock<HashMap<String, BotConfig>>>,
     pub(crate) bot_workspace: Arc<PathBuf>,
     pub(crate) bot_stream_tx: broadcast::Sender<SessionEvent>,
+    pub(crate) bot_loggers: Arc<RwLock<HashMap<String, Arc<SessionLogger>>>>,
 
     // ── Shared dependencies ────────────────────────────────
     pub(crate) loop_executor: Arc<LoopExecutor>,
@@ -61,6 +63,31 @@ pub(crate) struct BotService {
 
 impl BotService {
     // ── Helpers ─────────────────────────────────────────────
+
+    /// Return (or lazily create) a `SessionLogger` for the given bot, writing
+    /// into `<hivemind_home>/sessions/<bot_id>/`.
+    async fn get_or_create_logger(&self, bot_id: &str) -> Option<Arc<SessionLogger>> {
+        // Fast path – already cached.
+        {
+            let loggers = self.bot_loggers.read().await;
+            if let Some(logger) = loggers.get(bot_id) {
+                return Some(Arc::clone(logger));
+            }
+        }
+        // Slow path – create and cache.
+        let sessions_root = self.hivemind_home.join("sessions");
+        match SessionLogger::new(&sessions_root, bot_id) {
+            Ok(logger) => {
+                let logger = Arc::new(logger);
+                self.bot_loggers.write().await.insert(bot_id.to_string(), Arc::clone(&logger));
+                Some(logger)
+            }
+            Err(e) => {
+                tracing::warn!(bot_id, "failed to create bot session logger: {e}");
+                None
+            }
+        }
+    }
 
     #[allow(dead_code)]
     fn available_personas(&self) -> Vec<Persona> {
@@ -237,6 +264,26 @@ impl BotService {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
+                        // ── File logging (mirrors spawn_supervisor_bridge) ──
+                        let bot_id = match &event {
+                            SupervisorEvent::AgentSpawned { agent_id, .. }
+                            | SupervisorEvent::AgentStatusChanged { agent_id, .. }
+                            | SupervisorEvent::AgentTaskAssigned { agent_id, .. }
+                            | SupervisorEvent::AgentOutput { agent_id, .. }
+                            | SupervisorEvent::AgentCompleted { agent_id, .. } => {
+                                Some(agent_id.clone())
+                            }
+                            _ => None,
+                        };
+                        if let Some(ref bid) = bot_id {
+                            if let Some(logger) = bot_svc.get_or_create_logger(bid).await {
+                                logger.handle_event(&SessionEvent::Supervisor(event.clone()));
+                                logger.persist_event(&event);
+                                logger.persist_session_event(
+                                    &SessionEvent::Supervisor(event.clone()),
+                                );
+                            }
+                        }
                         match &event {
                             SupervisorEvent::AgentStatusChanged { agent_id, status } => {
                                 if *status == AgentStatus::Done || *status == AgentStatus::Error {
@@ -784,10 +831,19 @@ impl BotService {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<SupervisorEvent>, usize), ChatServiceError> {
-        Ok(self
+        // Try in-memory first.
+        let (events, total) = self
             .get_or_create_bot_supervisor()
             .await?
-            .get_agent_events_paged(agent_id, offset, limit))
+            .get_agent_events_paged(agent_id, offset, limit);
+        if total > 0 {
+            return Ok((events, total));
+        }
+        // Fall back to persisted JSONL files.
+        if let Some(logger) = self.get_or_create_logger(agent_id).await {
+            return Ok(logger.read_agent_events_paged(agent_id, offset, limit));
+        }
+        Ok((Vec::new(), 0))
     }
 
     pub async fn get_bot_permissions(
