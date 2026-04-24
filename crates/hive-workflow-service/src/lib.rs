@@ -17,6 +17,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, Instrument};
 
+/// Returns true for sentinel parent_session_id values that do NOT correspond
+/// to a real chat session (e.g. trigger-launched or test-runner workflows).
+fn is_synthetic_session_id(id: &str) -> bool {
+    id.starts_with("trigger-") || id == "test-runner"
+}
+
 /// A pending workflow feedback gate request, surfaced to the parent session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowFeedbackItem {
@@ -1154,7 +1160,7 @@ impl WorkflowService {
         };
         let mut count = 0usize;
         for inst in &result.items {
-            let parent_ref = if inst.parent_session_id.starts_with("trigger-")
+            let parent_ref = if is_synthetic_session_id(&inst.parent_session_id)
                 || inst.parent_session_id == "manual"
             {
                 None
@@ -1495,7 +1501,7 @@ impl StepExecutor for ServiceStepExecutor {
                         .await
                     {
                         Ok(_) => {
-                            let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                            let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                                 None
                             } else {
                                 Some(ctx.parent_session_id.as_str())
@@ -1516,7 +1522,8 @@ impl StepExecutor for ServiceStepExecutor {
                 // Only pass session_id to the agent runner when there is a real
                 // chat session backing this workflow.  Trigger-launched workflows
                 // use a sentinel parent_session_id that is not a real session.
-                let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                // The test runner also uses a synthetic "test-runner" id.
+                let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())
@@ -1642,7 +1649,7 @@ impl StepExecutor for ServiceStepExecutor {
         let runner = self.agent_runner.lock().await.clone();
         match runner {
             Some(r) => {
-                let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())
@@ -1762,7 +1769,7 @@ impl StepExecutor for ServiceStepExecutor {
         let scheduler = self.task_scheduler.lock().await.clone();
         match scheduler {
             Some(s) => {
-                let parent_sid = if ctx.parent_session_id.starts_with("trigger-") {
+                let parent_sid = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())
