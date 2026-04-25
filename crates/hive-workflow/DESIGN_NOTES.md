@@ -62,3 +62,24 @@ modifying the core engine.
 The implementation adds concepts not in the spec (`EventGate`, `Delay`,
 `SetVariable`, `ScheduleTask`, `LaunchWorkflow`) that emerged from real-world
 usage.
+
+## 4. Shadow Mode & Test Runner
+
+**Not in spec.** Added to address real-world incidents where untested
+workflows sent thousands of emails or burned large amounts of LLM tokens.
+
+**Implementation:** `ExecutionMode::Shadow` causes side-effecting actions to be
+intercepted and recorded (as `InterceptedAction` rows) instead of executed.
+Read-only tools still execute normally. Agents spawned during shadow execution
+inherit `shadow_mode=true` on their `AgentSpec`, so their tool calls are also
+intercepted.
+
+The test runner (`test_runner.rs`) launches each `WorkflowTestCase` in shadow
+mode with optional per-step output overrides (`shadow_outputs`) for mocking.
+`TestExpectations` support asserting on terminal status, output values,
+step reachability, intercepted action counts, and expected tool calls
+(partial-match on arguments via bipartite matching).
+
+Agent interactions (`ask_user` questions and tool approval requests) are
+auto-responded to during test runs and recorded as intercepted actions
+alongside tool calls, so they are visible in test results.
