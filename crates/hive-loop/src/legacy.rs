@@ -2257,6 +2257,14 @@ impl LoopStrategy for CodeActStrategy {
             let has_persistent_session = context.session_registry.is_some();
             let ca_cfg = &context.code_act_config;
             let workspace_str = context.workspace_path().map(|p| p.to_string_lossy().to_string());
+            tracing::info!(
+                allow_network = ca_cfg.allow_network,
+                workspace = ?workspace_str,
+                persistent = has_persistent_session,
+                bridged_count = bridged_tools.len(),
+                native_count = native_tool_ids.len(),
+                "CodeAct: building system prompt supplement"
+            );
             let code_act_instructions =
                 build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network, workspace_str.as_deref());
 

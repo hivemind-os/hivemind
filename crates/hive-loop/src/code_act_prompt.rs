@@ -173,7 +173,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT ask clarifying questions, present menus, or list options. Make reasonable assumptions and execute. If something fails, fix it and retry.
+**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT use ask_user to confirm, do NOT ask clarifying questions, do NOT present menus or list options. Just do the task. Make reasonable assumptions and execute. If something fails, fix it and retry.
 "#;
 
 const CODE_ACT_HEADER_ONESHOT: &str = r#"
@@ -194,7 +194,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT ask clarifying questions, present menus, or list options. Make reasonable assumptions and execute. If something fails, fix it and retry.
+**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT use ask_user to confirm, do NOT ask clarifying questions, do NOT present menus or list options. Just do the task. Make reasonable assumptions and execute. If something fails, fix it and retry.
 "#;
 
 const OBSERVATION_FORMAT: &str = r#"
