@@ -173,7 +173,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT use ask_user to confirm, do NOT ask clarifying questions, do NOT present menus or list options. Just do the task. Make reasonable assumptions and execute. If something fails, fix it and retry.
+**Bias toward action:** When the user's request is clear, write and execute code immediately — do not ask for confirmation first. If the request is genuinely ambiguous (e.g., multiple conflicting interpretations), you may ask a brief clarifying question. But prefer making a reasonable assumption and acting over asking.
 "#;
 
 const CODE_ACT_HEADER_ONESHOT: &str = r#"
@@ -194,7 +194,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT use ask_user to confirm, do NOT ask clarifying questions, do NOT present menus or list options. Just do the task. Make reasonable assumptions and execute. If something fails, fix it and retry.
+**Bias toward action:** When the user's request is clear, write and execute code immediately — do not ask for confirmation first. If the request is genuinely ambiguous (e.g., multiple conflicting interpretations), you may ask a brief clarifying question. But prefer making a reasonable assumption and acting over asking.
 "#;
 
 const OBSERVATION_FORMAT: &str = r#"

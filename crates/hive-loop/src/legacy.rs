@@ -2267,6 +2267,12 @@ impl LoopStrategy for CodeActStrategy {
             );
             let code_act_instructions =
                 build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network, workspace_str.as_deref());
+            tracing::debug!(
+                instructions_len = code_act_instructions.len(),
+                has_network_section = code_act_instructions.contains("Network Access"),
+                has_workspace_section = code_act_instructions.contains("Working Directory"),
+                "CodeAct: prompt supplement built"
+            );
 
             // ── Initialize the code executor ─────────────────────────
             // Build executor config from the CodeActConfig on the context.
