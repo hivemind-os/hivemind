@@ -19,7 +19,7 @@ const CodeActTab = (props: CodeActTabProps) => {
     max_output_bytes: 1048576,
     idle_timeout_secs: 600,
     max_sessions: 3,
-    allow_network: false,
+    allow_network: true,
   };
 
   const update = (field: string, value: unknown) => {

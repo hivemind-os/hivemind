@@ -1485,7 +1485,7 @@ impl Default for CodeActConfig {
             max_output_bytes: 1_048_576, // 1 MB
             idle_timeout_secs: 600,      // 10 min
             max_sessions: 3,
-            allow_network: false,
+            allow_network: true,
         }
     }
 }
