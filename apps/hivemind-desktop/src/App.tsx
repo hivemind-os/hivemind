@@ -789,6 +789,15 @@ const App = () => {
   // stale fetch responses (issued earlier but arriving later) are discarded.
   let chatSyncEpoch = 0;
 
+  // In CodeAct mode, strip Python code blocks from the streaming display to
+  // reduce noise — the user sees the agent's reasoning text but not raw code.
+  const displayStreamingContent = createMemo(() => {
+    const raw = streamingContent();
+    if (!raw || !isCodeActSession()) return raw;
+    // Strip ```python ... ``` fenced blocks (complete and in-progress)
+    return raw.replace(/```(?:python|py)?\n[\s\S]*?(?:```|$)/g, '').trim();
+  });
+
   let streamSyncEpoch = 0;
   const syncChatStateAfterStream = (session_id: string) => {
     // Capture accumulated tool calls before clearing streaming state — the
@@ -918,6 +927,13 @@ const App = () => {
     } else {
       setSelectedAgentId('system/general');
     }
+  });
+
+  // Detect whether the current session is using CodeAct strategy.
+  const isCodeActSession = createMemo(() => {
+    const pid = selectedAgentId();
+    const p = personas().find(x => x.id === pid);
+    return p?.loop_strategy === 'code_act';
   });
 
   // Reload persona-scoped tools and skills when the active persona changes.
@@ -2392,7 +2408,13 @@ const App = () => {
               if (!inner) break;
               switch (inner.type) {
                 case 'model_call_started':
-                  if (!isStreaming()) beginStreamingState();
+                  if (!isStreaming()) {
+                    beginStreamingState();
+                  } else if (isCodeActSession()) {
+                    // New CodeAct iteration — clear previous turn's streaming
+                    // content so the display doesn't grow indefinitely.
+                    setStreamingContent('');
+                  }
                   pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
                   break;
                 case 'model_call_completed':
@@ -2411,6 +2433,14 @@ const App = () => {
                   const actId = `tool:${tool_id}:${Date.now()}`;
                   pushActivity({ id: actId, kind: 'tool', label: `Running ${tool_id}`, detail: truncate(JSON.stringify(inner.input ?? ''), 80) });
                   recordToolCallStart(currentSessionId, actId, tool_id, `Running ${tool_id}`, JSON.stringify(inner.input ?? ''));
+                  break;
+                }
+                case 'code_execution': {
+                  if (inner.duration_ms != null) {
+                    completeActivity('code-exec', inner.is_error);
+                  } else {
+                    pushActivity({ id: 'code-exec', kind: 'tool', label: 'Running code…' });
+                  }
                   break;
                 }
                 case 'tool_call_completed': {
@@ -2608,7 +2638,11 @@ const App = () => {
           // "type" field) rather than the externally-tagged LoopEvent shape.
           const inner = event.event;
           if (inner.type === 'model_call_started') {
-            if (!isStreaming()) beginStreamingState();
+            if (!isStreaming()) {
+              beginStreamingState();
+            } else if (isCodeActSession()) {
+              setStreamingContent('');
+            }
             pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
           } else if (inner.type === 'model_call_completed') {
             completeActivity('inference');
@@ -2623,6 +2657,12 @@ const App = () => {
             if (match) completeActivity(match.id, inner.is_error);
             recordToolCallResult(sid, tool_id, JSON.stringify(inner.output ?? ''), inner.is_error ?? false, inner.output?._mcp_raw);
             pushActivity({ id: 'inference', kind: 'inference', label: 'Thinking...' });
+          } else if (inner.type === 'code_execution') {
+            if (inner.duration_ms != null) {
+              completeActivity('code-exec', inner.is_error);
+            } else {
+              pushActivity({ id: 'code-exec', kind: 'tool', label: 'Running code…' });
+            }
           } else if (inner.type === 'user_interaction_required') {
             completeActivity('inference');
             pushActivity({ id: 'feedback', kind: 'feedback', label: 'Waiting for your input' });
@@ -3489,7 +3529,7 @@ const App = () => {
                   chatFontPx={chatFontPx}
                   expandedMsgIds={expandedMsgIds}
                   setExpandedMsgIds={setExpandedMsgIds}
-                  streamingContent={streamingContent}
+                  streamingContent={displayStreamingContent}
                   isStreaming={isStreaming}
                   activities={activities}
                   toolCallHistory={toolCallHistory}
