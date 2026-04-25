@@ -21,8 +21,8 @@ use hive_scheduler::SchedulerService;
 use hive_tools::ToolRegistry;
 use hive_workflow::types::{PermissionEntry, ScheduleTaskDef, SignalTarget, WorkflowAttachment};
 use hive_workflow_service::{
-    InterceptedToolCall, WorkflowAgentRunner, WorkflowInteractionGate, WorkflowTaskScheduler,
-    WorkflowToolExecutor,
+    AgentInteraction, InterceptedToolCall, WorkflowAgentRunner, WorkflowInteractionGate,
+    WorkflowTaskScheduler, WorkflowToolExecutor,
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -562,7 +562,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         agent_name: Option<&str>,
         shadow_mode: bool,
         auto_respond: bool,
-    ) -> Result<(String, Value, Vec<InterceptedToolCall>), String> {
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>, Vec<AgentInteraction>), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
         // Subscribe to supervisor events BEFORE spawning the agent
@@ -608,6 +608,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
 
         let mut intercepted_calls: Vec<InterceptedToolCall> = Vec::new();
+        let mut agent_interactions: Vec<AgentInteraction> = Vec::new();
 
         tracing::info!(
             %agent_id,
@@ -643,7 +644,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                         "result": result,
                         "status": "completed",
                     });
-                    return Ok((agent_id, val, intercepted_calls));
+                    return Ok((agent_id, val, intercepted_calls, agent_interactions));
                 }
                 // Capture shadow-mode tool interceptions from the agent
                 Ok(SupervisorEvent::AgentOutput {
@@ -664,15 +665,32 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                     agent_id: ref aid,
                     event: hive_contracts::ReasoningEvent::QuestionAsked {
                         ref request_id,
+                        ref text,
                         ref choices,
+                        ref allow_freeform,
                         ..
                     },
                 }) if *aid == agent_id && auto_respond => {
+                    let auto_answer = if choices.is_empty() {
+                        "proceed".to_string()
+                    } else {
+                        choices[0].clone()
+                    };
                     tracing::info!(
                         agent_id = %aid,
                         request_id = %request_id,
+                        answer = %auto_answer,
                         "auto-responding to agent question in test mode"
                     );
+                    agent_interactions.push(AgentInteraction {
+                        kind: "ask_user".to_string(),
+                        details: json!({
+                            "question": text,
+                            "choices": choices,
+                            "allow_freeform": allow_freeform,
+                            "auto_response": auto_answer,
+                        }),
+                    });
                     let payload = if choices.is_empty() {
                         hive_contracts::InteractionResponsePayload::Answer {
                             selected_choice: None,
@@ -703,14 +721,26 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                     agent_id: ref aid,
                     event: hive_contracts::ReasoningEvent::UserInteractionRequired {
                         ref request_id,
-                        ..
+                        ref tool_id,
+                        ref input,
+                        ref reason,
                     },
                 }) if *aid == agent_id && auto_respond => {
                     tracing::info!(
                         agent_id = %aid,
                         request_id = %request_id,
+                        tool_id = %tool_id,
                         "auto-approving tool in test mode"
                     );
+                    agent_interactions.push(AgentInteraction {
+                        kind: "tool_approval".to_string(),
+                        details: json!({
+                            "tool_id": tool_id,
+                            "input": input,
+                            "reason": reason,
+                            "auto_approved": true,
+                        }),
+                    });
                     let response = hive_contracts::UserInteractionResponse {
                         request_id: request_id.clone(),
                         payload: hive_contracts::InteractionResponsePayload::ToolApproval {

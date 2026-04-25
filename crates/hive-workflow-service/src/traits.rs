@@ -9,6 +9,14 @@ pub struct InterceptedToolCall {
     pub input: Value,
 }
 
+/// An agent interaction that was auto-responded to during a test run.
+#[derive(Debug, Clone)]
+pub struct AgentInteraction {
+    /// `"ask_user"` or `"tool_approval"`
+    pub kind: String,
+    pub details: Value,
+}
+
 /// Extension trait for executing tools within workflows.
 /// Implemented in hive-api to avoid circular dependencies.
 #[async_trait]
@@ -79,7 +87,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         agent_name: Option<&str>,
         shadow_mode: bool,
         auto_respond: bool,
-    ) -> Result<(String, Value, Vec<InterceptedToolCall>), String>;
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>, Vec<AgentInteraction>), String>;
 
     /// Signal an agent or chat session.
     async fn signal_agent(&self, target: &SignalTarget, content: &str) -> Result<Value, String>;

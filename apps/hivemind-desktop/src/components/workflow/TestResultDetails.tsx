@@ -24,6 +24,9 @@ function statusColor(status: string): string {
 }
 
 function kindLabel(kind: string): string {
+  if (kind === 'ask_user') return '💬 ask user';
+  if (kind === 'tool_approval') return '🔐 tool approval';
+  if (kind === 'tool_call') return '🔧 tool call';
   return kind.replace(/_/g, ' ');
 }
 
@@ -35,8 +38,12 @@ function formatJson(val: unknown): string {
 
 function summarizeDetails(details: Record<string, unknown>): string {
   const toolId = details.tool_id as string | undefined;
-  const agentId = details.agent_id as string | undefined;
+  const question = details.question as string | undefined;
+  const autoResponse = details.auto_response as string | undefined;
+  if (question) return question.length > 80 ? question.slice(0, 80) + '…' : question;
+  if (toolId && autoResponse) return `${toolId} → auto-approved`;
   if (toolId) return toolId;
+  const agentId = details.agent_id as string | undefined;
   if (agentId) return agentId;
   const keys = Object.keys(details);
   if (keys.length === 0) return '—';
