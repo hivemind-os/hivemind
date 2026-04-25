@@ -2255,12 +2255,12 @@ impl LoopStrategy for CodeActStrategy {
 
             // ── Build CodeAct system prompt supplement ────────────────
             let has_persistent_session = context.session_registry.is_some();
+            let ca_cfg = &context.code_act_config;
             let code_act_instructions =
-                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session);
+                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network);
 
             // ── Initialize the code executor ─────────────────────────
             // Build executor config from the CodeActConfig on the context.
-            let ca_cfg = &context.code_act_config;
             let session_id = context.conversation.session_id.clone();
             let using_registry = context.session_registry.is_some();
 

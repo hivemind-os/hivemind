@@ -16,10 +16,14 @@ use hive_code_executor::{BridgedToolInfo, CodeActToolMode};
 ///
 /// When `persistent` is true (session registry available), the prompt mentions
 /// state persists across code blocks. Otherwise it says each block runs fresh.
+///
+/// When `allow_network` is true, the prompt tells the LLM that network access
+/// (urllib, http.client, socket) is available.
 pub fn build_code_act_instructions(
     bridged_tools: &[BridgedToolInfo],
     native_tool_ids: &[String],
     persistent: bool,
+    allow_network: bool,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -63,6 +67,11 @@ pub fn build_code_act_instructions(
     }
 
     parts.push(OBSERVATION_FORMAT.to_string());
+
+    if allow_network {
+        parts.push(NETWORK_ACCESS.to_string());
+    }
+
     parts.push(COMPLETION_RULES.to_string());
 
     parts.join("\n")
@@ -153,7 +162,9 @@ print(result)
 - Use `print()` to output results — printed output appears as observations.
 - You can write multiple code blocks in a single response; they execute sequentially.
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
-- You may also use standard Python libraries (json, os, pathlib, re, math, etc.).
+- Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
+
+**Important:** Act directly to accomplish the user's request. Write and execute code immediately — do not ask the user what to do or present a menu of options.
 "#;
 
 const CODE_ACT_HEADER_ONESHOT: &str = r#"
@@ -172,7 +183,9 @@ print(result)
 - Use `print()` to output results — printed output appears as observations.
 - You can write multiple code blocks in a single response; they execute sequentially within that message.
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
-- You may also use standard Python libraries (json, os, pathlib, re, math, etc.).
+- Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
+
+**Important:** Act directly to accomplish the user's request. Write and execute code immediately — do not ask the user what to do or present a menu of options.
 "#;
 
 const OBSERVATION_FORMAT: &str = r#"
@@ -202,6 +215,18 @@ When you have finished the task:
 - A response with **no code blocks and no tool calls** signals that you are done.
 "#;
 
+const NETWORK_ACCESS: &str = r#"
+## Network Access
+
+Your Python environment has **full network access**. You can:
+- Fetch URLs using `urllib.request` (e.g., `urllib.request.urlopen(url).read()`)
+- Make HTTP requests using `http.client`
+- Use sockets via the `socket` module
+- Download files, call APIs, scrape web pages
+
+Use network capabilities directly when the task requires fetching data from the internet.
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +254,7 @@ mod tests {
         ];
 
         let native_ids = vec!["core.ask_user".to_string()];
-        let prompt = build_code_act_instructions(&tools, &native_ids, true);
+        let prompt = build_code_act_instructions(&tools, &native_ids, true, false);
 
         assert!(prompt.contains("filesystem_read(path: str)"));
         assert!(prompt.contains("Read a file"));
@@ -240,7 +265,7 @@ mod tests {
 
     #[test]
     fn instructions_with_no_tools() {
-        let prompt = build_code_act_instructions(&[], &[], true);
+        let prompt = build_code_act_instructions(&[], &[], true, false);
         assert!(prompt.contains("persistent Python environment"));
         assert!(!prompt.contains("Available Python Functions"));
         assert!(!prompt.contains("Structured Tool Calls"));
@@ -248,7 +273,7 @@ mod tests {
 
     #[test]
     fn oneshot_prompt_does_not_mention_persistence() {
-        let prompt = build_code_act_instructions(&[], &[], false);
+        let prompt = build_code_act_instructions(&[], &[], false, false);
         assert!(prompt.contains("fresh environment"));
         assert!(!prompt.contains("persistent Python environment"));
     }
@@ -275,5 +300,19 @@ mod tests {
         assert!(sig.contains("path: str"));
         assert!(sig.contains("content: str"));
         assert!(sig.contains("append: bool = None"));
+    }
+
+    #[test]
+    fn network_access_included_when_enabled() {
+        let prompt = build_code_act_instructions(&[], &[], true, true);
+        assert!(prompt.contains("full network access"));
+        assert!(prompt.contains("urllib.request"));
+    }
+
+    #[test]
+    fn network_access_excluded_when_disabled() {
+        let prompt = build_code_act_instructions(&[], &[], true, false);
+        assert!(!prompt.contains("Network Access"));
+        assert!(!prompt.contains("urllib"));
     }
 }
