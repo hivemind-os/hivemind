@@ -274,7 +274,16 @@ impl SubprocessExecutor {
         .await;
 
         match result {
-            Ok(inner) => inner,
+            Ok(inner) => {
+                // If the process exited unexpectedly (EOF on stdout), clear
+                // the guard so is_alive() returns false and recovery kicks in.
+                if let Err(ExecutorError::ExecutionFailed(ref msg)) = inner {
+                    if msg.contains("exited unexpectedly") || msg.contains("failed to read stdout") {
+                        *guard = None;
+                    }
+                }
+                inner
+            }
             Err(_) => {
                 // Timeout — kill the subprocess and mark as error
                 if let Some(ref mut proc) = guard.as_mut() {
@@ -307,7 +316,10 @@ impl SubprocessExecutor {
                 .arg(&wrapper)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+                // Redirect stderr to null — we capture Python stderr via StringIO
+                // in the wrapper. Piping without reading causes deadlocks when
+                // native code (e.g. SSL/urllib) writes to the C stderr fd.
+                .stderr(Stdio::null());
             if let Some(ref cwd) = config.working_directory {
                 cmd.current_dir(cwd);
             }
@@ -383,8 +395,26 @@ impl CodeExecutor for SubprocessExecutor {
     }
 
     async fn is_alive(&self) -> bool {
-        let guard = self.child.lock().await;
-        guard.is_some()
+        let mut guard = self.child.lock().await;
+        match guard.as_mut() {
+            None => false,
+            Some(proc) => {
+                // Check if the child process has actually exited
+                match proc.child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process has exited — clear the guard so reset() can respawn
+                        *guard = None;
+                        false
+                    }
+                    Ok(None) => true, // Still running
+                    Err(_) => {
+                        // Can't query status — assume dead
+                        *guard = None;
+                        false
+                    }
+                }
+            }
+        }
     }
 }
 

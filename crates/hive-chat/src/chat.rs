@@ -6504,7 +6504,7 @@ impl ChatService {
                     personas,
                     current_agent_id: None,
                     parent_agent_id: None,
-                    workspace_path: None,
+                    workspace_path: if workspace_path.is_empty() { None } else { Some(PathBuf::from(&workspace_path)) },
                     keep_alive: false,
                     session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },

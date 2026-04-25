@@ -228,21 +228,11 @@ fn json_type_to_python(ty: &str) -> &str {
 }
 
 /// Richer type hint that inspects the full property schema, e.g. array items.
+/// Uses only basic type names (no subscripts like list[str]) for Python 3.6+ compat.
 fn json_type_to_python_rich(prop: &Value) -> &'static str {
     let ty = prop.get("type").and_then(|t| t.as_str()).unwrap_or("");
     match ty {
-        "array" => {
-            if let Some(items) = prop.get("items") {
-                match items.get("type").and_then(|t| t.as_str()) {
-                    Some("string") => return "list[str]",
-                    Some("number") => return "list[float]",
-                    Some("integer") => return "list[int]",
-                    Some("boolean") => return "list[bool]",
-                    _ => {}
-                }
-            }
-            "list"
-        }
+        "array" => "list",
         "string" => "str",
         "number" => "float",
         "integer" => "int",
