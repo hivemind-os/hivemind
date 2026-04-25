@@ -5,11 +5,13 @@
 //! idle reaping, and LRU eviction.
 
 use crate::executor::{CodeExecutor, ExecutorConfig, ExecutorError};
-use crate::subprocess::SubprocessExecutor;
+use crate::wasm_executor::WasmExecutor;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use wasmtime::{Engine, Module};
 
 /// Configuration for a code execution session.
 #[derive(Debug, Clone)]
@@ -29,6 +31,14 @@ impl Default for SessionConfig {
     }
 }
 
+/// Shared resources for WASM executor creation (engine + compiled module).
+/// Created once and shared across all sessions for efficiency.
+pub struct WasmRuntime {
+    pub engine: Arc<Engine>,
+    pub module: Arc<Module>,
+    pub stdlib_dir: PathBuf,
+}
+
 /// A single code execution session tied to a conversation.
 pub struct Session {
     pub id: String,
@@ -38,9 +48,32 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new session with a subprocess-based executor.
+    /// Create a new session with a WASM-sandboxed executor.
+    pub async fn new_wasm(
+        id: String,
+        config: SessionConfig,
+        runtime: &WasmRuntime,
+    ) -> Result<Self, ExecutorError> {
+        let executor = WasmExecutor::with_shared(
+            config.executor,
+            Arc::clone(&runtime.engine),
+            Arc::clone(&runtime.module),
+            runtime.stdlib_dir.clone(),
+        );
+        // Spawn the initial WASM instance
+        executor.ensure_instance().await?;
+
+        Ok(Self {
+            id,
+            executor: Arc::new(executor),
+            last_activity: Mutex::new(Instant::now()),
+            idle_timeout: config.idle_timeout,
+        })
+    }
+
+    /// Create a new session with a subprocess-based executor (fallback).
     pub async fn new_subprocess(id: String, config: SessionConfig) -> Result<Self, ExecutorError> {
-        let executor = SubprocessExecutor::new(config.executor).await?;
+        let executor = crate::subprocess::SubprocessExecutor::new(config.executor).await?;
         Ok(Self {
             id,
             executor: Arc::new(executor),
@@ -77,14 +110,32 @@ pub struct SessionRegistry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     default_config: SessionConfig,
     max_sessions: usize,
+    /// Shared WASM runtime (None = fallback to subprocess).
+    wasm_runtime: Option<Arc<WasmRuntime>>,
 }
 
 impl SessionRegistry {
-    pub fn new(default_config: SessionConfig, max_sessions: usize) -> Self {
+    /// Create a registry that uses WASM-sandboxed executors.
+    pub fn new_wasm(
+        default_config: SessionConfig,
+        max_sessions: usize,
+        runtime: Arc<WasmRuntime>,
+    ) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             default_config,
             max_sessions,
+            wasm_runtime: Some(runtime),
+        }
+    }
+
+    /// Create a registry that uses subprocess executors (fallback).
+    pub fn new_subprocess(default_config: SessionConfig, max_sessions: usize) -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            default_config,
+            max_sessions,
+            wasm_runtime: None,
         }
     }
 
@@ -102,11 +153,20 @@ impl SessionRegistry {
         // Slow path: create a new session
         self.evict_if_needed().await;
 
-        let session = Session::new_subprocess(
-            session_id.to_string(),
-            self.default_config.clone(),
-        )
-        .await?;
+        let session = if let Some(ref runtime) = self.wasm_runtime {
+            Session::new_wasm(
+                session_id.to_string(),
+                self.default_config.clone(),
+                runtime,
+            )
+            .await?
+        } else {
+            Session::new_subprocess(
+                session_id.to_string(),
+                self.default_config.clone(),
+            )
+            .await?
+        };
         let session = Arc::new(session);
 
         let mut sessions = self.sessions.lock();
@@ -114,6 +174,7 @@ impl SessionRegistry {
         tracing::info!(
             session_id = session_id,
             active_sessions = sessions.len(),
+            backend = if self.wasm_runtime.is_some() { "wasm" } else { "subprocess" },
             "CodeAct session created"
         );
 
@@ -226,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_tracks_count() {
-        let registry = SessionRegistry::new(SessionConfig::default(), 10);
+        let registry = SessionRegistry::new_subprocess(SessionConfig::default(), 10);
         assert_eq!(registry.active_count(), 0);
     }
 }

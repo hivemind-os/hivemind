@@ -2113,7 +2113,7 @@ impl LoopStrategy for CodeActStrategy {
             use crate::code_extraction::extract_python_blocks;
             use hive_code_executor::{
                 BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutorConfig, Language,
-                SubprocessExecutor,
+                SubprocessExecutor, WasmExecutor,
             };
 
             // ── Route the model ──────────────────────────────────────
@@ -2178,11 +2178,58 @@ impl LoopStrategy for CodeActStrategy {
                 build_code_act_instructions(&bridged_tools, &native_tool_ids);
 
             // ── Initialize the code executor ─────────────────────────
-            let executor = SubprocessExecutor::new(ExecutorConfig::default())
-                .await
-                .map_err(|e| {
-                    simple_model_error(format!("failed to start code executor: {e}"))
-                })?;
+            // Try WASM-sandboxed executor first; fall back to subprocess if
+            // the WASM binary isn't available.
+            let executor: Arc<dyn CodeExecutor> = {
+                let exec_config = ExecutorConfig::default();
+                match (
+                    std::env::var("PYTHON_WASM_PATH"),
+                    std::env::var("PYTHON_WASM_STDLIB"),
+                ) {
+                    (Ok(wasm_path), Ok(stdlib_path)) => {
+                        let wasm_path = std::path::PathBuf::from(&wasm_path);
+                        let stdlib_path = std::path::PathBuf::from(&stdlib_path);
+                        if wasm_path.exists() && stdlib_path.exists() {
+                            match WasmExecutor::new(exec_config.clone(), &wasm_path, &stdlib_path)
+                                .await
+                            {
+                                Ok(exec) => {
+                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor");
+                                    Arc::new(exec)
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "WASM executor failed to initialize, falling back to subprocess"
+                                    );
+                                    Arc::new(SubprocessExecutor::new(exec_config).await.map_err(
+                                        |e| {
+                                            simple_model_error(format!(
+                                                "failed to start code executor: {e}"
+                                            ))
+                                        },
+                                    )?)
+                                }
+                            }
+                        } else {
+                            tracing::info!(
+                                "CodeAct: WASM binary not found, using subprocess executor"
+                            );
+                            Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
+                                simple_model_error(format!("failed to start code executor: {e}"))
+                            })?)
+                        }
+                    }
+                    _ => {
+                        tracing::info!(
+                            "CodeAct: PYTHON_WASM_PATH/PYTHON_WASM_STDLIB not set, using subprocess executor"
+                        );
+                        Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
+                            simple_model_error(format!("failed to start code executor: {e}"))
+                        })?)
+                    }
+                }
+            };
 
             // Inject the tool bridge code into the Python session
             let bridge_code =
