@@ -4823,6 +4823,11 @@ impl ChatService {
         self.bot_service.has_bot_supervisor()
     }
 
+    /// Returns the base directory where per-bot workspaces are created.
+    pub fn bot_workspace(&self) -> &std::path::Path {
+        self.bot_service.bot_workspace()
+    }
+
     pub async fn shutdown_bot_supervisor(&self) {
         self.bot_service.shutdown_bot_supervisor().await
     }
@@ -11584,6 +11589,7 @@ mod tests {
             permission_rules: vec![],
             tool_limits: None,
             persona_id: None,
+            shadow_mode: false,
         }
     }
 

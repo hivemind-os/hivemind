@@ -246,6 +246,11 @@ impl BotService {
         self.bot_supervisor.try_read().map(|g| g.is_some()).unwrap_or(false)
     }
 
+    /// Returns the base directory where per-bot workspaces are created.
+    pub fn bot_workspace(&self) -> &std::path::Path {
+        &self.bot_workspace
+    }
+
     pub async fn shutdown_bot_supervisor(&self) {
         let mut guard = self.bot_supervisor.write().await;
         if let Some(sup) = guard.take() {
@@ -626,6 +631,7 @@ impl BotService {
                 ..Default::default()
             }),
             persona_id: None,
+            shadow_mode: false,
         };
 
         self.launch_bot(config).await?;

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use hive_agents::{
-    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole, BotConfig,
+    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole,
     SupervisorEvent,
 };
 use hive_chat::ChatService;
@@ -420,33 +420,71 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
 
         // No workspace and no session → launch as a standalone bot with its
         // own per-bot workspace directory.
-        let config = BotConfig {
-            id: String::new(),
-            friendly_name: agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name),
+        // Use the bot supervisor directly (like the workspace path) so we
+        // can pass shadow_mode correctly. BotConfig.to_agent_spec() does
+        // not support shadow_mode.
+        let supervisor = chat
+            .get_or_create_bot_supervisor()
+            .await
+            .map_err(|e| format!("get bot supervisor: {e}"))?;
+
+        let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+        let agent_id = format!("bot-{suffix}");
+
+        let agent_perms = if permission_rules.is_empty() {
+            None
+        } else {
+            Some(Arc::new(parking_lot::Mutex::new(
+                hive_contracts::SessionPermissions::with_rules(permission_rules),
+            )))
+        };
+
+        let display_name =
+            agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name);
+
+        let spec = hive_agents::AgentSpec {
+            id: agent_id.clone(),
+            name: display_name.clone(),
+            friendly_name: display_name,
             description: persona.description.clone(),
-            avatar,
-            color: persona.color.clone(),
+            role: AgentRole::Custom(persona.id.clone()),
             model: persona.preferred_models.as_ref().and_then(|v| v.first().cloned()),
             preferred_models: persona.preferred_models.clone(),
             loop_strategy: Some(persona.loop_strategy.clone()),
             tool_execution_mode: Some(persona.tool_execution_mode),
             system_prompt,
-            launch_prompt: task.to_string(),
             allowed_tools: persona.allowed_tools.clone(),
+            avatar,
+            color: persona.color.clone(),
             data_class: hive_classification::DataClass::Public,
-            role: AgentRole::Custom(persona.id.clone()),
-            mode: hive_agents::BotMode::OneShot,
-            active: false,
-            created_at: String::new(),
-            timeout_secs,
-            permission_rules,
+            keep_alive: false,
+            idle_timeout_secs: None,
             tool_limits: None,
             persona_id: Some(persona.id.clone()),
+            workflow_managed: true,
+            shadow_mode,
         };
 
-        let summary = chat.launch_bot(config).await.map_err(|e| format!("launch bot: {e}"))?;
+        // Create a per-agent workspace under the bots directory.
+        let agent_workspace = chat.bot_workspace().join(&agent_id);
+        let _ = std::fs::create_dir_all(&agent_workspace);
 
-        Ok(summary.config.id.clone())
+        supervisor
+            .spawn_agent(spec, None, None, agent_perms, Some(agent_workspace))
+            .await
+            .map_err(|e| format!("spawn agent on bot supervisor: {e}"))?;
+
+        if !task.is_empty() {
+            supervisor
+                .send_to_agent(
+                    &agent_id,
+                    AgentMessage::Task { content: task.to_string(), from: None },
+                )
+                .await
+                .map_err(|e| format!("send task to agent: {e}"))?;
+        }
+
+        Ok(agent_id)
     }
 
     async fn wait_for_agent(

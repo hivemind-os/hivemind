@@ -205,7 +205,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].passed, "Test should pass: {:?}", results[0].failures);
     assert!(results[0].failures.is_empty());
@@ -270,7 +270,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     // Shadow mode intercepts side-effecting tool with synthetic success output,
     // so workflow completes. The test expected "completed" and that's what happens.
@@ -335,7 +335,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(!results[0].passed);
     assert_eq!(results[0].failures[0].expectation, "status");
@@ -387,7 +387,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(!results[0].passed);
     let out_fail = results[0].failures.iter().find(|f| f.expectation == "output").unwrap();
@@ -454,7 +454,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].passed, "Failures: {:?}", results[0].failures);
 
@@ -530,7 +530,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].passed, "Failures: {:?}", results[0].failures);
 }
@@ -591,7 +591,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].passed, "Failures: {:?}", results[0].failures);
 }
@@ -650,7 +650,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 3);
 
     // pass-case should pass
@@ -759,7 +759,7 @@ steps:
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     assert!(def.tests.is_empty());
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert!(results.is_empty());
 }
 
@@ -805,7 +805,7 @@ tests:
 "#;
     let def: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
 
-    let results = run_all_tests(&engine, &def, false).await.unwrap();
+    let results = run_all_tests(&engine, &def, false, None).await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(!results[0].passed);
     let fail = &results[0].failures[0];

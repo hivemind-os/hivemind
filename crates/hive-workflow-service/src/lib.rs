@@ -1300,7 +1300,17 @@ impl WorkflowService {
                 })
                 .await;
 
-            let result = hive_workflow::run_test_case(engine, &def, tc, auto_respond).await?;
+            let result = {
+                // Create a per-test workspace so agents spawned during the
+                // test have a workspace_path (and thus use the AgentSpec path
+                // that correctly propagates shadow_mode).
+                let ws = self.workspaces_base_dir.as_ref().map(|base| {
+                    let dir = base.join(format!("test-{}", uuid::Uuid::new_v4())).join("workspace");
+                    let _ = std::fs::create_dir_all(&dir);
+                    dir.to_string_lossy().into_owned()
+                });
+                hive_workflow::run_test_case(engine, &def, tc, auto_respond, ws).await?
+            };
 
             // Emit "test completed" progress event.
             engine

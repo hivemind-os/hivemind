@@ -17,10 +17,11 @@ pub async fn run_all_tests(
     engine: &WorkflowEngine,
     definition: &WorkflowDefinition,
     auto_respond: bool,
+    workspace_path: Option<String>,
 ) -> Result<Vec<TestResult>, WorkflowError> {
     let mut results = Vec::with_capacity(definition.tests.len());
     for tc in &definition.tests {
-        results.push(run_test_case(engine, definition, tc, auto_respond).await?);
+        results.push(run_test_case(engine, definition, tc, auto_respond, workspace_path.clone()).await?);
     }
     Ok(results)
 }
@@ -31,6 +32,7 @@ pub async fn run_test_case(
     definition: &WorkflowDefinition,
     test_case: &WorkflowTestCase,
     auto_respond: bool,
+    workspace_path: Option<String>,
 ) -> Result<TestResult, WorkflowError> {
     let start = std::time::Instant::now();
 
@@ -43,6 +45,7 @@ pub async fn run_test_case(
             test_case.trigger_step_id.clone(),
             test_case.shadow_outputs.clone(),
             auto_respond,
+            workspace_path,
         )
         .await?;
 

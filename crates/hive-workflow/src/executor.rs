@@ -429,6 +429,7 @@ impl WorkflowEngine {
         trigger_step_id: Option<String>,
         shadow_overrides: HashMap<String, serde_json::Value>,
         auto_respond: bool,
+        workspace_path: Option<String>,
     ) -> Result<i64, WorkflowError> {
         let mut instance = self
             .setup_instance(
@@ -438,7 +439,7 @@ impl WorkflowEngine {
                 None,
                 vec![],
                 trigger_step_id,
-                None,
+                workspace_path,
                 ExecutionMode::Shadow,
             )
             .await?;

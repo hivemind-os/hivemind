@@ -1206,6 +1206,7 @@ mod tests {
             permission_rules: vec![],
             tool_limits: None,
             persona_id: None,
+            shadow_mode: false,
         };
 
         let spec = config.to_agent_spec();
