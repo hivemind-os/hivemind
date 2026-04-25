@@ -845,6 +845,23 @@ pub enum LoopEvent {
         tool_name: Option<String>,
         arguments_so_far: String,
     },
+    /// CodeAct: a Python code block is being executed or has completed.
+    CodeExecution {
+        code: String,
+        output: String,
+        is_error: bool,
+        phase: CodeExecutionPhase,
+    },
+}
+
+/// Phase of a CodeAct code execution event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeExecutionPhase {
+    /// Code execution has started (output is empty).
+    Started,
+    /// Code execution has completed (output contains stdout/stderr).
+    Completed,
 }
 
 #[derive(Debug, Error)]
@@ -2069,11 +2086,488 @@ impl LoopStrategy for PlanThenExecuteStrategy {
     }
 }
 
+// ── CodeAct Strategy ─────────────────────────────────────────────
+//
+// Hybrid agentic loop: the LLM can produce both native structured tool calls
+// AND executable Python code blocks. Native tool calls (ask_user, delegate_task,
+// workflow.*) are dispatched via the ToolRegistry as usual. Python code blocks
+// are extracted and executed in a persistent WASM-sandboxed Pyodide interpreter.
+//
+// The loop terminates when the LLM produces a response with no tool calls and
+// no executable code blocks.
+
+#[derive(Default)]
+pub struct CodeActStrategy;
+
+impl LoopStrategy for CodeActStrategy {
+    fn run<'a>(
+        &'a self,
+        context: LoopContext,
+        model_router: Arc<ModelRouter>,
+        middleware: &'a [Arc<dyn LoopMiddleware>],
+        event_tx: Option<tokio::sync::mpsc::Sender<LoopEvent>>,
+        interaction_gate: Option<Arc<UserInteractionGate>>,
+    ) -> BoxFuture<'a, Result<LoopResult, LoopError>> {
+        Box::pin(async move {
+            use crate::code_act_prompt::build_code_act_instructions;
+            use crate::code_extraction::extract_python_blocks;
+            use hive_code_executor::{
+                BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutorConfig, Language,
+                SubprocessExecutor,
+            };
+
+            // ── Route the model ──────────────────────────────────────
+            let routing_request = RoutingRequest {
+                prompt: context.conversation.prompt.clone(),
+                required_capabilities: context.routing.required_capabilities.clone(),
+                preferred_models: context.routing.preferred_models.clone(),
+            };
+            let decision = if let Some(decision) = context.routing.routing_decision.clone() {
+                decision
+            } else {
+                model_router
+                    .route(&routing_request)
+                    .map_err(|error| LoopError::ModelRouting(error.to_string()))?
+            };
+
+            let mut context = context;
+            context.routing.routing_decision = Some(decision.clone());
+
+            let use_multi_turn = model_router
+                .provider_kind(&decision.selected.provider_id)
+                .map(|k| k.supports_tool_history())
+                .unwrap_or(false);
+
+            tracing::info!(
+                provider_id = %decision.selected.provider_id,
+                model = %decision.selected.model,
+                use_multi_turn,
+                "CodeAct loop starting"
+            );
+
+            // ── Classify tools: native vs bridged ────────────────────
+            let all_tools = context.tools_ctx.tools.list_definitions();
+            let mut bridged_tools = Vec::new();
+            let mut native_tool_ids = Vec::new();
+            let mut native_tool_defs = Vec::new();
+
+            for def in &all_tools {
+                let mode = hive_code_executor::tool_bridge::default_tool_mode(&def.id);
+                match mode {
+                    CodeActToolMode::Native => {
+                        native_tool_ids.push(def.id.clone());
+                        native_tool_defs.push(def.clone());
+                    }
+                    CodeActToolMode::Bridged | CodeActToolMode::Both => {
+                        bridged_tools.push(BridgedToolInfo {
+                            tool_id: def.id.clone(),
+                            description: def.description.clone(),
+                            input_schema: def.input_schema.clone(),
+                            mode,
+                        });
+                        if mode == CodeActToolMode::Both {
+                            native_tool_ids.push(def.id.clone());
+                            native_tool_defs.push(def.clone());
+                        }
+                    }
+                }
+            }
+
+            // ── Build CodeAct system prompt supplement ────────────────
+            let code_act_instructions =
+                build_code_act_instructions(&bridged_tools, &native_tool_ids);
+
+            // ── Initialize the code executor ─────────────────────────
+            let executor = SubprocessExecutor::new(ExecutorConfig::default())
+                .await
+                .map_err(|e| {
+                    simple_model_error(format!("failed to start code executor: {e}"))
+                })?;
+
+            // Inject the tool bridge code into the Python session
+            let bridge_code =
+                hive_code_executor::tool_bridge::generate_bridge_code(&bridged_tools);
+            if !bridge_code.trim().is_empty() {
+                let init_result = executor
+                    .execute(&bridge_code, Language::Python)
+                    .await
+                    .map_err(|e| {
+                        simple_model_error(format!("failed to initialize tool bridge: {e}"))
+                    })?;
+                if init_result.is_error {
+                    tracing::warn!(
+                        stderr = %init_result.stderr,
+                        "tool bridge initialization had errors"
+                    );
+                }
+            }
+
+            // ── Main loop ────────────────────────────────────────────
+            let mut prompt = context.conversation.prompt.clone();
+            let mut prompt_content_parts = context.conversation.prompt_content_parts.clone();
+            let mut tool_iterations = context.conversation.initial_tool_iterations;
+            let mut tool_history: Vec<CompletionMessage> = Vec::new();
+            let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
+
+            loop {
+                // Build the system prompt with CodeAct instructions appended
+                let system_prompt = if tool_iterations == 0 {
+                    format!("{prompt}\n\n{code_act_instructions}")
+                } else {
+                    prompt.clone()
+                };
+
+                let mut request = if use_multi_turn {
+                    let mut messages = context.conversation.history.clone();
+                    let user_msg = CompletionMessage {
+                        role: "user".into(),
+                        content: system_prompt.clone(),
+                        content_parts: std::mem::take(&mut prompt_content_parts),
+                        blocks: vec![],
+                    };
+                    messages.push(user_msg);
+                    messages.extend(tool_history.iter().cloned());
+                    CompletionRequest {
+                        prompt: String::new(),
+                        prompt_content_parts: vec![],
+                        messages,
+                        required_capabilities: context.routing.required_capabilities.clone(),
+                        preferred_models: context.routing.preferred_models.clone(),
+                        tools: native_tool_defs.clone(),
+                    }
+                } else {
+                    CompletionRequest {
+                        prompt: system_prompt.clone(),
+                        prompt_content_parts: std::mem::take(&mut prompt_content_parts),
+                        messages: context.conversation.history.clone(),
+                        required_capabilities: context.routing.required_capabilities.clone(),
+                        preferred_models: context.routing.preferred_models.clone(),
+                        tools: native_tool_defs.clone(),
+                    }
+                };
+
+                for hook in middleware {
+                    request = hook.before_model_call(&context, request)?;
+                }
+
+                // ── Call the model (streaming if event_tx is present) ──
+                let response = if let Some(ref tx) = event_tx {
+                    let router = Arc::clone(&model_router);
+                    let decision_clone = decision.clone();
+
+                    let _ = tx.try_send(LoopEvent::ModelLoading {
+                        provider_id: decision_clone.selected.provider_id.clone(),
+                        model: decision_clone.selected.model.clone(),
+                        tool_result_counts: HashMap::new(),
+                        estimated_tokens: Some(crate::token_budget::estimate_request_tokens(&request) as u32),
+                    });
+
+                    let retry_cb = |info: &RetryInfo| {
+                        let _ = tx.try_send(LoopEvent::ModelRetry {
+                            provider_id: info.provider_id.clone(),
+                            model: info.model.clone(),
+                            attempt: info.attempt,
+                            max_attempts: info.max_attempts,
+                            error_kind: format!("{:?}", info.error_kind).to_lowercase(),
+                            http_status: info.http_status,
+                            backoff_ms: info.backoff_ms,
+                        });
+                    };
+
+                    let (stream, actual_selection) = router
+                        .complete_stream_with_decision_and_callback(
+                            &request,
+                            &decision_clone,
+                            Some(&retry_cb),
+                        )
+                        .map_err(model_router_error_to_loop_error)?;
+
+                    if actual_selection != decision_clone.selected {
+                        let _ = tx.try_send(LoopEvent::ModelFallback {
+                            from_provider: decision_clone.selected.provider_id.clone(),
+                            from_model: decision_clone.selected.model.clone(),
+                            to_provider: actual_selection.provider_id.clone(),
+                            to_model: actual_selection.model.clone(),
+                        });
+                    }
+
+                    let mut content = String::new();
+                    let provider_id = actual_selection.provider_id.clone();
+                    let model = actual_selection.model.clone();
+                    let mut streamed_tool_calls = Vec::new();
+                    let mut token_filter = StreamingToolCallFilter::new();
+
+                    tokio::pin!(stream);
+                    let stream_cancelled;
+                    loop {
+                        let chunk_result =
+                            if let Some(ref token) = context.cancellation_token {
+                                tokio::select! {
+                                    biased;
+                                    _ = token.cancelled() => {
+                                        stream_cancelled = true;
+                                        break;
+                                    }
+                                    chunk = stream.next() => chunk,
+                                }
+                            } else {
+                                stream.next().await
+                            };
+                        match chunk_result {
+                            Some(Ok(chunk)) => {
+                                if !chunk.delta.is_empty() {
+                                    content.push_str(&chunk.delta);
+                                    let visible = token_filter.feed(&chunk.delta);
+                                    if !visible.is_empty() {
+                                        let _ = tx.try_send(LoopEvent::Token {
+                                            delta: visible,
+                                        });
+                                    }
+                                }
+                                if !chunk.tool_calls.is_empty() {
+                                    streamed_tool_calls.extend(chunk.tool_calls);
+                                }
+                            }
+                            Some(Err(e)) => {
+                                return Err(simple_model_error(format!("{:#}", e)))
+                            }
+                            None => {
+                                stream_cancelled = false;
+                                break;
+                            }
+                        }
+                    }
+                    if stream_cancelled {
+                        return Err(LoopError::Cancelled);
+                    }
+
+                    let remaining = token_filter.flush();
+                    if !remaining.is_empty() {
+                        let _ = tx.try_send(LoopEvent::Token { delta: remaining });
+                    }
+                    let _ = tx.try_send(LoopEvent::ModelDone {
+                        content: content.clone(),
+                        provider_id: provider_id.clone(),
+                        model: model.clone(),
+                    });
+
+                    CompletionResponse {
+                        provider_id,
+                        model,
+                        content,
+                        tool_calls: streamed_tool_calls,
+                    }
+                } else {
+                    let router = Arc::clone(&model_router);
+                    let decision_clone = decision.clone();
+                    let request_clone = request.clone();
+                    let blocking_future = tokio::task::spawn_blocking(move || {
+                        router.complete_with_decision(&request_clone, &decision_clone)
+                    });
+                    if let Some(ref token) = context.cancellation_token {
+                        tokio::select! {
+                            biased;
+                            _ = token.cancelled() => {
+                                return Err(LoopError::Cancelled);
+                            }
+                            result = blocking_future => {
+                                result
+                                    .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                                    .map_err(model_router_error_to_loop_error)?
+                            }
+                        }
+                    } else {
+                        blocking_future
+                            .await
+                            .map_err(|error| LoopError::JoinFailed(error.to_string()))?
+                            .map_err(model_router_error_to_loop_error)?
+                    }
+                };
+
+                let mut response = response;
+                for hook in middleware {
+                    response = hook.after_model_response(&context, response)?;
+                }
+
+                // ── Extract code blocks and native tool calls ────────
+                let code_blocks = extract_python_blocks(&response.content);
+                let native_calls: Vec<ToolCall> = if !response.tool_calls.is_empty() {
+                    response
+                        .tool_calls
+                        .iter()
+                        .map(|tc| ToolCall {
+                            tool_id: tc.name.clone(),
+                            input: tc.arguments.clone(),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+                tracing::info!(
+                    iteration = tool_iterations,
+                    code_blocks = code_blocks.len(),
+                    native_calls = native_calls.len(),
+                    "CodeAct: model response processed"
+                );
+
+                // If no code blocks and no native tool calls → done
+                if code_blocks.is_empty() && native_calls.is_empty() {
+                    let _ = executor.shutdown().await;
+                    if let Some(ref tx) = event_tx {
+                        let _ = tx.try_send(LoopEvent::Done {
+                            content: response.content.clone(),
+                            provider_id: response.provider_id.clone(),
+                            model: response.model.clone(),
+                        });
+                    }
+                    return Ok(LoopResult {
+                        content: response.content,
+                        provider_id: response.provider_id.clone(),
+                        model: response.model.clone(),
+                        decision: decision.clone(),
+                        preempted: false,
+                    });
+                }
+
+                // ── Budget check ─────────────────────────────────────
+                let action_count = code_blocks.len() + native_calls.len();
+                match budget.check(tool_iterations, action_count) {
+                    crate::tool_budget::BudgetDecision::Allow => {}
+                    crate::tool_budget::BudgetDecision::Extended {
+                        new_budget,
+                        extensions_granted,
+                    } => {
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.try_send(LoopEvent::BudgetExtended {
+                                new_budget,
+                                extensions_granted,
+                            });
+                        }
+                    }
+                    crate::tool_budget::BudgetDecision::HardStop { ceiling } => {
+                        let _ = executor.shutdown().await;
+                        return Err(LoopError::HardCeilingReached { ceiling });
+                    }
+                }
+
+                let mut observations = Vec::new();
+
+                // ── Execute code blocks ──────────────────────────────
+                for block in &code_blocks {
+                    if let Some(ref tx) = event_tx {
+                        let _ = tx.try_send(LoopEvent::CodeExecution {
+                            code: block.code.clone(),
+                            output: String::new(),
+                            is_error: false,
+                            phase: CodeExecutionPhase::Started,
+                        });
+                    }
+
+                    let exec_result = executor
+                        .execute(&block.code, Language::Python)
+                        .await;
+
+                    match exec_result {
+                        Ok(result) => {
+                            let observation = result.to_observation();
+                            tracing::debug!(
+                                is_error = result.is_error,
+                                duration_ms = result.duration_ms,
+                                "CodeAct: code block executed"
+                            );
+
+                            if let Some(ref tx) = event_tx {
+                                let _ = tx.try_send(LoopEvent::CodeExecution {
+                                    code: block.code.clone(),
+                                    output: observation.clone(),
+                                    is_error: result.is_error,
+                                    phase: CodeExecutionPhase::Completed,
+                                });
+                            }
+
+                            if result.is_error {
+                                observations.push(format!(
+                                    "[Code Execution Error]\n{}",
+                                    observation
+                                ));
+                            } else {
+                                observations.push(format!(
+                                    "[Code Execution Output]\n{}",
+                                    observation
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let err_msg = format!("[Code Execution Error]\n{e}");
+                            if let Some(ref tx) = event_tx {
+                                let _ = tx.try_send(LoopEvent::CodeExecution {
+                                    code: block.code.clone(),
+                                    output: err_msg.clone(),
+                                    is_error: true,
+                                    phase: CodeExecutionPhase::Completed,
+                                });
+                            }
+                            observations.push(err_msg);
+                        }
+                    }
+                }
+
+                // ── Execute native tool calls ────────────────────────
+                if !native_calls.is_empty() {
+                    let (tool_result_text, _journal_calls) = execute_tool_batch(
+                        &native_calls,
+                        &context,
+                        middleware,
+                        event_tx.as_ref(),
+                        interaction_gate.as_deref(),
+                        Some(&response.content),
+                    )
+                    .await;
+
+                    if !tool_result_text.is_empty() {
+                        observations.push(tool_result_text);
+                    }
+                }
+
+                // ── Feed observations back to the model ──────────────
+                let observation_text = observations.join("\n\n");
+
+                if use_multi_turn {
+                    // Add assistant message with the model's response
+                    tool_history.push(CompletionMessage {
+                        role: "assistant".into(),
+                        content: response.content.clone(),
+                        content_parts: vec![],
+                        blocks: vec![],
+                    });
+                    // Add observation as a "user" message
+                    tool_history.push(CompletionMessage {
+                        role: "user".into(),
+                        content: observation_text,
+                        content_parts: vec![],
+                        blocks: vec![],
+                    });
+                } else {
+                    // Legacy mode: append to prompt
+                    prompt.push_str(&format!(
+                        "\n\n<assistant>\n{}\n</assistant>\n\n<observation>\n{}\n</observation>\n",
+                        response.content, observation_text
+                    ));
+                }
+
+                tool_iterations += 1;
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StrategyKind {
     ReAct,
     Sequential,
     PlanThenExecute,
+    CodeAct,
 }
 
 impl StrategyKind {
@@ -2082,6 +2576,7 @@ impl StrategyKind {
             StrategyKind::ReAct => Arc::new(ReActStrategy),
             StrategyKind::Sequential => Arc::new(SequentialStrategy),
             StrategyKind::PlanThenExecute => Arc::new(PlanThenExecuteStrategy),
+            StrategyKind::CodeAct => Arc::new(CodeActStrategy),
         }
     }
 }
@@ -2107,6 +2602,7 @@ impl LoopExecutor {
             Some(ConfigLoopStrategy::React) => Arc::new(ReActStrategy),
             Some(ConfigLoopStrategy::Sequential) => Arc::new(SequentialStrategy),
             Some(ConfigLoopStrategy::PlanThenExecute) => Arc::new(PlanThenExecuteStrategy),
+            Some(ConfigLoopStrategy::CodeAct) => Arc::new(CodeActStrategy),
             None => Arc::clone(&self.strategy),
         }
     }

@@ -1,0 +1,32 @@
+[package]
+name = "hive-code-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "WASM-sandboxed Python code execution for CodeAct agent loops"
+
+[dependencies]
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "process", "io-util"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+parking_lot.workspace = true
+
+# WASM runtime — will be used for Pyodide sandboxing.
+# For the initial skeleton we define the traits and a subprocess-based
+# executor.  Wasmtime integration will be added as a feature gate once
+# the Pyodide WASM blob pipeline is set up.
+# wasmtime = { version = "29", optional = true }
+# wasmtime-wasi = { version = "29", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[features]
+default = []
+# Enable once Wasmtime + Pyodide integration is ready:
+# wasm = ["wasmtime", "wasmtime-wasi"]

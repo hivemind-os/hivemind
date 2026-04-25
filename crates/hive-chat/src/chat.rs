@@ -9320,6 +9320,13 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 input: serde_json::from_str(input).unwrap_or_else(|_| json!(input)),
             }
         }
+        LoopEvent::CodeExecution { code, output, is_error, phase: _ } => {
+            ReasoningEvent::CodeExecution {
+                code: code.clone(),
+                output: output.clone(),
+                is_error: *is_error,
+            }
+        }
     }
 }
 

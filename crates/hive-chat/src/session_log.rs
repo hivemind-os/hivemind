@@ -147,6 +147,12 @@ impl SessionLogger {
                 let preview = truncate(input, 300);
                 self.log_loop(&format!("TOOL_INTERCEPTED {tool_id} input={preview}"));
             }
+            LoopEvent::CodeExecution { code, output, is_error, .. } => {
+                let code_preview = truncate(code, 100);
+                let output_preview = truncate(output, 200);
+                let tag = if *is_error { "CODE_ERROR" } else { "CODE_EXEC" };
+                self.log_loop(&format!("{tag} code={code_preview} output={output_preview}"));
+            }
         }
     }
 
@@ -371,6 +377,15 @@ fn format_reasoning_event(event: &ReasoningEvent) -> String {
         ReasoningEvent::ToolCallIntercepted { tool_id, input } => {
             let input_str = serde_json::to_string(input).unwrap_or_default();
             format!("TOOL_INTERCEPTED {} input={}", tool_id, truncate(&input_str, 300))
+        }
+        ReasoningEvent::CodeExecution { code, output, is_error } => {
+            let code_preview = truncate(code, 100);
+            let output_preview = truncate(output, 200);
+            if *is_error {
+                format!("CODE_ERROR code={} output={}", code_preview, output_preview)
+            } else {
+                format!("CODE_EXEC code={} output={}", code_preview, output_preview)
+            }
         }
     }
 }

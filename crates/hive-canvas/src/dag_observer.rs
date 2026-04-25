@@ -147,6 +147,19 @@ impl DagObserver {
                 ));
                 events
             }
+            ReasoningEvent::CodeExecution { code, output, is_error } => {
+                // Treat code execution as a tool call in the DAG
+                let input = serde_json::json!({"code": code});
+                let output_val = serde_json::json!({"output": output});
+                let mut events =
+                    self.handle_tool_call_started(&"code_execution".to_string(), &input);
+                events.extend(self.handle_tool_call_completed(
+                    &"code_execution".to_string(),
+                    &output_val,
+                    *is_error,
+                ));
+                events
+            }
         }
     }
 

@@ -279,7 +279,7 @@ const App = () => {
   const [kgNewEdgeType, setKgNewEdgeType] = createSignal('');
 
   const [showDiagnostics, setShowDiagnostics] = createSignal(false);
-  const [settingsTab, setSettingsTab] = createSignal<'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search'>('general-appearance');
+  const [settingsTab, setSettingsTab] = createSignal<'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search' | 'code-act'>('general-appearance');
   const [showSetupWizard, setShowSetupWizard] = createSignal(false);
   const [showMemoriesDialog, setShowMemoriesDialog] = createSignal(false);
   const [showSessionPermsDialog, setShowSessionPermsDialog] = createSignal(false);

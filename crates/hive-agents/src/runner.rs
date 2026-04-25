@@ -914,6 +914,13 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 input: parse_json_or_text(&input),
             }
         }
+        LoopEvent::CodeExecution { code, output, is_error, phase: _ } => {
+            ReasoningEvent::CodeExecution {
+                code,
+                output,
+                is_error,
+            }
+        }
     }
 }
 

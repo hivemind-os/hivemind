@@ -754,6 +754,7 @@ export type HiveMindConfigData = {
     auto_approve_on_timeout_secs?: number | null;
   };
   web_search?: WebSearchConfig;
+  code_act?: { enabled: boolean; execution_timeout_secs: number; max_output_bytes: number; idle_timeout_secs: number; max_sessions: number; allow_network: boolean };
 };
 
 export type WebSearchConfig = {

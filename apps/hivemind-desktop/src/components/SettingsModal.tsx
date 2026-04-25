@@ -13,6 +13,7 @@ import ProvidersTab from './settings/ProvidersTab';
 import RecordingsTab from './settings/RecordingsTab';
 import CompactionTab from './settings/CompactionTab';
 import RuntimeTab from './settings/RuntimeTab';
+import CodeActTab from './settings/CodeActTab';
 import GeneralTab from './settings/GeneralTab';
 const ConnectorsTab = lazy(() => import('./ConnectorsTab'));
 const AuditViewer = lazy(() => import('./AuditViewer'));
@@ -40,7 +41,7 @@ import { extractFileQuantization } from '../types';
 import { parseModelMeta, displayModelName, isEmbeddingOnly, modelCapsToProviderCaps } from '../types';
 import { formatBytes, formatPayload, formatTime, mcpStatusClass } from '../utils';
 
-type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search' | 'plugins';
+type SettingsTab = 'general-appearance' | 'general-daemon' | 'general-recording' | 'providers' | 'security' | 'mcp' | 'local-models' | 'scheduler' | 'downloads' | 'tools' | 'personas' | 'compaction' | 'channels' | 'comm-audit' | 'afk' | 'python' | 'node' | 'web-search' | 'plugins' | 'code-act';
 type LocalModelView = 'library' | 'search' | 'hardware';
 
 interface SettingsCategory {
@@ -71,6 +72,7 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     { id: 'web-search', label: 'Web Search' },
     { id: 'python', label: 'Python' },
     { id: 'node', label: 'Node.js' },
+    { id: 'code-act', label: 'CodeAct Sandbox' },
   ]},
   { id: 'security', label: 'Security', tabs: [
     { id: 'security', label: 'Policies' },
@@ -1694,6 +1696,15 @@ const SettingsModal = (props: SettingsModalProps) => {
                     setEditConfig={setEditConfig}
                     configLoadingFallback={configLoadingFallback}
                     tab="node"
+                  />
+                </Show>
+
+                {/* ── CodeAct Sandbox ────────────────────────────────── */}
+                <Show when={localTab() === 'code-act'}>
+                  <CodeActTab
+                    editConfig={editConfig}
+                    setEditConfig={setEditConfig}
+                    configLoadingFallback={configLoadingFallback}
                   />
                 </Show>
               </div>
