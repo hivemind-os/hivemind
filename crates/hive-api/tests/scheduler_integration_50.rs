@@ -63,6 +63,7 @@ async fn boot() -> (String, Arc<Notify>, TempDir, Arc<SchedulerService>) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        hive_contracts::CodeActConfig::default(),
         None, // plugin_host
         None, // plugin_registry
     ));

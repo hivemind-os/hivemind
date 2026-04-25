@@ -1,5 +1,6 @@
 //! Core trait and types for code execution backends.
 
+use crate::tool_bridge::ExecutionOptions;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -128,7 +129,21 @@ pub trait CodeExecutor: Send + Sync {
     ///
     /// The execution happens in the context of the current session — previous
     /// variables, imports, and definitions are visible.
-    async fn execute(&self, code: &str, language: Language) -> Result<ExecutionResult, ExecutorError>;
+    async fn execute(&self, code: &str, language: Language) -> Result<ExecutionResult, ExecutorError> {
+        self.execute_with_tools(code, language, &ExecutionOptions::default()).await
+    }
+
+    /// Execute a code block with tool call support.
+    ///
+    /// When `options.tool_call_handler` is set, the Python code can call
+    /// bridged tool functions. Tool calls are intercepted in the output
+    /// stream and dispatched to the handler.
+    async fn execute_with_tools(
+        &self,
+        code: &str,
+        language: Language,
+        options: &ExecutionOptions<'_>,
+    ) -> Result<ExecutionResult, ExecutorError>;
 
     /// Reset the execution environment to a clean state.
     ///

@@ -1,6 +1,6 @@
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::{
-    infer_scope_with_workspace, InteractionKind, InteractionResponsePayload,
+    infer_scope_with_workspace, CodeActConfig, InteractionKind, InteractionResponsePayload,
     LoopStrategy as ConfigLoopStrategy, Persona, SessionPermissions, ToolExecutionMode,
     ToolLimitsConfig, UserInteractionResponse, WorkspaceClassification,
 };
@@ -461,6 +461,9 @@ pub struct LoopContext {
     /// Adaptive tool-call limits and stall detection config.
     /// Defaults to `ToolLimitsConfig::default()` if not explicitly set.
     pub tool_limits: ToolLimitsConfig,
+    /// CodeAct executor settings (timeouts, memory limits, network access).
+    /// Defaults to `CodeActConfig::default()` if not explicitly set.
+    pub code_act_config: CodeActConfig,
     /// When set, the loop checks this signal after each tool batch.
     /// If `true`, the loop yields early so the next queued message
     /// can be processed at the current checkpoint.
@@ -848,8 +851,11 @@ pub enum LoopEvent {
     /// CodeAct: a Python code block is being executed or has completed.
     CodeExecution {
         code: String,
-        output: String,
+        stdout: String,
+        stderr: String,
         is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
         phase: CodeExecutionPhase,
     },
 }
@@ -2096,6 +2102,48 @@ impl LoopStrategy for PlanThenExecuteStrategy {
 // The loop terminates when the LLM produces a response with no tool calls and
 // no executable code blocks.
 
+// ── BridgedToolCallHandler: dispatches tool calls from Python to the ToolRegistry ──
+
+/// Adapter that implements `ToolCallHandler` by dispatching to the `ToolRegistry`.
+/// This is how Python code calls host tools via the bridge protocol.
+struct BridgedToolCallHandler {
+    tools: Arc<ToolRegistry>,
+}
+
+#[async_trait::async_trait]
+impl hive_code_executor::ToolCallHandler for BridgedToolCallHandler {
+    async fn handle_tool_call(
+        &self,
+        request: hive_code_executor::ToolCallRequest,
+    ) -> hive_code_executor::ToolCallResponse {
+        let tool = match self.tools.get(&request.tool_id) {
+            Some(t) => t,
+            None => {
+                return hive_code_executor::ToolCallResponse {
+                    request_id: request.request_id,
+                    result: None,
+                    error: Some(format!("tool not found: {}", request.tool_id)),
+                    truncated: false,
+                };
+            }
+        };
+        match tool.execute(request.args.clone()).await {
+            Ok(result) => hive_code_executor::ToolCallResponse {
+                request_id: request.request_id,
+                result: Some(serde_json::json!(result.output)),
+                error: None,
+                truncated: false,
+            },
+            Err(e) => hive_code_executor::ToolCallResponse {
+                request_id: request.request_id,
+                result: None,
+                error: Some(e.to_string()),
+                truncated: false,
+            },
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct CodeActStrategy;
 
@@ -2112,8 +2160,8 @@ impl LoopStrategy for CodeActStrategy {
             use crate::code_act_prompt::build_code_act_instructions;
             use crate::code_extraction::extract_python_blocks;
             use hive_code_executor::{
-                BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutorConfig, Language,
-                SubprocessExecutor, WasmExecutor,
+                BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions,
+                ExecutorConfig, Language, SubprocessExecutor, WasmExecutor,
             };
 
             // ── Route the model ──────────────────────────────────────
@@ -2178,10 +2226,17 @@ impl LoopStrategy for CodeActStrategy {
                 build_code_act_instructions(&bridged_tools, &native_tool_ids);
 
             // ── Initialize the code executor ─────────────────────────
-            // Try WASM-sandboxed executor first; fall back to subprocess if
-            // the WASM binary isn't available.
+            // Build executor config from the CodeActConfig on the context.
+            let ca_cfg = &context.code_act_config;
             let executor: Arc<dyn CodeExecutor> = {
-                let exec_config = ExecutorConfig::default();
+                let exec_config = ExecutorConfig {
+                    execution_timeout_secs: ca_cfg.execution_timeout_secs,
+                    max_output_bytes: ca_cfg.max_output_bytes,
+                    memory_limit_mb: 256, // not yet in CodeActConfig
+                    working_directory: None,
+                    allow_network: ca_cfg.allow_network,
+                };
+                // Try WASM-sandboxed executor first; fall back to subprocess.
                 match (
                     std::env::var("PYTHON_WASM_PATH"),
                     std::env::var("PYTHON_WASM_STDLIB"),
@@ -2231,12 +2286,20 @@ impl LoopStrategy for CodeActStrategy {
                 }
             };
 
+            // ── Build tool call handler for Python→host tool bridge ───
+            let tool_handler = BridgedToolCallHandler {
+                tools: Arc::clone(&context.tools_ctx.tools),
+            };
+            let exec_options = ExecutionOptions {
+                tool_call_handler: Some(&tool_handler),
+            };
+
             // Inject the tool bridge code into the Python session
             let bridge_code =
                 hive_code_executor::tool_bridge::generate_bridge_code(&bridged_tools);
             if !bridge_code.trim().is_empty() {
                 let init_result = executor
-                    .execute(&bridge_code, Language::Python)
+                    .execute_with_tools(&bridge_code, Language::Python, &exec_options)
                     .await
                     .map_err(|e| {
                         simple_model_error(format!("failed to initialize tool bridge: {e}"))
@@ -2505,14 +2568,16 @@ impl LoopStrategy for CodeActStrategy {
                     if let Some(ref tx) = event_tx {
                         let _ = tx.try_send(LoopEvent::CodeExecution {
                             code: block.code.clone(),
-                            output: String::new(),
+                            stdout: String::new(),
+                            stderr: String::new(),
                             is_error: false,
+                            duration_ms: None,
                             phase: CodeExecutionPhase::Started,
                         });
                     }
 
                     let exec_result = executor
-                        .execute(&block.code, Language::Python)
+                        .execute_with_tools(&block.code, Language::Python, &exec_options)
                         .await;
 
                     match exec_result {
@@ -2527,8 +2592,10 @@ impl LoopStrategy for CodeActStrategy {
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.try_send(LoopEvent::CodeExecution {
                                     code: block.code.clone(),
-                                    output: observation.clone(),
+                                    stdout: result.stdout.clone(),
+                                    stderr: result.stderr.clone(),
                                     is_error: result.is_error,
+                                    duration_ms: Some(result.duration_ms),
                                     phase: CodeExecutionPhase::Completed,
                                 });
                             }
@@ -2550,8 +2617,10 @@ impl LoopStrategy for CodeActStrategy {
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.try_send(LoopEvent::CodeExecution {
                                     code: block.code.clone(),
-                                    output: err_msg.clone(),
+                                    stdout: String::new(),
+                                    stderr: err_msg.clone(),
                                     is_error: true,
+                                    duration_ms: None,
                                     phase: CodeExecutionPhase::Completed,
                                 });
                             }
@@ -4360,6 +4429,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4471,6 +4541,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4537,6 +4608,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4603,6 +4675,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4664,6 +4737,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4737,6 +4811,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4803,6 +4878,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4867,6 +4943,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4965,6 +5042,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5158,6 +5236,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5388,6 +5467,7 @@ mod tests {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5628,6 +5708,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         }
@@ -5811,6 +5892,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5976,6 +6058,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -6194,6 +6277,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: Some(signal),
             cancellation_token: None,
         };
@@ -6269,6 +6353,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -6335,6 +6420,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: Some(signal),
             cancellation_token: None,
         };
@@ -6595,6 +6681,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         }
@@ -7089,6 +7176,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: Some(token.clone()),
         };
@@ -7165,6 +7253,7 @@ Let me know if you need anything else."#;
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: ToolLimitsConfig::default(),
+            code_act_config: CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: None,
         };

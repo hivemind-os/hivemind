@@ -323,13 +323,14 @@ impl SubprocessExecutor {
 
 #[async_trait::async_trait]
 impl CodeExecutor for SubprocessExecutor {
-    async fn execute(
+    async fn execute_with_tools(
         &self,
         code: &str,
         language: Language,
+        options: &ExecutionOptions<'_>,
     ) -> Result<ExecutionResult, ExecutorError> {
-        self.execute_with_tools(code, language, &ExecutionOptions::default())
-            .await
+        // Delegate to the concrete method
+        SubprocessExecutor::execute_with_tools(self, code, language, options).await
     }
 
     async fn reset(&self) -> Result<(), ExecutorError> {

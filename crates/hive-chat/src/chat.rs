@@ -1010,6 +1010,7 @@ pub struct ChatService {
     default_permissions: Arc<Mutex<Vec<PermissionRule>>>,
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
+    code_act_config: hive_contracts::CodeActConfig,
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
     mcp: Option<Arc<McpService>>,
@@ -1102,6 +1103,7 @@ impl ChatService {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            hive_contracts::CodeActConfig::default(),
             None, // plugin_host
             None, // plugin_registry
         )
@@ -1132,6 +1134,7 @@ impl ChatService {
         sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>>,
         detected_shells: Arc<hive_contracts::DetectedShells>,
         tool_limits: hive_contracts::ToolLimitsConfig,
+        code_act_config: hive_contracts::CodeActConfig,
         plugin_host: Option<Arc<hive_plugins::PluginHost>>,
         plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
     ) -> Self {
@@ -1614,6 +1617,7 @@ impl ChatService {
             default_permissions: Arc::new(Mutex::new(Vec::new())),
             compaction_config: compaction_config_swap,
             tool_limits: Arc::new(tool_limits),
+            code_act_config,
             skills_service: bot_service.skills_service.clone(),
             mcp,
             mcp_catalog,
@@ -2824,11 +2828,10 @@ impl ChatService {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: (*self.tool_limits).clone(),
+            code_act_config: self.code_act_config.clone(),
             preempt_signal: None,
             cancellation_token: None,
-        };
-
-        match self.loop_executor.call_tool(&context, tool_id, input).await {
+        };        match self.loop_executor.call_tool(&context, tool_id, input).await {
             Ok(result) => {
                 if let Err(e) = self.audit.append(NewAuditEntry::new(
                     "tools",
@@ -6478,6 +6481,7 @@ impl ChatService {
                     session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
                 tool_limits: (*self.tool_limits).clone(),
+                code_act_config: self.code_act_config.clone(),
                 preempt_signal: None, // Set below after reading session state.
                 cancellation_token: None,
             };
@@ -9320,11 +9324,13 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 input: serde_json::from_str(input).unwrap_or_else(|_| json!(input)),
             }
         }
-        LoopEvent::CodeExecution { code, output, is_error, phase: _ } => {
+        LoopEvent::CodeExecution { code, stdout, stderr, is_error, duration_ms, .. } => {
             ReasoningEvent::CodeExecution {
                 code: code.clone(),
-                output: output.clone(),
+                stdout: stdout.clone(),
+                stderr: stderr.clone(),
                 is_error: *is_error,
+                duration_ms: *duration_ms,
             }
         }
     }
@@ -11414,6 +11420,7 @@ mod tests {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            hive_contracts::CodeActConfig::default(),
             None, // plugin_host
             None, // plugin_registry
         ));

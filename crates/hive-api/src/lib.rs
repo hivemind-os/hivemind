@@ -893,6 +893,7 @@ impl AppState {
             Arc::clone(&sandbox_config),
             Arc::clone(&detected_shells),
             config.tool_limits.clone(),
+            config.code_act.clone(),
             Some(Arc::clone(&plugin_host)),
             Some(Arc::clone(&plugin_registry)),
         ));

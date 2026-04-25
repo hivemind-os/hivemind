@@ -737,6 +737,7 @@ impl AgentRunner {
                 session_messaged: Arc::new(AtomicBool::new(false)),
             },
             tool_limits: self.spec.tool_limits.clone().unwrap_or_default(),
+            code_act_config: hive_contracts::CodeActConfig::default(),
             preempt_signal: None,
             cancellation_token: Some(self.cancellation_token.clone()),
         }
@@ -914,11 +915,13 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 input: parse_json_or_text(&input),
             }
         }
-        LoopEvent::CodeExecution { code, output, is_error, phase: _ } => {
+        LoopEvent::CodeExecution { code, stdout, stderr, is_error, duration_ms, .. } => {
             ReasoningEvent::CodeExecution {
                 code,
-                output,
+                stdout,
+                stderr,
                 is_error,
+                duration_ms,
             }
         }
     }

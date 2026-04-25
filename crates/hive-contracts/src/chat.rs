@@ -142,8 +142,11 @@ pub enum ReasoningEvent {
     /// CodeAct: a Python code block was executed.
     CodeExecution {
         code: String,
-        output: String,
+        stdout: String,
+        stderr: String,
         is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
 }
 
