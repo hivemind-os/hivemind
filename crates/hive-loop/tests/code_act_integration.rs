@@ -29,8 +29,8 @@ use hive_loop::{
 };
 use hive_model::{
     Capability, CompletionChunk, CompletionMessage, CompletionRequest, CompletionResponse,
-    CompletionStream, FinishReason, ModelProvider, ModelRouter, ModelSelection, ProviderDescriptor,
-    ProviderKind, RoutingDecision, ToolCallResponse,
+    CompletionStream, FinishReason, MessageBlock, ModelProvider, ModelRouter, ModelSelection,
+    ProviderDescriptor, ProviderKind, RoutingDecision, ToolCallResponse,
 };
 use hive_tools::{Tool, ToolError, ToolRegistry, ToolResult};
 
@@ -54,6 +54,26 @@ impl ScriptProvider {
                 id: "test-provider".to_string(),
                 name: Some("Test Provider".to_string()),
                 kind: ProviderKind::Mock,
+                models: vec!["test-model".to_string()],
+                model_capabilities: BTreeMap::from([(
+                    "test-model".to_string(),
+                    [Capability::Chat, Capability::ToolUse].into_iter().collect(),
+                )]),
+                priority: 100,
+                available: true,
+            },
+        }
+    }
+
+    /// Create a provider with OpenAiCompatible kind so supports_tool_history() = true.
+    fn new_multi_turn(responses: Vec<CompletionResponse>) -> Self {
+        Self {
+            responses: Mutex::new(responses),
+            recorded_requests: Arc::new(Mutex::new(Vec::new())),
+            descriptor: ProviderDescriptor {
+                id: "test-provider".to_string(),
+                name: Some("Test Provider".to_string()),
+                kind: ProviderKind::OpenAiCompatible,
                 models: vec!["test-model".to_string()],
                 model_capabilities: BTreeMap::from([(
                     "test-model".to_string(),
@@ -747,5 +767,75 @@ async fn code_act_prompt_forbids_followup_menus() {
         combined.contains("do next") || combined.contains("follow-up menus")
             || combined.contains("present follow-up"),
         "Completion rules should mention not asking 'what next'"
+    );
+}
+
+/// Test 14: Multi-turn native tool calls produce proper ToolUse/ToolResult blocks.
+/// When the model makes a native tool call (e.g., ask_user), the next iteration
+/// must see structured ToolUse blocks in the assistant message and ToolResult
+/// blocks in the tool message — NOT a bare "user" message with raw XML.
+/// This is the bug that caused the ask_user infinite loop with OpenAI models.
+#[tokio::test]
+async fn code_act_native_tool_call_produces_structured_history() {
+    // Use multi-turn provider (OpenAiCompatible → supports_tool_history = true)
+    let provider = ScriptProvider::new_multi_turn(vec![
+        // Iteration 0: model makes a native tool call
+        ScriptProvider::tool_call("mock_question_tool", json!({
+            "question": "What format?",
+            "choices": ["JSON", "Text"],
+        })),
+        // Iteration 1: model sees the structured tool result and finishes
+        ScriptProvider::text("OK, I'll use JSON format."),
+    ]);
+    let recorder = provider.recorder();
+    let router = make_router(provider);
+
+    // Register a mock tool that returns an answer
+    let ask_tool = Arc::new(
+        MockTool::new("mock_question_tool").with_response(json!({"answer": "JSON"})),
+    );
+    let tools = registry_with(vec![ask_tool]);
+    let ctx = make_code_act_context(tools, "Save weather to file");
+    let executor = make_code_act_executor();
+
+    let result = executor.run(ctx, router).await.expect("loop should succeed");
+    assert_eq!(result.content, "OK, I'll use JSON format.");
+
+    // Verify the second request has proper structured messages
+    let requests = recorder.lock();
+    assert!(requests.len() >= 2, "Expected at least 2 model calls, got {}", requests.len());
+
+    let second_request = &requests[1];
+    // In multi-turn mode, messages should contain:
+    // 1. The user prompt message
+    // 2. An assistant message with ToolUse blocks
+    // 3. A tool message with ToolResult blocks
+
+    let has_tool_use = second_request.messages.iter().any(|m| {
+        m.blocks.iter().any(|b| matches!(b, MessageBlock::ToolUse { name, .. } if name == "mock_question_tool"))
+    });
+    assert!(
+        has_tool_use,
+        "Second request should have an assistant message with ToolUse block for mock_question_tool.\nMessages: {:?}",
+        second_request.messages.iter().map(|m| (&m.role, &m.blocks)).collect::<Vec<_>>()
+    );
+
+    let has_tool_result = second_request.messages.iter().any(|m| {
+        m.role == "tool" && m.blocks.iter().any(|b| matches!(b, MessageBlock::ToolResult { .. }))
+    });
+    assert!(
+        has_tool_result,
+        "Second request should have a tool message with ToolResult block.\nMessages: {:?}",
+        second_request.messages.iter().map(|m| (&m.role, &m.blocks)).collect::<Vec<_>>()
+    );
+
+    // The tool result content should contain the user's answer
+    let tool_result_content: String = second_request.messages.iter()
+        .filter(|m| m.role == "tool")
+        .map(|m| m.content.clone())
+        .collect();
+    assert!(
+        tool_result_content.contains("JSON"),
+        "Tool result should contain the user's answer 'JSON'. Got: {tool_result_content}"
     );
 }

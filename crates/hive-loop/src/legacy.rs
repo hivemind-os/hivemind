@@ -2717,8 +2717,9 @@ impl LoopStrategy for CodeActStrategy {
                 }
 
                 // ── Execute native tool calls ────────────────────────
+                let mut native_journal_calls = Vec::new();
                 if !native_calls.is_empty() {
-                    let (tool_result_text, _journal_calls) = execute_tool_batch(
+                    let (tool_result_text, journal_calls) = execute_tool_batch(
                         &native_calls,
                         &context,
                         middleware,
@@ -2727,6 +2728,7 @@ impl LoopStrategy for CodeActStrategy {
                         Some(&response.content),
                     )
                     .await;
+                    native_journal_calls = journal_calls;
 
                     if !tool_result_text.is_empty() {
                         observations.push(tool_result_text);
@@ -2757,20 +2759,85 @@ impl LoopStrategy for CodeActStrategy {
                 }
 
                 if use_multi_turn {
-                    // Add assistant message with the model's response
+                    use hive_model::MessageBlock;
+
+                    // Build assistant message with proper ToolUse blocks for
+                    // native tool calls so the model sees what it called.
+                    let mut assistant_blocks = Vec::new();
+                    if !response.content.is_empty() {
+                        assistant_blocks.push(MessageBlock::Text {
+                            text: response.content.clone(),
+                        });
+                    }
+
+                    // Attach ToolUse blocks for each native tool call, matching
+                    // the call IDs from the original response so providers can
+                    // pair them with ToolResult messages.
+                    let mut native_journal_with_ids = native_journal_calls.clone();
+                    for (i, jtc) in native_journal_with_ids.iter_mut().enumerate() {
+                        if let Some(tc) = response.tool_calls.get(i) {
+                            jtc.tool_call_id = Some(tc.id.clone());
+                            assistant_blocks.push(MessageBlock::ToolUse {
+                                id: tc.id.clone(),
+                                name: jtc.tool_id.clone(),
+                                input: serde_json::from_str(&jtc.input)
+                                    .unwrap_or(serde_json::Value::Null),
+                            });
+                        } else {
+                            let synthetic_id = format!("tool-call-{}", uuid::Uuid::new_v4());
+                            jtc.tool_call_id = Some(synthetic_id.clone());
+                            assistant_blocks.push(MessageBlock::ToolUse {
+                                id: synthetic_id,
+                                name: jtc.tool_id.clone(),
+                                input: serde_json::from_str(&jtc.input)
+                                    .unwrap_or(serde_json::Value::Null),
+                            });
+                        }
+                    }
+
                     tool_history.push(CompletionMessage {
                         role: "assistant".into(),
                         content: response.content.clone(),
                         content_parts: vec![],
-                        blocks: vec![],
+                        blocks: assistant_blocks,
                     });
-                    // Add observation as a "user" message
-                    tool_history.push(CompletionMessage {
-                        role: "user".into(),
-                        content: observation_text,
-                        content_parts: vec![],
-                        blocks: vec![],
-                    });
+
+                    // Push structured tool result messages for native calls.
+                    for jtc in &native_journal_with_ids {
+                        if let Some(ref call_id) = jtc.tool_call_id {
+                            let safe_output =
+                                hive_contracts::prompt_sanitize::escape_prompt_tags(&jtc.output);
+                            tool_history.push(CompletionMessage {
+                                role: "tool".into(),
+                                content: safe_output.clone(),
+                                content_parts: vec![],
+                                blocks: vec![MessageBlock::ToolResult {
+                                    tool_use_id: call_id.clone(),
+                                    content: safe_output,
+                                    is_error: jtc.is_error,
+                                }],
+                            });
+                        }
+                    }
+
+                    // Push code execution observations as user messages
+                    // (these don't have tool call IDs to match).
+                    if !code_blocks.is_empty() {
+                        let code_observation: String = observations
+                            .iter()
+                            .filter(|o| o.starts_with("[Code Execution"))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        if !code_observation.is_empty() {
+                            tool_history.push(CompletionMessage {
+                                role: "user".into(),
+                                content: code_observation,
+                                content_parts: vec![],
+                                blocks: vec![],
+                            });
+                        }
+                    }
                 } else {
                     // Legacy mode: append to prompt
                     prompt.push_str(&format!(
