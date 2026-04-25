@@ -212,7 +212,15 @@ impl SessionRegistry {
     }
 
     /// Get or create a session for the given conversation ID.
-    pub async fn get_or_create(&self, session_id: &str) -> Result<Arc<Session>, ExecutorError> {
+    ///
+    /// `workspace` optionally overrides the executor's `working_directory` so
+    /// that the Python process starts in the conversation's workspace rather
+    /// than the daemon's cwd.
+    pub async fn get_or_create(
+        &self,
+        session_id: &str,
+        workspace: Option<&str>,
+    ) -> Result<Arc<Session>, ExecutorError> {
         // Fast path: session already exists
         {
             let sessions = self.sessions.lock();
@@ -230,17 +238,23 @@ impl SessionRegistry {
         // Slow path: create a new session
         self.evict_if_needed().await;
 
+        // Merge workspace into config if provided
+        let mut config = self.default_config.clone();
+        if let Some(ws) = workspace {
+            config.executor.working_directory = Some(ws.to_string());
+        }
+
         let session = if let Some(ref runtime) = self.wasm_runtime {
             Session::new_wasm(
                 session_id.to_string(),
-                self.default_config.clone(),
+                config,
                 runtime,
             )
             .await?
         } else {
             Session::new_subprocess(
                 session_id.to_string(),
-                self.default_config.clone(),
+                config,
             )
             .await?
         };

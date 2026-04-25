@@ -2256,8 +2256,9 @@ impl LoopStrategy for CodeActStrategy {
             // ── Build CodeAct system prompt supplement ────────────────
             let has_persistent_session = context.session_registry.is_some();
             let ca_cfg = &context.code_act_config;
+            let workspace_str = context.workspace_path().map(|p| p.to_string_lossy().to_string());
             let code_act_instructions =
-                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network);
+                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network, workspace_str.as_deref());
 
             // ── Initialize the code executor ─────────────────────────
             // Build executor config from the CodeActConfig on the context.
@@ -2267,7 +2268,7 @@ impl LoopStrategy for CodeActStrategy {
             let executor: Arc<dyn CodeExecutor> = if let Some(ref registry) = context.session_registry {
                 // Session registry manages lifecycle: reuse or create session
                 let session = registry
-                    .get_or_create(&session_id)
+                    .get_or_create(&session_id, workspace_str.as_deref())
                     .await
                     .map_err(|e| simple_model_error(format!("failed to get code session: {e}")))?;
                 session.executor_arc()
@@ -2277,7 +2278,7 @@ impl LoopStrategy for CodeActStrategy {
                     execution_timeout_secs: ca_cfg.execution_timeout_secs,
                     max_output_bytes: ca_cfg.max_output_bytes,
                     memory_limit_mb: 256,
-                    working_directory: None,
+                    working_directory: workspace_str.clone(),
                     allow_network: ca_cfg.allow_network,
                 };
                 match (

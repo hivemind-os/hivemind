@@ -1,0 +1,7 @@
+Weather data for Seattle (fetched at 2026-04-25T19:07:57Z):
+  Condition: Sunny
+  Temperature: 13 Â°C / 55 Â°F
+  Feels like: 13 Â°C / 55 Â°F
+  Humidity: 51%
+  Wind: 6 km/h N
+  Precipitation (last hour): 0.0 mm

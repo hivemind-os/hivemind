@@ -24,6 +24,7 @@ pub fn build_code_act_instructions(
     native_tool_ids: &[String],
     persistent: bool,
     allow_network: bool,
+    workspace_path: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -32,6 +33,14 @@ pub fn build_code_act_instructions(
     } else {
         CODE_ACT_HEADER_ONESHOT.to_string()
     });
+
+    // Tell the LLM its working directory
+    if let Some(ws) = workspace_path {
+        parts.push(format!(
+            "\n## Working Directory\n\nYour code executes in: `{ws}`\n\
+             All relative file paths resolve here. Save files here unless the user specifies otherwise."
+        ));
+    }
 
     // List bridged tool functions
     let tool_funcs: Vec<&BridgedToolInfo> = bridged_tools
@@ -211,8 +220,9 @@ const COMPLETION_RULES: &str = r#"
 ## Completion
 
 When you have finished the task:
-- Provide your final answer in plain text (no code blocks).
+- Summarize what you did and the result in plain text (no code blocks).
 - A response with **no code blocks and no tool calls** signals that you are done.
+- Do NOT ask "what would you like me to do next?" or present follow-up menus. Just report the result and stop.
 "#;
 
 const NETWORK_ACCESS: &str = r#"
@@ -260,7 +270,7 @@ mod tests {
         ];
 
         let native_ids = vec!["core.ask_user".to_string()];
-        let prompt = build_code_act_instructions(&tools, &native_ids, true, false);
+        let prompt = build_code_act_instructions(&tools, &native_ids, true, false, None);
 
         assert!(prompt.contains("filesystem_read(path: str)"));
         assert!(prompt.contains("Read a file"));
@@ -271,7 +281,7 @@ mod tests {
 
     #[test]
     fn instructions_with_no_tools() {
-        let prompt = build_code_act_instructions(&[], &[], true, false);
+        let prompt = build_code_act_instructions(&[], &[], true, false, None);
         assert!(prompt.contains("persistent Python environment"));
         assert!(!prompt.contains("Available Python Functions"));
         assert!(!prompt.contains("Structured Tool Calls"));
@@ -279,7 +289,7 @@ mod tests {
 
     #[test]
     fn oneshot_prompt_does_not_mention_persistence() {
-        let prompt = build_code_act_instructions(&[], &[], false, false);
+        let prompt = build_code_act_instructions(&[], &[], false, false, None);
         assert!(prompt.contains("fresh environment"));
         assert!(!prompt.contains("persistent Python environment"));
     }
@@ -310,15 +320,28 @@ mod tests {
 
     #[test]
     fn network_access_included_when_enabled() {
-        let prompt = build_code_act_instructions(&[], &[], true, true);
+        let prompt = build_code_act_instructions(&[], &[], true, true, None);
         assert!(prompt.contains("full, unrestricted network access"));
         assert!(prompt.contains("urllib.request"));
     }
 
     #[test]
     fn network_access_excluded_when_disabled() {
-        let prompt = build_code_act_instructions(&[], &[], true, false);
+        let prompt = build_code_act_instructions(&[], &[], true, false, None);
         assert!(!prompt.contains("Network Access"));
         assert!(!prompt.contains("urllib"));
+    }
+
+    #[test]
+    fn workspace_path_included_in_prompt() {
+        let prompt = build_code_act_instructions(&[], &[], true, false, Some("/home/user/project"));
+        assert!(prompt.contains("/home/user/project"));
+        assert!(prompt.contains("Working Directory"));
+    }
+
+    #[test]
+    fn workspace_path_absent_when_none() {
+        let prompt = build_code_act_instructions(&[], &[], true, false, None);
+        assert!(!prompt.contains("Working Directory"));
     }
 }
