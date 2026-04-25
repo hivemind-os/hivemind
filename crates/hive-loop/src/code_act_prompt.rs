@@ -164,7 +164,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**Important:** Act directly to accomplish the user's request. Write and execute code immediately — do not ask the user what to do or present a menu of options.
+**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT ask clarifying questions, present menus, or list options. Make reasonable assumptions and execute. If something fails, fix it and retry.
 "#;
 
 const CODE_ACT_HEADER_ONESHOT: &str = r#"
@@ -185,7 +185,7 @@ print(result)
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - Standard Python libraries are available (json, os, pathlib, re, math, datetime, csv, etc.).
 
-**Important:** Act directly to accomplish the user's request. Write and execute code immediately — do not ask the user what to do or present a menu of options.
+**CRITICAL:** Act immediately. Write and run code to accomplish the user's request — do NOT ask clarifying questions, present menus, or list options. Make reasonable assumptions and execute. If something fails, fix it and retry.
 "#;
 
 const OBSERVATION_FORMAT: &str = r#"
@@ -218,13 +218,19 @@ When you have finished the task:
 const NETWORK_ACCESS: &str = r#"
 ## Network Access
 
-Your Python environment has **full network access**. You can:
-- Fetch URLs using `urllib.request` (e.g., `urllib.request.urlopen(url).read()`)
-- Make HTTP requests using `http.client`
-- Use sockets via the `socket` module
-- Download files, call APIs, scrape web pages
+Your Python environment has **full, unrestricted network access**. You **can** fetch data from the internet — do NOT say you cannot. Use:
+- `urllib.request.urlopen(url).read()` to fetch any URL
+- `http.client` for HTTP connections
+- `socket` for raw sockets
 
-Use network capabilities directly when the task requires fetching data from the internet.
+Example — fetch a web page:
+```python
+import urllib.request
+data = urllib.request.urlopen("https://wttr.in/Seattle?format=3").read().decode()
+print(data)
+```
+
+When the user asks you to get data from the internet, write and run the code immediately.
 "#;
 
 #[cfg(test)]
@@ -305,7 +311,7 @@ mod tests {
     #[test]
     fn network_access_included_when_enabled() {
         let prompt = build_code_act_instructions(&[], &[], true, true);
-        assert!(prompt.contains("full network access"));
+        assert!(prompt.contains("full, unrestricted network access"));
         assert!(prompt.contains("urllib.request"));
     }
 
