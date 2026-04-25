@@ -4,9 +4,9 @@
 //! running workflows.
 
 use hive_agents::types::{AgentStatus, AgentSummary};
-use hive_workflow_service::hive_workflow::types::{StepStatus, StepType, TaskDef, WorkflowStatus};
+use hive_workflow_service::hive_workflow::types::{ExecutionMode, StepStatus, StepType, TaskDef, WorkflowStatus};
 use hive_workflow_service::WorkflowService;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 /// Find the largest byte index ≤ `max` that is on a UTF-8 char boundary.
@@ -406,6 +406,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             bundled: false,
             archived: false,
             triggers_paused: false,
@@ -444,6 +445,9 @@ mod tests {
             goto_activated_steps: HashSet::new(),
             goto_source_steps: HashSet::new(),
             active_loops: HashMap::new(),
+            execution_mode: ExecutionMode::default(),
+            shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         }
     }
 

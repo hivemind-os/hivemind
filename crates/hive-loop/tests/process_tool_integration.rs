@@ -223,6 +223,7 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
                 hive_classification::DataClass::Internal.to_i64() as u8,
             )),
             connector_service: None,
+                shadow_mode: false,
         },
         tools_ctx: ToolsContext {
             tools: tools,

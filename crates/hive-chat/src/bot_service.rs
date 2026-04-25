@@ -24,6 +24,7 @@ use crate::chat::{
     normalize_workspace_relative_path, open_graph, read_workspace_file_at, with_default_persona,
     ApprovalStreamEvent, ChatServiceError, SessionEvent,
 };
+use crate::session_log::SessionLogger;
 
 /// Manages the bot supervisor, bot CRUD, bot persistence, and bot workspace.
 #[derive(Clone)]
@@ -33,6 +34,7 @@ pub(crate) struct BotService {
     pub(crate) bot_configs: Arc<RwLock<HashMap<String, BotConfig>>>,
     pub(crate) bot_workspace: Arc<PathBuf>,
     pub(crate) bot_stream_tx: broadcast::Sender<SessionEvent>,
+    pub(crate) bot_loggers: Arc<RwLock<HashMap<String, Arc<SessionLogger>>>>,
 
     // ── Shared dependencies ────────────────────────────────
     pub(crate) loop_executor: Arc<LoopExecutor>,
@@ -61,6 +63,31 @@ pub(crate) struct BotService {
 
 impl BotService {
     // ── Helpers ─────────────────────────────────────────────
+
+    /// Return (or lazily create) a `SessionLogger` for the given bot, writing
+    /// into `<hivemind_home>/sessions/<bot_id>/`.
+    async fn get_or_create_logger(&self, bot_id: &str) -> Option<Arc<SessionLogger>> {
+        // Fast path – already cached.
+        {
+            let loggers = self.bot_loggers.read().await;
+            if let Some(logger) = loggers.get(bot_id) {
+                return Some(Arc::clone(logger));
+            }
+        }
+        // Slow path – create and cache.
+        let sessions_root = self.hivemind_home.join("sessions");
+        match SessionLogger::new(&sessions_root, bot_id) {
+            Ok(logger) => {
+                let logger = Arc::new(logger);
+                self.bot_loggers.write().await.insert(bot_id.to_string(), Arc::clone(&logger));
+                Some(logger)
+            }
+            Err(e) => {
+                tracing::warn!(bot_id, "failed to create bot session logger: {e}");
+                None
+            }
+        }
+    }
 
     #[allow(dead_code)]
     fn available_personas(&self) -> Vec<Persona> {
@@ -219,6 +246,11 @@ impl BotService {
         self.bot_supervisor.try_read().map(|g| g.is_some()).unwrap_or(false)
     }
 
+    /// Returns the base directory where per-bot workspaces are created.
+    pub fn bot_workspace(&self) -> &std::path::Path {
+        &self.bot_workspace
+    }
+
     pub async fn shutdown_bot_supervisor(&self) {
         let mut guard = self.bot_supervisor.write().await;
         if let Some(sup) = guard.take() {
@@ -237,6 +269,26 @@ impl BotService {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
+                        // ── File logging (mirrors spawn_supervisor_bridge) ──
+                        let bot_id = match &event {
+                            SupervisorEvent::AgentSpawned { agent_id, .. }
+                            | SupervisorEvent::AgentStatusChanged { agent_id, .. }
+                            | SupervisorEvent::AgentTaskAssigned { agent_id, .. }
+                            | SupervisorEvent::AgentOutput { agent_id, .. }
+                            | SupervisorEvent::AgentCompleted { agent_id, .. } => {
+                                Some(agent_id.clone())
+                            }
+                            _ => None,
+                        };
+                        if let Some(ref bid) = bot_id {
+                            if let Some(logger) = bot_svc.get_or_create_logger(bid).await {
+                                logger.handle_event(&SessionEvent::Supervisor(event.clone()));
+                                logger.persist_event(&event);
+                                logger.persist_session_event(
+                                    &SessionEvent::Supervisor(event.clone()),
+                                );
+                            }
+                        }
                         match &event {
                             SupervisorEvent::AgentStatusChanged { agent_id, status } => {
                                 if *status == AgentStatus::Done || *status == AgentStatus::Error {
@@ -522,12 +574,23 @@ impl BotService {
                 - Both a `schedule` trigger AND a `manual` trigger for scheduled workflows (for testing)\n\
              6. **Submit and summarize**: Call `workflow_author.submit_workflow` with the complete YAML. \
                 If validation fails, read the error carefully, fix the issues, and resubmit **once**. \
-                After a successful submit, give a brief summary of the workflow structure and STOP. \
-                Do not call any more tools after a successful submit.\n\n\
-             **CRITICAL**: After `workflow_author.submit_workflow` returns `success: true`, you MUST stop \
-             calling tools immediately. Respond with a brief summary and do nothing else. Do NOT attempt \
-             to fix lint warnings by resubmitting — just mention them to the user. \
-             Never call `submit_workflow` more than twice total.\n\n\
+                After a successful submit, generate 2-3 test cases covering: \
+                (a) a happy-path scenario with typical inputs, \
+                (b) an edge case (empty input, boundary values), and \
+                (c) an error scenario if the workflow has error handling. \
+                Then call `workflow_author.submit_tests` with the test cases.\n\
+              7. **Run tests**: After submit_tests succeeds, call `workflow_author.run_tests` with the same \
+                `definition_name` you used in submit_workflow. Review the results:\n\
+                - If all tests pass: STOP and respond with a brief summary of the workflow and test results.\n\
+                - If tests fail: analyze the failures, fix the workflow YAML (call submit_workflow again) \
+                  or fix the test cases (call submit_tests again), then call run_tests again.\n\
+                - Limit yourself to **2 fix-and-rerun cycles** maximum. If tests still fail after 2 attempts, \
+                  STOP and present the remaining failures to the user for guidance.\n\n\
+             **CRITICAL**: After `workflow_author.submit_workflow` returns `success: true`, generate test cases, \
+             call `workflow_author.submit_tests`, then call `workflow_author.run_tests`. \
+             If all tests pass, STOP immediately — respond with a brief summary and do nothing else. \
+             Do NOT attempt to fix lint warnings by resubmitting — just mention them to the user. \
+             Never call `submit_workflow` more than 3 times total.\n\n\
              Important: The YAML you submit must be a complete, valid workflow definition. \
              Always include all required fields (name, triggers, steps). \
              Use template expressions like `{{{{trigger.field}}}}` and `{{{{steps.id.outputs.field}}}}` \
@@ -568,6 +631,7 @@ impl BotService {
                 ..Default::default()
             }),
             persona_id: None,
+            shadow_mode: false,
         };
 
         self.launch_bot(config).await?;
@@ -773,10 +837,19 @@ impl BotService {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<SupervisorEvent>, usize), ChatServiceError> {
-        Ok(self
+        // Try in-memory first.
+        let (events, total) = self
             .get_or_create_bot_supervisor()
             .await?
-            .get_agent_events_paged(agent_id, offset, limit))
+            .get_agent_events_paged(agent_id, offset, limit);
+        if total > 0 {
+            return Ok((events, total));
+        }
+        // Fall back to persisted JSONL files.
+        if let Some(logger) = self.get_or_create_logger(agent_id).await {
+            return Ok(logger.read_agent_events_paged(agent_id, offset, limit));
+        }
+        Ok((Vec::new(), 0))
     }
 
     pub async fn get_bot_permissions(

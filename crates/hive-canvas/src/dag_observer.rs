@@ -137,6 +137,16 @@ impl DagObserver {
             ReasoningEvent::QuestionAsked { .. } => vec![],
             ReasoningEvent::ModelRetry { .. } => vec![],
             ReasoningEvent::ToolCallArgDelta { .. } => vec![],
+            ReasoningEvent::ToolCallIntercepted { tool_id, input } => {
+                // Treat intercepted tool calls like completed tool calls in the DAG
+                let mut events = self.handle_tool_call_started(tool_id, input);
+                events.extend(self.handle_tool_call_completed(
+                    tool_id,
+                    &serde_json::json!({"intercepted": true}),
+                    false,
+                ));
+                events
+            }
         }
     }
 

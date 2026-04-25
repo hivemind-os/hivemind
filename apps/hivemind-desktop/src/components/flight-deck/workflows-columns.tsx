@@ -129,9 +129,13 @@ export function createWorkflowColumns(callbacks?: WorkflowColumnCallbacks): Colu
       minSize: 60,
       cell: (info) => {
         const status = info.getValue() as WorkflowStatus;
+        const wf = info.row.original.workflow;
         return (
           <span class={`flight-deck-status ${status}`}>
             {status.replace(/_/g, ' ')}
+            {wf.execution_mode === 'shadow' && (
+              <span class="wf-test-badge" style="margin-left:4px;">TEST</span>
+            )}
           </span>
         );
       },
@@ -142,22 +146,22 @@ export function createWorkflowColumns(callbacks?: WorkflowColumnCallbacks): Colu
       accessorFn: (row) =>
         row.workflow.parent_agent_id ?? row.workflow.parent_session_id,
       header: 'Parent',
-      size: 110,
-      minSize: 60,
+      size: 140,
+      minSize: 80,
       cell: (info) => {
         const wf = info.row.original.workflow;
         if (wf.parent_agent_id) {
           return (
-            <span class="text-xs">
+            <span class="text-xs" title={`agent: ${wf.parent_agent_id}`}>
               <span class="text-muted-foreground">agent:</span>{' '}
-              <code>{wf.parent_agent_id.slice(0, 8)}…</code>
+              <code>{wf.parent_agent_id}</code>
             </span>
           );
         }
         return (
-          <span class="text-xs">
+          <span class="text-xs" title={`session: ${wf.parent_session_id}`}>
             <span class="text-muted-foreground">session:</span>{' '}
-            <code>{wf.parent_session_id.slice(0, 8)}…</code>
+            <code>{wf.parent_session_id}</code>
           </span>
         );
       },

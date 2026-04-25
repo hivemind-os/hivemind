@@ -95,13 +95,16 @@ export function createAgentColumns(callbacks?: AgentColumnCallbacks): ColumnDef<
     },
     {
       id: 'id',
-      accessorFn: (row) => row.agent.spec.id,
+      accessorFn: (row) => row.agent.agent_id,
       header: 'ID',
-      size: 90,
-      minSize: 60,
-      cell: (info) => (
-        <code class="text-xs">{info.getValue() as string}</code>
-      ),
+      size: 140,
+      minSize: 80,
+      cell: (info) => {
+        const val = info.getValue() as string;
+        return (
+          <code class="text-xs" title={val}>{val}</code>
+        );
+      },
       enableSorting: false,
     },
     {
@@ -171,7 +174,7 @@ export function createAgentColumns(callbacks?: AgentColumnCallbacks): ColumnDef<
       cell: (info) => {
         const val = info.getValue() as string;
         return val ? (
-          <code class="text-xs">{val.slice(0, 8)}…</code>
+          <code class="text-xs" title={val}>{val.slice(0, 8)}…</code>
         ) : (
           <span class="text-muted-foreground text-xs">—</span>
         );

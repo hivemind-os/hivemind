@@ -523,6 +523,7 @@ impl AdvancedContextMap {
                 role: "assistant".to_string(),
                 content: response.content.clone(),
                 content_parts: vec![],
+                blocks: vec![],
             });
 
             // Execute each tool call and format results

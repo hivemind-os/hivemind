@@ -54,7 +54,37 @@ impl ContextCompactorMiddleware {
              --- CONVERSATION TO SUMMARIZE ---\n",
         );
         for msg in messages {
-            prompt.push_str(&format!("\n[{}]: {}\n", msg.role, msg.content));
+            if msg.blocks.is_empty() {
+                prompt.push_str(&format!("\n[{}]: {}\n", msg.role, msg.content));
+            } else {
+                // Serialize blocks for the summarizer.
+                prompt.push_str(&format!("\n[{}]:", msg.role));
+                for block in &msg.blocks {
+                    match block {
+                        hive_model::MessageBlock::Text { text } => {
+                            prompt.push_str(&format!(" {}", text));
+                        }
+                        hive_model::MessageBlock::ToolUse { name, input, .. } => {
+                            let args_preview: String = serde_json::to_string(input)
+                                .unwrap_or_default()
+                                .chars()
+                                .take(200)
+                                .collect();
+                            prompt.push_str(&format!(
+                                "\n  [Tool Call: {}({})]\n",
+                                name, args_preview
+                            ));
+                        }
+                        hive_model::MessageBlock::ToolResult { content, is_error, .. } => {
+                            let preview: String = content.chars().take(300).collect();
+                            let label =
+                                if *is_error { "Tool Error" } else { "Tool Result" };
+                            prompt.push_str(&format!("\n  [{}: {}]\n", label, preview));
+                        }
+                    }
+                }
+                prompt.push('\n');
+            }
         }
         prompt.push_str(
             "\n--- END ---\n\n\
@@ -229,6 +259,7 @@ impl ContextCompactorMiddleware {
                 "{COMPACTION_SUMMARY_PREFIX} #{summary_count} — {compact_count} messages compacted]\n\n{summary}"
             ),
             content_parts: vec![],
+            blocks: vec![],
         };
 
         // Remove the compacted messages and insert the summary.
@@ -273,6 +304,7 @@ impl ContextCompactorMiddleware {
                         role: "system".to_string(),
                         content: epoch_summary,
                         content_parts: vec![],
+                        blocks: vec![],
                     },
                 );
             }
@@ -305,21 +337,25 @@ mod tests {
                 role: "system".into(),
                 content: "system prompt".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
             CompletionMessage {
                 role: "system".into(),
                 content: "[Compaction Summary #1 — 5 messages]\nstuff".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
             CompletionMessage {
                 role: "user".into(),
                 content: "hello".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
             CompletionMessage {
                 role: "system".into(),
                 content: "[Compaction Summary #2 — 3 messages]\nmore stuff".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
         ];
         assert_eq!(ContextCompactorMiddleware::count_summaries(&messages), 2);
@@ -332,11 +368,13 @@ mod tests {
                 role: "user".into(),
                 content: "What is X?".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
             CompletionMessage {
                 role: "assistant".into(),
                 content: "X is Y.".into(),
                 content_parts: vec![],
+                blocks: vec![],
             },
         ];
         let prompt = ContextCompactorMiddleware::build_summary_prompt(&messages);
@@ -406,6 +444,7 @@ mod tests {
                     hive_classification::DataClass::Public.to_i64() as u8,
                 )),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(hive_tools::ToolRegistry::new()),

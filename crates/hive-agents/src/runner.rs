@@ -590,12 +590,14 @@ impl AgentRunner {
                 role: "user".to_string(),
                 content: content.to_string(),
                 content_parts: vec![],
+                blocks: vec![],
             });
             if let Ok(ref response) = result {
                 self.conversation_history.push(CompletionMessage {
                     role: "assistant".to_string(),
                     content: response.clone(),
                     content_parts: vec![],
+                    blocks: vec![],
                 });
             }
         }
@@ -656,6 +658,7 @@ impl AgentRunner {
                 role: "system".to_string(),
                 content: system_parts.join("\n\n"),
                 content_parts: vec![],
+                blocks: vec![],
             }]
         };
 
@@ -715,6 +718,7 @@ impl AgentRunner {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(self.spec.data_class.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: self.spec.shadow_mode,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -904,6 +908,12 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 arguments_so_far,
             }
         }
+        LoopEvent::ToolCallIntercepted { tool_id, input } => {
+            ReasoningEvent::ToolCallIntercepted {
+                tool_id,
+                input: parse_json_or_text(&input),
+            }
+        }
     }
 }
 
@@ -1014,6 +1024,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(registry),
         );
@@ -1052,6 +1063,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(registry),
         );
@@ -1091,6 +1103,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1122,6 +1135,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1153,6 +1167,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             Arc::new(ToolRegistry::new()),
         );
@@ -1191,6 +1206,7 @@ mod tests {
             permission_rules: vec![],
             tool_limits: None,
             persona_id: None,
+            shadow_mode: false,
         };
 
         let spec = config.to_agent_spec();
@@ -1227,6 +1243,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,
@@ -1268,6 +1285,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,
@@ -1327,6 +1345,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             inbox_rx,
             event_tx,

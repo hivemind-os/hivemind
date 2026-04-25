@@ -15,6 +15,7 @@ hive-mcp = { path = "../hive-mcp" }
 hive-process = { path = "../hive-process" }
 hive-sandbox = { path = "../hive-sandbox" }
 hive-scheduler = { path = "../hive-scheduler" }
+hive-workflow = { path = "../hive-workflow" }
 hive-workflow-service = { path = "../hive-workflow-service" }
 hive-workspace-index = { path = "../hive-workspace-index" }
 glob.workspace = true

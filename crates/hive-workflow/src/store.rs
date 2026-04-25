@@ -1,6 +1,7 @@
 use crate::error::WorkflowError;
 use crate::types::*;
 use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -193,6 +194,35 @@ pub trait WorkflowPersistence: Send + Sync {
     /// Advance/persist the replay cursor timestamp used by TriggerManager event replay.
     fn set_event_replay_cursor(&self, timestamp_ms: u64) -> Result<(), WorkflowError>;
 
+    // -- Intercepted actions (shadow mode) --
+
+    /// Store an intercepted action from a shadow-mode workflow run.
+    /// Returns the auto-assigned row ID.
+    fn save_intercepted_action(&self, action: &InterceptedAction) -> Result<i64, WorkflowError>;
+
+    /// List intercepted actions for an instance with pagination.
+    fn list_intercepted_actions(
+        &self,
+        instance_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<InterceptedActionPage, WorkflowError>;
+
+    /// Compute a shadow summary by counting intercepted actions by kind.
+    fn get_shadow_summary(&self, instance_id: i64) -> Result<ShadowSummary, WorkflowError>;
+
+    // -- Definition run tracking --
+
+    /// Record that a normal-mode run of a definition completed successfully.
+    /// `definition_hash` is a SHA-256 of the definition JSON that was executed.
+    fn record_successful_run(
+        &self,
+        name: &str,
+        version: &str,
+        definition_hash: &str,
+        run_at_ms: u64,
+    ) -> Result<(), WorkflowError>;
+
     // -- Maintenance --
 
     /// Prune completed/failed/killed instances older than `max_age_ms`.
@@ -201,6 +231,13 @@ pub trait WorkflowPersistence: Send + Sync {
 
 /// Backward-compatible type alias.
 pub type WorkflowStore = SqliteWorkflowStore;
+
+/// Compute SHA-256 hex digest of a string.
+pub fn sha256_hex(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
 
 fn sql_push_param(
     where_clause: &mut String,
@@ -567,6 +604,48 @@ impl SqliteWorkflowStore {
                 ON workflow_instances(archived, status, created_at_ms DESC)",
         )?;
 
+        // Migration: add execution_mode column to workflow_instances if missing.
+        let has_execution_mode: bool = conn
+            .prepare(
+                "SELECT 1 FROM pragma_table_info('workflow_instances') WHERE name = 'execution_mode'",
+            )?
+            .exists([])?;
+        if !has_execution_mode {
+            conn.execute_batch(
+                "ALTER TABLE workflow_instances ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'normal'",
+            )?;
+        }
+
+        // Shadow mode: intercepted actions table.
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS workflow_intercepted_actions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                instance_id INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+                step_id     TEXT    NOT NULL,
+                kind        TEXT    NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                details     TEXT    NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_wia_instance
+                ON workflow_intercepted_actions(instance_id);
+            ",
+        )?;
+
+        // Migration: add definition run-tracking columns if missing.
+        let has_last_run: bool = conn
+            .prepare(
+                "SELECT 1 FROM pragma_table_info('workflow_definition_versions') WHERE name = 'last_successful_run_at_ms'",
+            )?
+            .exists([])?;
+        if !has_last_run {
+            conn.execute_batch(
+                "ALTER TABLE workflow_definition_versions ADD COLUMN last_successful_run_at_ms INTEGER;
+                 ALTER TABLE workflow_definition_versions ADD COLUMN last_successful_definition_hash TEXT;",
+            )?;
+        }
+
         Ok(())
     }
 }
@@ -765,7 +844,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
         // the rowid as a final tie-breaker.
         let mut stmt = conn.prepare(
             "SELECT d.external_id, d.name, v.version, v.description, v.definition_json,
-                    v.created_at_ms, v.updated_at_ms, d.bundled, v.archived, v.triggers_paused
+                    v.created_at_ms, v.updated_at_ms, d.bundled, v.archived, v.triggers_paused,
+                    v.last_successful_run_at_ms, v.last_successful_definition_hash
              FROM workflow_definition_versions v
              JOIN workflow_definitions d ON d.id = v.definition_id
              WHERE v.id = (
@@ -788,6 +868,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 row.get::<_, i32>(7)?,
                 row.get::<_, i32>(8)?,
                 row.get::<_, i32>(9)?,
+                row.get::<_, Option<u64>>(10)?,
+                row.get::<_, Option<String>>(11)?,
             ))
         })?;
 
@@ -804,6 +886,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 bundled,
                 archived,
                 triggers_paused,
+                last_successful_run_at_ms,
+                last_successful_definition_hash,
             ) = row?;
             let def: WorkflowDefinition = match serde_json::from_str(&json_str) {
                 Ok(d) => d,
@@ -816,6 +900,13 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                     );
                     continue;
                 }
+            };
+            // Compute is_untested: true if never run or definition changed since
+            // last successful run.
+            let current_hash = sha256_hex(&json_str);
+            let is_untested = match &last_successful_definition_hash {
+                Some(h) => h != &current_hash,
+                None => true,
             };
             let trigger_types: Vec<String> = def
                 .trigger_defs()
@@ -840,6 +931,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 bundled: bundled != 0,
                 archived: archived != 0,
                 triggers_paused: triggers_paused != 0,
+                last_successful_run_at_ms,
+                is_untested,
             });
         }
         Ok(defs)
@@ -977,6 +1070,10 @@ impl WorkflowPersistence for SqliteWorkflowStore {
             .unwrap_or_else(|_| "[]".to_string());
         let goto_source_steps =
             serde_json::to_string(&instance.goto_source_steps).unwrap_or_else(|_| "[]".to_string());
+        let execution_mode = serde_json::to_value(instance.execution_mode)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| "normal".to_string());
 
         tx.execute(
             "INSERT INTO workflow_instances
@@ -984,8 +1081,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
               mode, status, variables, parent_session_id, parent_agent_id, trigger_step_id,
               permissions, workspace_path, created_at_ms, updated_at_ms,
               completed_at_ms, output, error, resolved_result_message, active_loops,
-              goto_activated_steps, goto_source_steps)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+              goto_activated_steps, goto_source_steps, execution_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 instance.definition.name,
                 instance.definition.version,
@@ -1007,6 +1104,7 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 active_loops,
                 goto_activated_steps,
                 goto_source_steps,
+                execution_mode,
             ],
         )?;
 
@@ -1079,7 +1177,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 "SELECT id, definition_snapshot, status, variables, parent_session_id,
                         parent_agent_id, permissions, created_at_ms, updated_at_ms,
                         completed_at_ms, output, error, workspace_path, resolved_result_message,
-                        active_loops, goto_activated_steps, goto_source_steps, trigger_step_id
+                        active_loops, goto_activated_steps, goto_source_steps, trigger_step_id,
+                        execution_mode
                  FROM workflow_instances WHERE id = ?1",
                 params![id],
                 |row| {
@@ -1101,6 +1200,7 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                     let goto_activated_steps_str: Option<String> = row.get(15)?;
                     let goto_source_steps_str: Option<String> = row.get(16)?;
                     let trigger_step_id: Option<String> = row.get(17)?;
+                    let execution_mode_str: String = row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "normal".to_string());
                     Ok((
                         rowid,
                         def_snapshot,
@@ -1120,6 +1220,7 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                         goto_activated_steps_str,
                         goto_source_steps_str,
                         trigger_step_id,
+                        execution_mode_str,
                     ))
                 },
             )
@@ -1144,6 +1245,7 @@ impl WorkflowPersistence for SqliteWorkflowStore {
             goto_activated_steps_str,
             goto_source_steps_str,
             trigger_step_id,
+            execution_mode_str,
         )) = row
         else {
             return Ok(None);
@@ -1174,6 +1276,9 @@ impl WorkflowPersistence for SqliteWorkflowStore {
             .unwrap_or_default();
         let goto_source_steps =
             goto_source_steps_str.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let execution_mode: ExecutionMode =
+            serde_json::from_value(serde_json::Value::String(execution_mode_str))
+                .unwrap_or_default();
 
         let step_states = load_step_states_on(&conn, rowid)?;
 
@@ -1197,6 +1302,9 @@ impl WorkflowPersistence for SqliteWorkflowStore {
             goto_activated_steps,
             goto_source_steps,
             active_loops,
+            execution_mode,
+            shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         }))
     }
 
@@ -1284,7 +1392,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                     COALESCE(ss.pending_interactions, 0),
                     i.definition_version,
                     i.trigger_step_id,
-                    i.archived
+                    i.archived,
+                    i.execution_mode
              FROM workflow_instances i
              LEFT JOIN (
                  SELECT instance_id,
@@ -1332,6 +1441,9 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 pending_agent_questions: 0,
                 child_agent_ids: Vec::new(),
                 archived: row.get::<_, i32>(15)? != 0,
+                execution_mode: row.get::<_, Option<String>>(16)?
+                    .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok())
+                    .unwrap_or_default(),
             })
         })?;
 
@@ -1589,6 +1701,117 @@ impl WorkflowPersistence for SqliteWorkflowStore {
     }
 
     // -----------------------------------------------------------------------
+    // Intercepted actions (shadow mode)
+    // -----------------------------------------------------------------------
+
+    fn save_intercepted_action(&self, action: &InterceptedAction) -> Result<i64, WorkflowError> {
+        let conn = self.conn()?;
+        let details_str = serde_json::to_string(&action.details)?;
+        conn.execute(
+            "INSERT INTO workflow_intercepted_actions (instance_id, step_id, kind, timestamp_ms, details)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                action.instance_id,
+                action.step_id,
+                action.kind,
+                action.timestamp_ms,
+                details_str,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    fn list_intercepted_actions(
+        &self,
+        instance_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<InterceptedActionPage, WorkflowError> {
+        let conn = self.conn()?;
+        let total: usize = conn.query_row(
+            "SELECT COUNT(*) FROM workflow_intercepted_actions WHERE instance_id = ?1",
+            params![instance_id],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, instance_id, step_id, kind, timestamp_ms, details
+             FROM workflow_intercepted_actions
+             WHERE instance_id = ?1
+             ORDER BY id ASC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![instance_id, limit as i64, offset as i64], |row| {
+            let details_str: String = row.get(5)?;
+            let details: serde_json::Value =
+                serde_json::from_str(&details_str).unwrap_or(serde_json::Value::Null);
+            Ok(InterceptedAction {
+                id: row.get(0)?,
+                instance_id: row.get(1)?,
+                step_id: row.get(2)?,
+                kind: row.get(3)?,
+                timestamp_ms: row.get(4)?,
+                details,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(InterceptedActionPage { items, total })
+    }
+
+    fn get_shadow_summary(&self, instance_id: i64) -> Result<ShadowSummary, WorkflowError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT kind, COUNT(*) FROM workflow_intercepted_actions
+             WHERE instance_id = ?1
+             GROUP BY kind",
+        )?;
+        let rows = stmt.query_map(params![instance_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })?;
+
+        let mut summary = ShadowSummary::default();
+        for row in rows {
+            let (kind, count) = row?;
+            summary.total_intercepted += count;
+            match kind.as_str() {
+                "tool_call" => summary.tool_calls_intercepted += count,
+                "agent_invocation" => summary.agent_invocations_intercepted += count,
+                "workflow_launch" => summary.workflow_launches_intercepted += count,
+                "scheduled_task" => summary.scheduled_tasks_intercepted += count,
+                "agent_signal" => summary.agent_signals_intercepted += count,
+                _ => {} // Unknown kinds still count toward total
+            }
+        }
+        Ok(summary)
+    }
+
+    fn record_successful_run(
+        &self,
+        name: &str,
+        version: &str,
+        definition_hash: &str,
+        run_at_ms: u64,
+    ) -> Result<(), WorkflowError> {
+        let conn = self.conn()?;
+        // Only overwrite if this run is newer than the stored one (prevents
+        // stale completions from regressing the status).
+        conn.execute(
+            "UPDATE workflow_definition_versions
+             SET last_successful_run_at_ms = ?1,
+                 last_successful_definition_hash = ?2
+             WHERE definition_id = (SELECT id FROM workflow_definitions WHERE name = ?3)
+               AND version = ?4
+               AND (last_successful_run_at_ms IS NULL OR last_successful_run_at_ms < ?1)",
+            params![run_at_ms, definition_hash, name, version],
+        )?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Maintenance
     // -----------------------------------------------------------------------
 
@@ -1818,6 +2041,10 @@ mod tests {
         def_insert_order: HashMap<(String, String), u64>,
         next_order: u64,
         next_instance_id: i64,
+        intercepted_actions: Vec<InterceptedAction>,
+        next_action_id: i64,
+        /// (name, version) → (run_at_ms, definition_hash)
+        successful_runs: HashMap<(String, String), (u64, String)>,
     }
 
     pub(crate) struct InMemoryWorkflowStore {
@@ -1837,6 +2064,9 @@ mod tests {
                     def_insert_order: HashMap::new(),
                     next_order: 0,
                     next_instance_id: 1,
+                    intercepted_actions: Vec::new(),
+                    next_action_id: 1,
+                    successful_runs: HashMap::new(),
                 }),
             }
         }
@@ -1884,6 +2114,7 @@ mod tests {
             pending_agent_questions: 0,
             child_agent_ids,
             archived: false,
+            execution_mode: inst.execution_mode,
         }
     }
 
@@ -1953,9 +2184,17 @@ mod tests {
             // Build summaries grouped by definition name, keeping only the latest version.
             let mut latest_by_name: std::collections::HashMap<String, WorkflowDefinitionSummary> =
                 std::collections::HashMap::new();
-            for (def, _yaml) in inner.definitions.values() {
+            for ((name, _version), (def, _yaml)) in &inner.definitions {
                 let trigger_types: Vec<String> =
                     def.trigger_defs().map(|t| trigger_type_name(&t.trigger_type)).collect();
+                let json_str = serde_json::to_string(def).unwrap_or_default();
+                let current_hash = sha256_hex(&json_str);
+                let run_meta = inner.successful_runs.get(&(def.name.clone(), def.version.clone()));
+                let last_successful_run_at_ms = run_meta.map(|(ts, _)| *ts);
+                let is_untested = match run_meta {
+                    Some((_, h)) => h != &current_hash,
+                    None => true,
+                };
                 let summary = WorkflowDefinitionSummary {
                     id: def.id.clone(),
                     name: def.name.clone(),
@@ -1969,8 +2208,10 @@ mod tests {
                     bundled: def.bundled,
                     archived: def.archived,
                     triggers_paused: def.triggers_paused,
+                    last_successful_run_at_ms,
+                    is_untested,
                 };
-                match latest_by_name.get(&def.name) {
+                match latest_by_name.get(name) {
                     Some(existing)
                         if cmp_version_strings(&existing.version, &def.version)
                             != std::cmp::Ordering::Less => {}
@@ -2309,14 +2550,89 @@ mod tests {
             let mut inner = self.inner.lock().unwrap();
             let cutoff = now_ms().saturating_sub(max_age_ms);
             let before = inner.instances.len();
-            inner.instances.retain(|_, inst| {
-                let dominated = matches!(
-                    inst.status,
-                    WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Killed
-                ) && inst.completed_at_ms.map_or(false, |t| t < cutoff);
-                !dominated
-            });
+            let removed_ids: Vec<i64> = inner
+                .instances
+                .iter()
+                .filter(|(_, inst)| {
+                    matches!(
+                        inst.status,
+                        WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Killed
+                    ) && inst.completed_at_ms.map_or(false, |t| t < cutoff)
+                })
+                .map(|(&id, _)| id)
+                .collect();
+            for id in &removed_ids {
+                inner.instances.remove(id);
+                inner.intercepted_actions.retain(|a| a.instance_id != *id);
+            }
             Ok(before - inner.instances.len())
+        }
+
+        fn save_intercepted_action(&self, action: &InterceptedAction) -> Result<i64, WorkflowError> {
+            let mut inner = self.inner.lock().unwrap();
+            let id = inner.next_action_id;
+            inner.next_action_id += 1;
+            let mut stored = action.clone();
+            stored.id = id;
+            inner.intercepted_actions.push(stored);
+            Ok(id)
+        }
+
+        fn list_intercepted_actions(
+            &self,
+            instance_id: i64,
+            limit: usize,
+            offset: usize,
+        ) -> Result<InterceptedActionPage, WorkflowError> {
+            let inner = self.inner.lock().unwrap();
+            let matching: Vec<&InterceptedAction> = inner
+                .intercepted_actions
+                .iter()
+                .filter(|a| a.instance_id == instance_id)
+                .collect();
+            let total = matching.len();
+            let items: Vec<InterceptedAction> =
+                matching.into_iter().skip(offset).take(limit).cloned().collect();
+            Ok(InterceptedActionPage { items, total })
+        }
+
+        fn get_shadow_summary(&self, instance_id: i64) -> Result<ShadowSummary, WorkflowError> {
+            let inner = self.inner.lock().unwrap();
+            let mut summary = ShadowSummary::default();
+            for action in &inner.intercepted_actions {
+                if action.instance_id != instance_id {
+                    continue;
+                }
+                summary.total_intercepted += 1;
+                match action.kind.as_str() {
+                    "tool_call" => summary.tool_calls_intercepted += 1,
+                    "agent_invocation" => summary.agent_invocations_intercepted += 1,
+                    "workflow_launch" => summary.workflow_launches_intercepted += 1,
+                    "scheduled_task" => summary.scheduled_tasks_intercepted += 1,
+                    "agent_signal" => summary.agent_signals_intercepted += 1,
+                    _ => {}
+                }
+            }
+            Ok(summary)
+        }
+
+        fn record_successful_run(
+            &self,
+            name: &str,
+            version: &str,
+            definition_hash: &str,
+            run_at_ms: u64,
+        ) -> Result<(), WorkflowError> {
+            let mut inner = self.inner.lock().unwrap();
+            let key = (name.to_string(), version.to_string());
+            // Only update if this run is newer.
+            match inner.successful_runs.get(&key) {
+                Some((existing_ts, _)) if *existing_ts >= run_at_ms => {}
+                _ => {
+                    inner.successful_runs.insert(key, (run_at_ms, definition_hash.to_string()));
+                }
+            }
+            Ok(())
         }
     }
 
@@ -2364,6 +2680,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -2417,6 +2734,9 @@ mod tests {
             goto_activated_steps: std::collections::HashSet::new(),
             goto_source_steps: std::collections::HashSet::new(),
             active_loops: std::collections::HashMap::new(),
+            execution_mode: ExecutionMode::default(),
+            shadow_overrides: std::collections::HashMap::new(),
+            auto_respond_interactions: false,
         }
     }
 

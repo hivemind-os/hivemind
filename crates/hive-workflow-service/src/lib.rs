@@ -17,6 +17,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, Instrument};
 
+/// Returns true for sentinel parent_session_id values that do NOT correspond
+/// to a real chat session (e.g. trigger-launched or test-runner workflows).
+fn is_synthetic_session_id(id: &str) -> bool {
+    id.starts_with("trigger-") || id == "test-runner"
+}
+
 /// A pending workflow feedback gate request, surfaced to the parent session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowFeedbackItem {
@@ -53,6 +59,7 @@ impl WorkflowEventEmitter for EventBusEmitter {
                 definition_name,
                 parent_session_id,
                 mode,
+                execution_mode,
             } => (
                 "workflow.instance.created",
                 json!({
@@ -60,6 +67,7 @@ impl WorkflowEventEmitter for EventBusEmitter {
                     "definition_name": definition_name,
                     "parent_session_id": parent_session_id,
                     "mode": mode,
+                    "execution_mode": execution_mode,
                 }),
             ),
             WorkflowEvent::InstanceStarted { instance_id } => {
@@ -112,6 +120,18 @@ impl WorkflowEventEmitter for EventBusEmitter {
             WorkflowEvent::EventGateResolved { instance_id, step_id } => (
                 "workflow.event_gate.resolved",
                 json!({ "instance_id": instance_id, "step_id": step_id }),
+            ),
+            WorkflowEvent::TestCaseStarted { definition_name, test_name, index, total } => (
+                "workflow.test.case_started",
+                json!({ "definition_name": definition_name, "test_name": test_name, "index": index, "total": total }),
+            ),
+            WorkflowEvent::TestCaseCompleted { definition_name, test_name, passed, duration_ms, index, total } => (
+                "workflow.test.case_completed",
+                json!({ "definition_name": definition_name, "test_name": test_name, "passed": passed, "duration_ms": duration_ms, "index": index, "total": total }),
+            ),
+            WorkflowEvent::TestRunCompleted { definition_name, total, passed, failed } => (
+                "workflow.test.run_completed",
+                json!({ "definition_name": definition_name, "total": total, "passed": passed, "failed": failed }),
             ),
         };
         if let Err(e) = self.bus.publish(topic, "hive-workflow", payload) {
@@ -512,13 +532,20 @@ impl WorkflowService {
         yaml_source: &str,
     ) -> Result<WorkflowDefinition, WorkflowError> {
         let _span = tracing::info_span!("service", service = "workflows").entered();
-        let def: WorkflowDefinition = serde_yaml::from_str(yaml_source)?;
+        let mut def: WorkflowDefinition = serde_yaml::from_str(yaml_source)?;
         validate_definition(&def)?;
 
-        // Validate the name for NEW definitions only — existing plain-name
-        // workflows are grandfathered in.
-        let already_exists = self.store.get_latest_definition(&def.name)?.is_some();
-        if !already_exists {
+        // Pin the definition id to the stable DB external_id for existing
+        // definitions.  The YAML may omit the `id` field, causing
+        // serde(default) to generate a fresh UUID on every save.  The DB
+        // preserves the original external_id via ON CONFLICT, but we need the
+        // returned struct (and persisted JSON) to carry the correct id so that
+        // callers (e.g. trigger registration) can match on it.
+        let existing = self.store.get_latest_definition(&def.name)?;
+        if let Some((existing_def, _yaml)) = &existing {
+            def.id = existing_def.id.clone();
+        } else {
+            // New definition — validate the name.
             WorkflowDefinition::validate_name(&def.name)
                 .map_err(|reason| WorkflowError::ValidationError { reason })?;
         }
@@ -834,6 +861,7 @@ impl WorkflowService {
         permission_overrides: Option<Vec<PermissionEntry>>,
         trigger_step_id: Option<&str>,
         workspace_path: Option<&str>,
+        execution_mode: ExecutionMode,
     ) -> Result<i64, WorkflowError> {
         let svc_span = tracing::info_span!("service", service = "workflows");
         let (def, _yaml) = if let Some(v) = version {
@@ -883,6 +911,7 @@ impl WorkflowService {
                 permissions,
                 trigger_step_id.map(String::from),
                 effective_workspace,
+                execution_mode,
             )
             .await?;
 
@@ -1150,7 +1179,7 @@ impl WorkflowService {
         };
         let mut count = 0usize;
         for inst in &result.items {
-            let parent_ref = if inst.parent_session_id.starts_with("trigger-")
+            let parent_ref = if is_synthetic_session_id(&inst.parent_session_id)
                 || inst.parent_session_id == "manual"
             {
                 None
@@ -1201,6 +1230,120 @@ impl WorkflowService {
         event_data: Value,
     ) -> Result<(), WorkflowError> {
         self.engine.respond_to_event(instance_id, step_id, event_data).await
+    }
+
+    /// List intercepted actions for a shadow-mode instance.
+    pub async fn list_intercepted_actions(
+        &self,
+        instance_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<InterceptedActionPage, WorkflowError> {
+        self.store.list_intercepted_actions(instance_id, limit, offset)
+    }
+
+    /// Get a summary of intercepted actions for a shadow-mode instance.
+    pub async fn get_shadow_summary(
+        &self,
+        instance_id: i64,
+    ) -> Result<ShadowSummary, WorkflowError> {
+        self.store.get_shadow_summary(instance_id)
+    }
+
+    /// Run workflow unit tests defined on the workflow definition.
+    /// Optionally filter to specific test names.
+    pub async fn run_tests(
+        &self,
+        definition_name: &str,
+        version: Option<&str>,
+        test_names: Option<&[String]>,
+        auto_respond: bool,
+        cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Result<(Vec<hive_workflow::TestResult>, usize), WorkflowError> {
+        let (def, _yaml) = if let Some(v) = version {
+            self.get_definition(definition_name, v).await?
+        } else {
+            self.get_latest_definition(definition_name).await?
+        };
+        if def.tests.is_empty() {
+            return Ok((vec![], 0));
+        }
+        let engine = &self.engine;
+
+        // Collect the test cases to run (respecting optional filter).
+        let cases: Vec<&hive_workflow::WorkflowTestCase> = def
+            .tests
+            .iter()
+            .filter(|tc| {
+                test_names.map_or(true, |filter| filter.iter().any(|n| n == &tc.name))
+            })
+            .collect();
+        let total = cases.len();
+
+        let mut results = Vec::new();
+        for (idx, tc) in cases.iter().enumerate() {
+            // Check cancellation before starting next test.
+            if let Some(ref flag) = cancel {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info!(definition_name, test_name = %tc.name, "test run cancelled before test {}/{}", idx + 1, total);
+                    break;
+                }
+            }
+
+            // Emit "test started" progress event.
+            engine
+                .emit_event(hive_workflow::WorkflowEvent::TestCaseStarted {
+                    definition_name: definition_name.to_string(),
+                    test_name: tc.name.clone(),
+                    index: idx,
+                    total,
+                })
+                .await;
+
+            let result = {
+                // Create a per-test workspace so agents spawned during the
+                // test have a workspace_path (and thus use the AgentSpec path
+                // that correctly propagates shadow_mode).
+                let ws = self.workspaces_base_dir.as_ref().map(|base| {
+                    let dir = base.join(format!("test-{}", uuid::Uuid::new_v4())).join("workspace");
+                    let _ = std::fs::create_dir_all(&dir);
+                    dir.to_string_lossy().into_owned()
+                });
+                hive_workflow::run_test_case(engine, &def, tc, auto_respond, ws).await?
+            };
+
+            // Emit "test completed" progress event.
+            engine
+                .emit_event(hive_workflow::WorkflowEvent::TestCaseCompleted {
+                    definition_name: definition_name.to_string(),
+                    test_name: tc.name.clone(),
+                    passed: result.passed,
+                    duration_ms: result.duration_ms,
+                    index: idx,
+                    total,
+                })
+                .await;
+
+            results.push(result);
+        }
+
+        // Emit "all done" event.
+        let passed = results.iter().filter(|r| r.passed).count();
+        let cancelled = results.len() < total;
+        engine
+            .emit_event(hive_workflow::WorkflowEvent::TestRunCompleted {
+                definition_name: definition_name.to_string(),
+                total,
+                passed,
+                failed: results.iter().filter(|r| !r.passed).count(),
+            })
+            .await;
+
+        if cancelled {
+            tracing::info!(definition_name, completed = results.len(), total, "test run cancelled");
+        }
+
+        Ok((results, total))
     }
 
     /// List pending workflow feedback requests for a given parent session.
@@ -1425,6 +1568,7 @@ impl StepExecutor for ServiceStepExecutor {
         // Use per-step permissions if provided, otherwise fall back to context
         let effective_permissions =
             if step_permissions.is_empty() { &ctx.permissions } else { step_permissions };
+        let shadow = ctx.execution_mode == hive_workflow::types::ExecutionMode::Shadow;
         match runner {
             Some(r) => {
                 // Recovery path: if we have an existing agent from a previous
@@ -1443,7 +1587,7 @@ impl StepExecutor for ServiceStepExecutor {
                         .await
                     {
                         Ok(_) => {
-                            let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                            let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                                 None
                             } else {
                                 Some(ctx.parent_session_id.as_str())
@@ -1464,7 +1608,8 @@ impl StepExecutor for ServiceStepExecutor {
                 // Only pass session_id to the agent runner when there is a real
                 // chat session backing this workflow.  Trigger-launched workflows
                 // use a sentinel parent_session_id that is not a real session.
-                let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                // The test runner also uses a synthetic "test-runner" id.
+                let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())
@@ -1482,6 +1627,7 @@ impl StepExecutor for ServiceStepExecutor {
                             ctx.attachments_dir.as_deref(),
                             session_id,
                             agent_name,
+                            shadow,
                         )
                         .await?;
 
@@ -1544,7 +1690,7 @@ impl StepExecutor for ServiceStepExecutor {
                             }
                         });
 
-                    let (_agent_id, result) = r
+                    let (_agent_id, result, intercepted_calls, interactions) = r
                         .spawn_and_wait_agent(
                             persona_id,
                             task,
@@ -1556,8 +1702,58 @@ impl StepExecutor for ServiceStepExecutor {
                             session_id,
                             Some(on_spawned),
                             agent_name,
+                            shadow,
+                            ctx.auto_respond_interactions,
                         )
                         .await?;
+
+                    let now_ms = || std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+
+                    // Persist intercepted tool calls from shadow-mode agents
+                    for ic in intercepted_calls {
+                        let action = hive_workflow::InterceptedAction {
+                            id: 0,
+                            instance_id: ctx.instance_id,
+                            step_id: ctx.step_id.clone(),
+                            kind: "tool_call".to_string(),
+                            timestamp_ms: now_ms(),
+                            details: serde_json::json!({
+                                "tool_id": ic.tool_id,
+                                "arguments": ic.input,
+                            }),
+                        };
+                        if let Err(e) = self.store.save_intercepted_action(&action) {
+                            tracing::warn!(
+                                instance_id = %ctx.instance_id,
+                                step_id = %ctx.step_id,
+                                tool_id = %ic.tool_id,
+                                "failed to persist intercepted tool call: {e}"
+                            );
+                        }
+                    }
+
+                    // Persist auto-responded agent interactions (ask_user, tool_approval)
+                    for ia in interactions {
+                        let action = hive_workflow::InterceptedAction {
+                            id: 0,
+                            instance_id: ctx.instance_id,
+                            step_id: ctx.step_id.clone(),
+                            kind: ia.kind.clone(),
+                            timestamp_ms: now_ms(),
+                            details: ia.details,
+                        };
+                        if let Err(e) = self.store.save_intercepted_action(&action) {
+                            tracing::warn!(
+                                instance_id = %ctx.instance_id,
+                                step_id = %ctx.step_id,
+                                kind = %ia.kind,
+                                "failed to persist agent interaction: {e}"
+                            );
+                        }
+                    }
 
                     Ok(result)
                 }
@@ -1588,7 +1784,7 @@ impl StepExecutor for ServiceStepExecutor {
         let runner = self.agent_runner.lock().await.clone();
         match runner {
             Some(r) => {
-                let session_id = if ctx.parent_session_id.starts_with("trigger-") {
+                let session_id = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())
@@ -1682,6 +1878,7 @@ impl StepExecutor for ServiceStepExecutor {
                 ctx.permissions.clone(),
                 None,
                 ctx.workspace_path.clone(),
+                ctx.execution_mode,
             )
             .await
             .map_err(|e| format!("launch child workflow: {e}"))?;
@@ -1707,7 +1904,7 @@ impl StepExecutor for ServiceStepExecutor {
         let scheduler = self.task_scheduler.lock().await.clone();
         match scheduler {
             Some(s) => {
-                let parent_sid = if ctx.parent_session_id.starts_with("trigger-") {
+                let parent_sid = if is_synthetic_session_id(&ctx.parent_session_id) {
                     None
                 } else {
                     Some(ctx.parent_session_id.as_str())

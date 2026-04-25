@@ -183,6 +183,7 @@ impl SkillsService {
                 role: "system".to_string(),
                 content: system_prompt,
                 content_parts: vec![],
+                blocks: vec![],
             }],
             required_capabilities: BTreeSet::new(),
             preferred_models: Some(vec![model.to_string()]),

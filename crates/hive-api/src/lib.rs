@@ -58,6 +58,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use tokio::sync::Notify;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -269,6 +270,8 @@ pub struct AppState {
     pub local_models: Option<Arc<LocalModelService>>,
     pub scheduler: Arc<SchedulerService>,
     pub workflows: Arc<hive_workflow_service::WorkflowService>,
+    /// Cancel token for the currently-running test suite (if any).
+    pub test_cancel: Arc<parking_lot::Mutex<Option<Arc<AtomicBool>>>>,
     pub trigger_manager: Arc<hive_workflow_service::TriggerManager>,
     pub knowledge_graph_path: Arc<PathBuf>,
     pub entity_graph: Arc<hive_core::EntityGraph>,
@@ -1091,6 +1094,7 @@ impl AppState {
             local_models: Some(local_models),
             scheduler,
             workflows,
+            test_cancel: Arc::new(parking_lot::Mutex::new(None)),
             trigger_manager,
             knowledge_graph_path,
             entity_graph,
@@ -1814,6 +1818,7 @@ impl AppState {
             local_models: None,
             scheduler,
             workflows,
+            test_cancel: Arc::new(parking_lot::Mutex::new(None)),
             knowledge_graph_path: Arc::new(PathBuf::from("test-kg.db")),
             entity_graph,
             runtime_manager: None,
@@ -2474,6 +2479,30 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/workflows/instances/{instance_id}/steps/{step_id}/respond",
             post(workflows::wf_respond_to_gate),
         )
+        .route(
+            "/api/v1/workflows/instances/{instance_id}/intercepted-actions",
+            get(workflows::wf_intercepted_actions),
+        )
+        .route(
+            "/api/v1/workflows/instances/{instance_id}/shadow-summary",
+            get(workflows::wf_shadow_summary),
+        )
+        .route(
+            "/api/v1/workflows/analyze",
+            post(workflows::wf_analyze),
+        )
+        .route(
+            "/api/v1/workflows/test",
+            post(workflows::wf_run_tests),
+        )
+        .route(
+            "/api/v1/workflows/test/cancel",
+            post(workflows::wf_cancel_tests),
+        )
+        .route(
+            "/api/v1/workflows/simulate-trigger",
+            post(workflows::wf_simulate_trigger),
+        )
         .route("/api/v1/workflows/events", get(workflows::wf_event_stream))
         .route("/api/v1/workflows/topics", get(workflows::wf_list_topics))
         .route("/api/v1/workflows/triggers/active", get(workflows::wf_list_active_triggers))
@@ -2924,6 +2953,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,
@@ -3925,6 +3955,7 @@ mod tests {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         }
     }
 
@@ -4024,6 +4055,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch workflow 1");
@@ -4038,6 +4070,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch workflow 2");
@@ -4106,6 +4139,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf A");
@@ -4120,6 +4154,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf B");
@@ -4195,6 +4230,7 @@ output:
                 None,
                 None,
                 None,
+                ExecutionMode::Normal,
             )
             .await
             .expect("launch wf");

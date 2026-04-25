@@ -269,6 +269,7 @@ pub(crate) async fn api_launch_bot_with_prompt(
         permission_rules: Vec::new(),
         tool_limits: None,
         persona_id: Some(body.persona_id.clone()),
+        shadow_mode: false,
     };
 
     state.chat.launch_bot(config).await.map(Json).map_err(chat_error)

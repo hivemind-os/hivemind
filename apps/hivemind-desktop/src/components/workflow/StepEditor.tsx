@@ -1415,6 +1415,13 @@ export function StepConfigFields(props: StepConfigFieldsProps) {
           <input ref={captureFieldRef('collection')} style={{ ...inputStyle, border: fieldBorder('collection') }} value={props.getCfg().collection ?? ''} onInput={(e) => doUpdate('collection', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
           <div style={labelStyle}>Item Variable</div>
           <input style={inputStyle} value={props.getCfg().item_var ?? 'item'} onInput={(e) => doUpdate('item_var', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
+          <div style={labelStyle}>
+            Preview Count
+            <span style={{ 'font-weight': 'normal', 'font-size': '11px', 'margin-left': '6px', color: '#94a3b8' }}>
+              Pauses after this many items for review (0 = disabled)
+            </span>
+          </div>
+          <input style={inputStyle} type="number" min="0" value={props.getCfg().preview_count ?? 0} onInput={(e) => doUpdate('preview_count', parseInt(e.currentTarget.value) || 0)} onBlur={() => doPush()} disabled={ro()} />
         </>);
 
       case 'while':

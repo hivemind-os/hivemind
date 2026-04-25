@@ -187,9 +187,137 @@ steps:
 
 When an email arrives, HiveMind OS spawns a support agent with access to the uploaded product manual, drafts a knowledgeable response, and sends it — no human in the loop required.
 
+## Testing & Shadow Mode
+
+Building a workflow that sends emails, invokes agents, or calls external APIs is powerful — but mistakes during development can be costly (thousands of emails sent, LLM tokens burned, or data modified in production). HiveMind OS provides a built-in **test runner** and **shadow mode** to let you validate workflows safely before they go live.
+
+### Shadow Mode
+
+Every workflow test runs in **Shadow mode** — an execution mode where side-effecting actions are **intercepted and recorded** instead of actually executed. Shadow mode applies at every level:
+
+- **`call_tool` steps** — tools classified as having side effects (writes, sends, deletes) are intercepted. Read-only tools still execute normally so the workflow has realistic data to work with.
+- **`invoke_agent` steps** — the agent runs with `shadow_mode=true`, meaning any tools the agent calls with side effects are also intercepted. The agent still reasons and plans normally — it just can't *do* anything dangerous.
+- **`launch_workflow`**, **`schedule_task`**, **`signal_agent`** — all intercepted and recorded.
+
+Intercepted actions are stored with full details (tool ID, arguments, target workflow, etc.) so you can inspect exactly what *would have* happened in a real run.
+
+### Test Cases
+
+Test cases are defined directly in the workflow YAML under a `tests` key:
+
+```yaml
+name: user/email-support-responder
+mode: background
+steps:
+  # ... steps ...
+
+tests:
+  - name: billing_inquiry
+    description: "Routes billing questions to the billing team"
+    inputs:
+      from: "customer@example.com"
+      subject: "Invoice question"
+      body: "I need a copy of my last invoice."
+    expectations:
+      status: completed
+      steps_completed: [classify, forward_to_billing]
+      steps_not_reached: [auto_respond]
+
+  - name: general_question
+    inputs:
+      from: "user@example.com"
+      subject: "How do I reset my password?"
+      body: "I forgot my password and can't log in."
+    expectations:
+      status: completed
+      steps_completed: [classify, auto_respond, send_reply]
+```
+
+Each test case specifies:
+
+| Field | Description |
+|-------|-------------|
+| `name` | A unique identifier for the test |
+| `description` | Optional human-readable description |
+| `inputs` | Trigger input data (simulates the incoming event) |
+| `trigger_step_id` | Which trigger to activate (defaults to first) |
+| `shadow_outputs` | Per-step output overrides — stubs for expensive or non-deterministic steps |
+| `expected_tool_calls` | Assert that an agent step called specific tools with expected arguments |
+| `expectations` | Assertions on the final workflow state |
+
+### Shadow Outputs (Mocking Steps)
+
+Use `shadow_outputs` to stub specific steps — the executor skips real execution and uses the provided value as the step's output. This is invaluable for:
+
+- **Mocking LLM responses** — make agent steps deterministic by providing a fixed output
+- **Isolating branches** — stub the classification step's output to test each routing path
+- **Speed** — skip expensive steps when you only want to test control flow
+
+```yaml
+tests:
+  - name: billing_route_test
+    inputs:
+      from: "test@example.com"
+      subject: "Billing"
+      body: "Invoice question"
+    shadow_outputs:
+      classify:
+        category: "billing"
+    expectations:
+      status: completed
+      steps_completed: [classify, forward_to_billing]
+      steps_not_reached: [auto_respond]
+```
+
+### Expected Tool Calls
+
+For agent steps that run in shadow mode (not mocked via `shadow_outputs`), you can assert which tools the agent attempted to call:
+
+```yaml
+tests:
+  - name: agent_sends_email
+    inputs:
+      from: "customer@example.com"
+      subject: "Help"
+      body: "I need help with my account"
+    expected_tool_calls:
+      respond:
+        - tool_id: comm.send_external_message
+          arguments:
+            to: "customer@example.com"
+```
+
+Arguments use **partial matching** — only the keys you specify are checked. The real call may have additional keys.
+
+::: warning
+`expected_tool_calls` and `shadow_outputs` cannot be used on the same step. A mocked step skips execution entirely and produces no intercepted actions to assert against.
+:::
+
+### Expectations
+
+The `expectations` block asserts on the final state of the workflow:
+
+| Field | What it checks |
+|-------|---------------|
+| `status` | Terminal status — `"completed"` or `"failed"` |
+| `output` | Workflow output value (partial deep-equal) |
+| `steps_completed` | Steps that must have reached `Completed` status |
+| `steps_not_reached` | Steps that must NOT have been reached (`Pending` or `Skipped`) |
+| `intercepted_action_counts` | Expected counts by kind (e.g. `tool_calls: 2`, `agent_invocations: 1`) |
+
+### Agent Interactions in Tests
+
+When an agent step runs during a test, the agent may call `ask_user` (to ask questions) or request tool approvals. In test mode, these interactions are **automatically responded to**:
+
+- **`ask_user` questions** — the first choice is selected, or `"proceed"` is sent for freeform questions
+- **Tool approvals** — automatically approved
+
+These auto-responded interactions are recorded and visible in the test results under the **Actions** tab, alongside intercepted tool calls. This lets you verify that the agent asked the right questions and requested the right tools, even though no human was in the loop.
+
 ## Learn More
 
 - [Workflows Guide](/guides/workflows) — Step-by-step tutorial for building, launching, and managing workflows
+- [Workflows Guide → Running Tests](/guides/workflows#running-tests) — How to use the test runner in the visual designer
 - [Email Support Workflow](/examples/pr-review-workflow) — Full end-to-end example with classification and attachments
 - [Onboarding Chat Workflow](/examples/chat-workflow-onboarding) — Interactive guided workflow with feedback gates
 - [Daily Automation](/examples/daily-automation) — Scheduled background workflow recipes

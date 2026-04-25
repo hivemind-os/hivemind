@@ -2,6 +2,58 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
+// Execution mode (normal vs shadow/test)
+// ---------------------------------------------------------------------------
+
+/// Controls whether a workflow instance runs in production or test/shadow mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Normal production execution — all side effects are real.
+    #[default]
+    Normal,
+    /// Shadow/test execution — side-effecting actions are intercepted and
+    /// recorded without actually executing them.
+    Shadow,
+}
+
+// ---------------------------------------------------------------------------
+// Intercepted actions (shadow mode)
+// ---------------------------------------------------------------------------
+
+/// A side-effecting action that was intercepted during shadow mode execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterceptedAction {
+    pub id: i64,
+    pub instance_id: i64,
+    pub step_id: String,
+    /// Category of the intercepted action (e.g. "tool_call", "agent_invocation",
+    /// "workflow_launch", "scheduled_task", "agent_signal").
+    pub kind: String,
+    pub timestamp_ms: u64,
+    /// Tool-specific structured data about what would have happened.
+    pub details: serde_json::Value,
+}
+
+/// Summary counters derived from intercepted actions for a shadow instance.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ShadowSummary {
+    pub total_intercepted: u32,
+    pub tool_calls_intercepted: u32,
+    pub agent_invocations_intercepted: u32,
+    pub workflow_launches_intercepted: u32,
+    pub scheduled_tasks_intercepted: u32,
+    pub agent_signals_intercepted: u32,
+}
+
+/// Paginated result for intercepted actions queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterceptedActionPage {
+    pub items: Vec<InterceptedAction>,
+    pub total: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Workflow mode
 // ---------------------------------------------------------------------------
 
@@ -39,6 +91,127 @@ pub struct WorkflowAttachment {
     pub size_bytes: Option<u64>,
 }
 
+// ---------------------------------------------------------------------------
+// Workflow test case types
+// ---------------------------------------------------------------------------
+
+/// A test case for a workflow definition.  Stored alongside the definition
+/// in the `tests` field so they travel with the YAML.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowTestCase {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Which trigger step to activate (defaults to first trigger).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_step_id: Option<String>,
+    /// Trigger inputs for this test case.
+    #[serde(default)]
+    pub inputs: serde_json::Value,
+    /// Per-step output overrides.  When a step_id is present here the
+    /// executor skips real/shadow execution and uses this value as the
+    /// step's output.  Useful for stubbing agents or external calls.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub shadow_outputs: HashMap<String, serde_json::Value>,
+    /// Per-step expected tool calls.  For agent steps that run in shadow
+    /// mode, these assert against the real intercepted tool calls recorded
+    /// during execution.  Map of step_id → list of expected calls.
+    /// Uses partial matching on arguments: only specified keys are checked.
+    ///
+    /// NOTE: Cannot be used on the same step as `shadow_outputs` — a mocked
+    /// step skips execution and produces no real intercepted actions.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty", alias = "mock_tool_calls")]
+    pub expected_tool_calls: HashMap<String, Vec<ExpectedToolCall>>,
+    /// What to assert after the workflow completes.
+    #[serde(default)]
+    pub expectations: TestExpectations,
+}
+
+/// An expected tool call for asserting agent behavior in test cases.
+/// When a workflow test runs an agent step in shadow mode, the agent's
+/// side-effecting tool calls are intercepted and recorded.  This struct
+/// defines what we expect the agent to have called.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpectedToolCall {
+    pub tool_id: String,
+    /// Expected arguments (partial match).  Only specified keys are checked;
+    /// the real call may have additional keys.  If `None`, any arguments match.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "parameters")]
+    pub arguments: Option<serde_json::Value>,
+}
+
+/// Assertions applied to the completed workflow instance.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TestExpectations {
+    /// Expected terminal status (e.g. "completed", "failed").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Expected workflow output (partial deep-equal).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+    /// Steps that must have reached `Completed` status.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps_completed: Vec<String>,
+    /// Steps that must NOT have been reached (still `Pending` or `Skipped`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps_not_reached: Vec<String>,
+    /// Expected intercepted-action counts by kind.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub intercepted_action_counts: HashMap<String, u32>,
+}
+
+/// Result of running a single workflow test case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestResult {
+    pub test_name: String,
+    pub passed: bool,
+    pub instance_id: i64,
+    pub failures: Vec<TestFailure>,
+    pub duration_ms: u64,
+    /// Actual final status of the workflow instance (snake_case).
+    #[serde(default)]
+    pub actual_status: Option<String>,
+    /// Actual workflow output, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_output: Option<serde_json::Value>,
+    /// Per-step results in definition order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_results: Vec<StepStateSnapshot>,
+    /// Intercepted side-effect actions (capped; see `intercepted_actions_total`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intercepted_actions: Vec<InterceptedActionSnapshot>,
+    /// Total intercepted actions (may exceed len of `intercepted_actions` if truncated).
+    #[serde(default)]
+    pub intercepted_actions_total: u32,
+}
+
+/// Lightweight snapshot of a step's final state for test result display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepStateSnapshot {
+    pub step_id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Lightweight snapshot of an intercepted action for test result display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterceptedActionSnapshot {
+    pub step_id: String,
+    pub kind: String,
+    pub details: serde_json::Value,
+}
+
+/// A single assertion failure within a test result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestFailure {
+    pub expectation: String,
+    pub expected: String,
+    pub actual: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
     /// Immutable identifier for this workflow definition. Auto-generated if not
@@ -74,6 +247,9 @@ pub struct WorkflowDefinition {
     /// File attachments associated with this workflow definition.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<WorkflowAttachment>,
+    /// Test cases for this workflow (travel with the YAML definition).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<WorkflowTestCase>,
     /// `true` for factory-shipped workflows seeded from bundled YAML embedded
     /// in the binary.  Bundled workflows cannot be deleted, only archived
     /// (hidden).  Users can edit them and later reset to defaults.
@@ -325,6 +501,9 @@ pub enum ControlFlowDef {
         item_var: String,
         #[serde(default)]
         body: Vec<String>,
+        /// When set (and > 0), pause after this many iterations for user review.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preview_count: Option<u32>,
     },
     While {
         condition: String,
@@ -621,6 +800,18 @@ pub struct WorkflowInstance {
     /// Active loop iterations for ForEach/While control flow steps.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub active_loops: HashMap<String, LoopState>,
+    /// Execution mode: Normal (real) or Shadow (intercepted side effects).
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
+    /// Per-step output overrides for unit-test runs.  When present, the
+    /// executor skips real/shadow execution of that step and injects the
+    /// provided value as the step's output.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub shadow_overrides: HashMap<String, serde_json::Value>,
+    /// When true, agent interactions (ask_user, tool approvals) are
+    /// automatically responded to.  Used by the test runner.
+    #[serde(default)]
+    pub auto_respond_interactions: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -711,6 +902,12 @@ pub struct LoopState {
     /// Safety limit for While loops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_iterations: Option<u32>,
+    /// True once the preview checkpoint has fired (prevents re-pausing).
+    #[serde(default)]
+    pub preview_paused: bool,
+    /// Accumulated body-step outputs from the preview batch (one entry per iteration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_results: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -733,6 +930,7 @@ pub enum WorkflowEvent {
         definition_name: String,
         parent_session_id: String,
         mode: WorkflowMode,
+        execution_mode: ExecutionMode,
     },
     InstanceStarted {
         instance_id: i64,
@@ -791,6 +989,29 @@ pub enum WorkflowEvent {
         instance_id: i64,
         step_id: String,
     },
+    /// A test case is about to run.
+    TestCaseStarted {
+        definition_name: String,
+        test_name: String,
+        index: usize,
+        total: usize,
+    },
+    /// A test case finished (pass or fail).
+    TestCaseCompleted {
+        definition_name: String,
+        test_name: String,
+        passed: bool,
+        duration_ms: u64,
+        index: usize,
+        total: usize,
+    },
+    /// All requested test cases have finished.
+    TestRunCompleted {
+        definition_name: String,
+        total: usize,
+        passed: usize,
+        failed: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -817,6 +1038,13 @@ pub struct WorkflowDefinitionSummary {
     /// `true` when auto-triggers are suspended for this definition.
     #[serde(default)]
     pub triggers_paused: bool,
+    /// Timestamp (ms since epoch) of the last successful normal-mode run of this definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_successful_run_at_ms: Option<u64>,
+    /// `true` when the definition has never had a successful normal-mode run
+    /// or has been modified since the last successful run.
+    #[serde(default)]
+    pub is_untested: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -849,6 +1077,9 @@ pub struct WorkflowInstanceSummary {
     /// Whether this instance has been archived (hidden from default listings).
     #[serde(default)]
     pub archived: bool,
+    /// Execution mode: Normal (real) or Shadow (intercepted side effects).
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -2,6 +2,21 @@ use async_trait::async_trait;
 use hive_workflow::types::{PermissionEntry, ScheduleTaskDef, SignalTarget, WorkflowAttachment};
 use serde_json::Value;
 
+/// A tool call that was intercepted in shadow mode.
+#[derive(Debug, Clone)]
+pub struct InterceptedToolCall {
+    pub tool_id: String,
+    pub input: Value,
+}
+
+/// An agent interaction that was auto-responded to during a test run.
+#[derive(Debug, Clone)]
+pub struct AgentInteraction {
+    /// `"ask_user"` or `"tool_approval"`
+    pub kind: String,
+    pub details: Value,
+}
+
 /// Extension trait for executing tools within workflows.
 /// Implemented in hive-api to avoid circular dependencies.
 #[async_trait]
@@ -34,6 +49,7 @@ pub trait WorkflowAgentRunner: Send + Sync {
         attachments_dir: Option<&str>,
         session_id: Option<&str>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<String, String>;
 
     /// Wait for a previously spawned agent to complete and return its result.
@@ -49,6 +65,14 @@ pub trait WorkflowAgentRunner: Send + Sync {
     /// `spawn_agent` and `wait_for_agent`.
     /// The `on_spawned` callback is invoked with the agent_id immediately after
     /// spawning but before waiting, allowing callers to persist the mapping.
+    ///
+    /// Returns `(agent_id, result_value, intercepted_tool_calls)` where
+    /// `intercepted_tool_calls` contains tool calls that were intercepted in
+    /// shadow mode (tool_id, input JSON).
+    ///
+    /// When `auto_respond` is true, any `ask_user` questions and tool approval
+    /// requests from the agent are automatically answered, preventing the agent
+    /// from blocking indefinitely (used by the workflow test runner).
     async fn spawn_and_wait_agent(
         &self,
         persona_id: &str,
@@ -61,7 +85,9 @@ pub trait WorkflowAgentRunner: Send + Sync {
         session_id: Option<&str>,
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
-    ) -> Result<(String, Value), String>;
+        shadow_mode: bool,
+        auto_respond: bool,
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>, Vec<AgentInteraction>), String>;
 
     /// Signal an agent or chat session.
     async fn signal_agent(&self, target: &SignalTarget, content: &str) -> Result<Value, String>;

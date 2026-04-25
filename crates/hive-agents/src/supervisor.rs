@@ -1304,6 +1304,7 @@ mod tests {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         }
     }
 

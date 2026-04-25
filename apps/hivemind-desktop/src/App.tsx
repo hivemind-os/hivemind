@@ -994,6 +994,28 @@ const App = () => {
     (session()?.messages ?? []).filter((m) => m.status === 'queued' || m.status === 'processing')
   );
 
+  // Defensive recovery: if the session stays "running" for 30s without any
+  // SSE events, re-poll the snapshot.  This catches edge cases where the
+  // terminal event (Done/Error) was lost in transit.
+  let staleRunningTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearStaleTimer = () => { if (staleRunningTimer) { clearTimeout(staleRunningTimer); staleRunningTimer = null; } };
+  createEffect(() => {
+    const state = activeSessionState();
+    const sid = selectedSessionId();
+    clearStaleTimer();
+    if (state === 'running' && sid) {
+      staleRunningTimer = setTimeout(() => {
+        staleRunningTimer = null;
+        // Only re-sync if still running — a normal event may have cleared it.
+        if (activeSessionState() === 'running') {
+          console.debug('[stale-running] session still running after 30s with no events — re-syncing');
+          void syncChatState(sid);
+        }
+      }, 30_000);
+    }
+  });
+  onCleanup(clearStaleTimer);
+
   const clearChatState = () => {
     clearStreamingState();
     setSessions([]);

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use hive_agents::{
-    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole, BotConfig,
+    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole,
     SupervisorEvent,
 };
 use hive_chat::ChatService;
@@ -21,7 +21,8 @@ use hive_scheduler::SchedulerService;
 use hive_tools::ToolRegistry;
 use hive_workflow::types::{PermissionEntry, ScheduleTaskDef, SignalTarget, WorkflowAttachment};
 use hive_workflow_service::{
-    WorkflowAgentRunner, WorkflowInteractionGate, WorkflowTaskScheduler, WorkflowToolExecutor,
+    AgentInteraction, InterceptedToolCall, WorkflowAgentRunner, WorkflowInteractionGate,
+    WorkflowTaskScheduler, WorkflowToolExecutor,
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -220,6 +221,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         attachments_dir: Option<&str>,
         session_id: Option<&str>,
         agent_name: Option<&str>,
+        shadow_mode: bool,
     ) -> Result<String, String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
@@ -315,6 +317,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 tool_limits: None,
                 persona_id: Some(persona.id.clone()),
                 workflow_managed: true,
+                shadow_mode,
             };
 
             let supervisor = chat
@@ -393,6 +396,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 tool_limits: None,
                 persona_id: Some(persona.id.clone()),
                 workflow_managed: true,
+                shadow_mode,
             };
 
             let ws_override = std::path::PathBuf::from(wp);
@@ -416,33 +420,71 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
 
         // No workspace and no session → launch as a standalone bot with its
         // own per-bot workspace directory.
-        let config = BotConfig {
-            id: String::new(),
-            friendly_name: agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name),
+        // Use the bot supervisor directly (like the workspace path) so we
+        // can pass shadow_mode correctly. BotConfig.to_agent_spec() does
+        // not support shadow_mode.
+        let supervisor = chat
+            .get_or_create_bot_supervisor()
+            .await
+            .map_err(|e| format!("get bot supervisor: {e}"))?;
+
+        let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+        let agent_id = format!("bot-{suffix}");
+
+        let agent_perms = if permission_rules.is_empty() {
+            None
+        } else {
+            Some(Arc::new(parking_lot::Mutex::new(
+                hive_contracts::SessionPermissions::with_rules(permission_rules),
+            )))
+        };
+
+        let display_name =
+            agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name);
+
+        let spec = hive_agents::AgentSpec {
+            id: agent_id.clone(),
+            name: display_name.clone(),
+            friendly_name: display_name,
             description: persona.description.clone(),
-            avatar,
-            color: persona.color.clone(),
+            role: AgentRole::Custom(persona.id.clone()),
             model: persona.preferred_models.as_ref().and_then(|v| v.first().cloned()),
             preferred_models: persona.preferred_models.clone(),
             loop_strategy: Some(persona.loop_strategy.clone()),
             tool_execution_mode: Some(persona.tool_execution_mode),
             system_prompt,
-            launch_prompt: task.to_string(),
             allowed_tools: persona.allowed_tools.clone(),
+            avatar,
+            color: persona.color.clone(),
             data_class: hive_classification::DataClass::Public,
-            role: AgentRole::Custom(persona.id.clone()),
-            mode: hive_agents::BotMode::OneShot,
-            active: false,
-            created_at: String::new(),
-            timeout_secs,
-            permission_rules,
+            keep_alive: false,
+            idle_timeout_secs: None,
             tool_limits: None,
             persona_id: Some(persona.id.clone()),
+            workflow_managed: true,
+            shadow_mode,
         };
 
-        let summary = chat.launch_bot(config).await.map_err(|e| format!("launch bot: {e}"))?;
+        // Create a per-agent workspace under the bots directory.
+        let agent_workspace = chat.bot_workspace().join(&agent_id);
+        let _ = std::fs::create_dir_all(&agent_workspace);
 
-        Ok(summary.config.id.clone())
+        supervisor
+            .spawn_agent(spec, None, None, agent_perms, Some(agent_workspace))
+            .await
+            .map_err(|e| format!("spawn agent on bot supervisor: {e}"))?;
+
+        if !task.is_empty() {
+            supervisor
+                .send_to_agent(
+                    &agent_id,
+                    AgentMessage::Task { content: task.to_string(), from: None },
+                )
+                .await
+                .map_err(|e| format!("send task to agent: {e}"))?;
+        }
+
+        Ok(agent_id)
     }
 
     async fn wait_for_agent(
@@ -518,7 +560,9 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         session_id: Option<&str>,
         on_spawned: Option<Box<dyn FnOnce(String) + Send + Sync>>,
         agent_name: Option<&str>,
-    ) -> Result<(String, Value), String> {
+        shadow_mode: bool,
+        auto_respond: bool,
+    ) -> Result<(String, Value, Vec<InterceptedToolCall>, Vec<AgentInteraction>), String> {
         let chat = self.chat.get().ok_or("workflow agent runner: ChatService not initialised")?;
 
         // Subscribe to supervisor events BEFORE spawning the agent
@@ -546,6 +590,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 attachments_dir,
                 session_id,
                 agent_name,
+                shadow_mode,
             )
             .await?;
 
@@ -555,16 +600,32 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
             cb(agent_id.clone());
         }
 
-        // Wait for completion using the pre-subscribed receiver
-        let deadline = timeout_secs
+        // Wait for completion using the pre-subscribed receiver.
+        // In test/auto_respond mode, apply a safety-net deadline even if
+        // the step definition didn't specify a timeout.
+        let effective_timeout = timeout_secs.or_else(|| if auto_respond { Some(120) } else { None });
+        let deadline = effective_timeout
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
+
+        let mut intercepted_calls: Vec<InterceptedToolCall> = Vec::new();
+        let mut agent_interactions: Vec<AgentInteraction> = Vec::new();
+
+        tracing::info!(
+            %agent_id,
+            auto_respond,
+            effective_timeout_secs = ?effective_timeout,
+            "spawn_and_wait_agent: entering event loop"
+        );
 
         loop {
             let event = if let Some(dl) = deadline {
                 match tokio::time::timeout_at(dl, rx.recv()).await {
                     Ok(ev) => ev,
                     Err(_) => {
-                        return Err(format!("agent timed out after {}s", timeout_secs.unwrap()));
+                        return Err(format!(
+                            "agent timed out after {}s",
+                            effective_timeout.unwrap()
+                        ));
                     }
                 }
             } else {
@@ -574,15 +635,144 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 Ok(SupervisorEvent::AgentCompleted { agent_id: ref completed_id, ref result })
                     if *completed_id == agent_id =>
                 {
+                    tracing::info!(
+                        %agent_id,
+                        "spawn_and_wait_agent: agent completed"
+                    );
                     let val = json!({
                         "agent_id": &agent_id,
                         "result": result,
                         "status": "completed",
                     });
-                    return Ok((agent_id, val));
+                    return Ok((agent_id, val, intercepted_calls, agent_interactions));
                 }
-                Ok(_) => continue,
-                Err(_) => return Err("supervisor event channel closed".to_string()),
+                // Capture shadow-mode tool interceptions from the agent
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::ToolCallIntercepted {
+                        ref tool_id,
+                        ref input,
+                    },
+                }) if *aid == agent_id => {
+                    intercepted_calls.push(InterceptedToolCall {
+                        tool_id: tool_id.clone(),
+                        input: input.clone(),
+                    });
+                    continue;
+                }
+                // Auto-respond to agent questions (ask_user) when in test mode.
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::QuestionAsked {
+                        ref request_id,
+                        ref text,
+                        ref choices,
+                        ref allow_freeform,
+                        ..
+                    },
+                }) if *aid == agent_id && auto_respond => {
+                    let auto_answer = if choices.is_empty() {
+                        "proceed".to_string()
+                    } else {
+                        choices[0].clone()
+                    };
+                    tracing::info!(
+                        agent_id = %aid,
+                        request_id = %request_id,
+                        answer = %auto_answer,
+                        "auto-responding to agent question in test mode"
+                    );
+                    agent_interactions.push(AgentInteraction {
+                        kind: "ask_user".to_string(),
+                        details: json!({
+                            "question": text,
+                            "choices": choices,
+                            "allow_freeform": allow_freeform,
+                            "auto_response": auto_answer,
+                        }),
+                    });
+                    let payload = if choices.is_empty() {
+                        hive_contracts::InteractionResponsePayload::Answer {
+                            selected_choice: None,
+                            selected_choices: None,
+                            text: Some("proceed".to_string()),
+                        }
+                    } else {
+                        hive_contracts::InteractionResponsePayload::Answer {
+                            selected_choice: Some(0),
+                            selected_choices: None,
+                            text: None,
+                        }
+                    };
+                    let response = hive_contracts::UserInteractionResponse {
+                        request_id: request_id.clone(),
+                        payload,
+                    };
+                    if let Err(e) = supervisor.respond_to_agent_interaction(aid, response) {
+                        tracing::warn!(
+                            agent_id = %aid,
+                            "failed to auto-respond to question: {e}"
+                        );
+                    }
+                    continue;
+                }
+                // Auto-approve tool approvals when in test mode.
+                Ok(SupervisorEvent::AgentOutput {
+                    agent_id: ref aid,
+                    event: hive_contracts::ReasoningEvent::UserInteractionRequired {
+                        ref request_id,
+                        ref tool_id,
+                        ref input,
+                        ref reason,
+                    },
+                }) if *aid == agent_id && auto_respond => {
+                    tracing::info!(
+                        agent_id = %aid,
+                        request_id = %request_id,
+                        tool_id = %tool_id,
+                        "auto-approving tool in test mode"
+                    );
+                    agent_interactions.push(AgentInteraction {
+                        kind: "tool_approval".to_string(),
+                        details: json!({
+                            "tool_id": tool_id,
+                            "input": input,
+                            "reason": reason,
+                            "auto_approved": true,
+                        }),
+                    });
+                    let response = hive_contracts::UserInteractionResponse {
+                        request_id: request_id.clone(),
+                        payload: hive_contracts::InteractionResponsePayload::ToolApproval {
+                            approved: true,
+                            allow_session: false,
+                            allow_agent: false,
+                        },
+                    };
+                    if let Err(e) = supervisor.respond_to_agent_interaction(aid, response) {
+                        tracing::warn!(
+                            agent_id = %aid,
+                            "failed to auto-approve tool: {e}"
+                        );
+                    }
+                    continue;
+                }
+                Ok(ref other) => {
+                    tracing::trace!(
+                        %agent_id,
+                        event_type = std::any::type_name_of_val(other),
+                        "spawn_and_wait_agent: ignoring unmatched event"
+                    );
+                    continue;
+                }
+                Err(ref e) => {
+                    tracing::error!(
+                        %agent_id,
+                        error = %e,
+                        "spawn_and_wait_agent: supervisor event channel error"
+                    );
+                    return Err(format!("supervisor event channel error: {e}"));
+                }
             }
         }
     }

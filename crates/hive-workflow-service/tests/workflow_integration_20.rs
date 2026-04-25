@@ -7,6 +7,7 @@
 use hive_workflow::executor::{ExecutionContext, NullEventEmitter, StepExecutor, WorkflowEngine};
 use hive_workflow::store::{WorkflowPersistence, WorkflowStore};
 use hive_workflow::types::*;
+use hive_workflow::ExecutionMode;
 use hive_workflow_service::WorkflowService;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -899,7 +900,7 @@ steps:
 async fn test_17_launch_missing_definition() {
     let svc = WorkflowService::in_memory().unwrap();
 
-    let result = svc.launch("nonexistent", None, json!({}), "sess-1", None, None, None, None).await;
+    let result = svc.launch("nonexistent", None, json!({}), "sess-1", None, None, None, None, ExecutionMode::Normal).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(

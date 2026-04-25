@@ -309,6 +309,7 @@ impl StepExecutor for FullStackExecutor {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         };
 
         let agent_id = spec.id.clone();

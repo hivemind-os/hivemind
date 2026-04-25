@@ -2,6 +2,7 @@ use crate::{BoxFuture, Tool, ToolError, ToolResult};
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::{ToolAnnotations, ToolApproval, ToolDefinition};
 use hive_workflow_service::WorkflowService;
+use hive_workflow::ExecutionMode;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -133,6 +134,7 @@ impl Tool for WorkflowLaunchTool {
                     None,
                     trigger_step_id,
                     self.workspace_path.as_deref(),
+                    ExecutionMode::Normal,
                 )
                 .await
                 .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;

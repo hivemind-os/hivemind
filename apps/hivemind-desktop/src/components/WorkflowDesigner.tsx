@@ -1,5 +1,5 @@
 import { Component, createSignal, createMemo, createEffect, onMount, onCleanup, For, Index, Show, untrack, ErrorBoundary, batch, type JSX } from 'solid-js';
-import { Wrench, Hand, Timer, RotateCcw, RotateCw, ClipboardList, AlertTriangle, Send, Paperclip, Sparkles, ArrowLeft, Save, LayoutGrid, Maximize2, Grid3x3, Code2, AlignLeft } from 'lucide-solid';
+import { Wrench, Hand, Timer, RotateCcw, RotateCw, ClipboardList, AlertTriangle, Send, Paperclip, Sparkles, ArrowLeft, Save, LayoutGrid, Maximize2, Grid3x3, Code2, AlignLeft, FlaskConical } from 'lucide-solid';
 
 import { GraphCanvas, type CanvasNode, type CanvasEdge } from './WorkflowCanvas';
 import PermissionRulesEditor, { type PermissionRule as WfPermissionRule } from './PermissionRulesEditor';
@@ -11,6 +11,7 @@ import { Button } from '~/ui/button';
 import { useTimerCleanup } from '~/lib/useTimerCleanup';
 import yaml from 'js-yaml';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // Extracted workflow sub-components
 import {
@@ -30,9 +31,30 @@ import { StepConfigFields, NodeEditorPanel } from './workflow/StepEditor';
 import { AiAssistPanel, type AiQuestion } from './workflow/AiAssistPanel';
 import { YamlEditorPanel } from './workflow/YamlEditorPanel';
 import { AttachmentsPanel } from './workflow/WorkflowPreview';
+import { TestsPanel, type WorkflowTestContext, type TriggerInputField } from './workflow/TestsPanel';
+import type { WorkflowTestCase, WorkflowTestResult } from '~/types';
 
 // Module-level counter for stable expression helper IDs across re-renders
 let _exprHelperNextId = 0;
+
+/** Client-side risk classification for visual indicators on canvas nodes. */
+function classifyStepRisk(stepType: string, subtype: string, config: Record<string, any>): 'safe' | 'caution' | 'danger' | 'unknown' {
+  if (stepType === 'trigger' || stepType === 'control_flow') return 'safe';
+  // Task steps
+  const kind = subtype;
+  if (kind === 'set_variable' || kind === 'delay' || kind === 'feedback_gate' || kind === 'event_gate') return 'safe';
+  if (kind === 'invoke_agent' || kind === 'invoke_prompt' || kind === 'launch_workflow' || kind === 'signal_agent') return 'caution';
+  if (kind === 'schedule_task') return 'danger';
+  if (kind === 'call_tool') {
+    const toolId: string = config.tool_id || '';
+    if (toolId.startsWith('connector.send_message') || toolId.startsWith('http.request') || toolId.startsWith('http.') || toolId.startsWith('process.start')) return 'danger';
+    // Heuristic: tools with "write", "delete", "send", "post", "create" in name
+    const lower = toolId.toLowerCase();
+    if (/\b(write|delete|send|post|create|update|remove|drop)\b/.test(lower)) return 'caution';
+    return 'safe';
+  }
+  return 'unknown';
+}
 
 // ── Types (re-exported from workflow/types.tsx) ────────────────────────
 // DesignerNode, DesignerEdge, WorkflowVariable, WorkflowAttachment,
@@ -301,6 +323,7 @@ function toYaml(
   variables: WorkflowVariable[],
   permissions: WfPermissionRule[],
   attachments: WorkflowAttachment[],
+  tests: WorkflowTestCase[],
 ): string {
   const doc: Record<string, any> = {
     id: wfId,
@@ -564,6 +587,10 @@ function toYaml(
   }
   doc.steps = steps;
 
+  if (tests.length > 0) {
+    doc.tests = tests;
+  }
+
   return yaml.dump(doc, { lineWidth: -1, noRefs: true, quotingType: "'", forceQuotes: false });
 }
 
@@ -587,6 +614,7 @@ function fromYaml(yamlStr: string): {
   variables: WorkflowVariable[];
   permissions: WfPermissionRule[];
   attachments: WorkflowAttachment[];
+  tests: WorkflowTestCase[];
 } {
   const def = parseSimpleYaml(yamlStr);
   const nodes: DesignerNode[] = [];
@@ -857,6 +885,7 @@ function fromYaml(yamlStr: string): {
       config,
       outputs,
       onError,
+      riskLevel: classifyStepRisk(node_type, subtype, config),
     });
 
     // Build edges from `next` and branch then/else and loop body
@@ -908,13 +937,24 @@ function fromYaml(yamlStr: string): {
       }))
     : [];
 
+  const tests: WorkflowTestCase[] = Array.isArray(def.tests)
+    ? def.tests.map((t: any) => ({
+        name: t.name ?? '',
+        description: t.description,
+        trigger_step_id: t.trigger_step_id,
+        inputs: t.inputs ?? {},
+        shadow_outputs: t.shadow_outputs,
+        expectations: t.expectations ?? {},
+      }))
+    : [];
+
   // Auto-layout only when positions were not persisted
   const hasPositions = nodes.length > 0 && nodes.every(n => n.x !== 0 || n.y !== 0);
   if (!hasPositions) {
     autoLayout(nodes, edges);
   }
 
-  return { nodes, edges, id, name, version, description, mode, resultMessage, variables, permissions, attachments };
+  return { nodes, edges, id, name, version, description, mode, resultMessage, variables, permissions, attachments, tests };
 }
 
 function autoLayout(nodes: DesignerNode[], edges: DesignerEdge[]): void {
@@ -1103,7 +1143,10 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
   const [wfAttachments, setWfAttachments] = createSignal<WorkflowAttachment[]>([]);
   const [wfMode, setWfMode] = createSignal<string>('background');
   const [wfResultMessage, setWfResultMessage] = createSignal<string>('');
-
+  const [wfTests, setWfTests] = createSignal<WorkflowTestCase[]>([]);
+  const [testResults, setTestResults] = createSignal<WorkflowTestResult[]>([]);
+  const [runningTests, setRunningTests] = createSignal(false);
+  const [testProgress, setTestProgress] = createSignal<Record<string, { state: 'running' | 'passed' | 'failed'; index: number; total: number }>>({});
   // ── Viewport (synced from GraphCanvas for UI display) ──
   const [panX, setPanX] = createSignal(0);
   const [panY, setPanY] = createSignal(0);
@@ -1112,6 +1155,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
   // ── UI state (not related to canvas rendering) ──
   const [showYaml, setShowYaml] = createSignal(false);
   const [showAttachments, setShowAttachments] = createSignal(false);
+  const [showTests, setShowTests] = createSignal(false);
   const [showDescPopup, setShowDescPopup] = createSignal(false);
   const [toast, setToast] = createSignal<{ text: string; type: 'success' | 'error' } | null>(null);
   const [snapEnabled, setSnapEnabled] = createSignal(true);
@@ -1234,6 +1278,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
                 'workflow_author.list_workflows': '📋 Checking existing workflows...',
                 'workflow_author.get_template': '📄 Loading workflow template...',
                 'workflow_author.lint_workflow': '🔎 Checking workflow quality...',
+                'workflow_author.submit_tests': '🧪 Generating test cases...',
                 'core.ask_user': '', // handled separately via onQuestion
               };
               if (tool_id in toolLabels && toolLabels[tool_id]) {
@@ -1270,6 +1315,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
                       if (result.variables) setVariables(result.variables);
                       if (result.permissions) setWfPermissions(result.permissions);
                       if (result.attachments) setWfAttachments(result.attachments);
+                      if (result.tests) setWfTests(result.tests);
                     });
                     setAiAssistResponse((prev) => prev + '\n✓ Workflow updated!\n');
                     showToast('Workflow updated by AI', 'success');
@@ -1277,6 +1323,26 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
                     setAiAssistResponse((prev) => prev + '\n✗ AI returned invalid YAML\n');
                     showToast('AI returned invalid YAML', 'error');
                   }
+                }
+                if (message) {
+                  setAiAssistResponse((prev) => prev + '\n' + message + '\n');
+                }
+              }
+
+              if (tool_id === 'workflow_author.submit_tests' && rawInput) {
+                let input = rawInput;
+                if (typeof input === 'string') {
+                  try { input = JSON.parse(input); } catch { /* keep as-is */ }
+                }
+                const tests = (typeof input === 'object' && input !== null && Array.isArray((input as any).tests))
+                  ? (input as any).tests as WorkflowTestCase[]
+                  : [];
+                const message = (typeof input === 'object' && input !== null) ? (input as any).message || '' : '';
+
+                if (tests.length > 0) {
+                  setWfTests(tests);
+                  setAiAssistResponse((prev) => prev + `\n🧪 ${tests.length} test case(s) added!\n`);
+                  showToast(`${tests.length} test case(s) generated`, 'success');
                 }
                 if (message) {
                   setAiAssistResponse((prev) => prev + '\n' + message + '\n');
@@ -1409,6 +1475,42 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
     return map;
   });
 
+  // Derive workflow test context from designer nodes for the TestsPanel
+  const testContext = createMemo((): WorkflowTestContext => {
+    const allNodes = nodes();
+    const stepIds = allNodes.map(n => n.id);
+    const triggerNodes = allNodes.filter(n => n.type === 'trigger');
+    const triggerStepIds = triggerNodes.map(n => n.id);
+
+    // Build per-task subtypes
+    const taskNodes = allNodes.filter(n => n.type === 'task');
+    const taskStepIds = taskNodes.map(n => n.id);
+    const taskStepSubtypes: Record<string, string> = {};
+    for (const n of taskNodes) {
+      taskStepSubtypes[n.id] = n.subtype ?? 'call_tool';
+    }
+
+    // Build per-trigger subtypes and input schemas
+    const triggerSubtypes: Record<string, string> = {};
+    const triggerSchemas: Record<string, TriggerInputField[]> = {};
+    for (const n of triggerNodes) {
+      triggerSubtypes[n.id] = n.subtype ?? 'manual';
+      // Only manual triggers have user-defined input schemas
+      if (!n.subtype || n.subtype === 'manual') {
+        const schema: WorkflowVariable[] = n.config?.input_schema ?? [];
+        triggerSchemas[n.id] = schema.map(v => ({
+          name: v.name,
+          type: v.varType ?? 'string',
+          required: v.required ?? false,
+          description: v.description,
+          defaultValue: v.defaultValue,
+        }));
+      }
+    }
+
+    return { stepIds, taskStepIds, triggerStepIds, triggerSchemas, triggerSubtypes, taskStepSubtypes, toolDefinitions: (props.toolDefinitions ?? []).map(t => ({ id: t.id, name: t.name, description: t.description, input_schema: t.input_schema })) };
+  });
+
   // ── Debounced YAML generation ──
   const [yamlOutput, setYamlOutput] = createSignal('');
   const [savedYamlSnapshot, setSavedYamlSnapshot] = createSignal('');
@@ -1419,14 +1521,14 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
   });
   let yamlGenTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
-    nodes(); edges(); wfId(); wfName(); wfVersion(); wfDescription(); wfMode(); wfResultMessage(); variables(); wfPermissions(); wfAttachments();
+    nodes(); edges(); wfId(); wfName(); wfVersion(); wfDescription(); wfMode(); wfResultMessage(); variables(); wfPermissions(); wfAttachments(); wfTests();
     if (yamlGenTimer) clearTimeout(yamlGenTimer);
     yamlGenTimer = setTimeout(() => {
       try {
         const n = untrack(nodes);
         const e = untrack(edges);
         if (n.length === 0 && !props.initialYaml) { setYamlOutput(''); return; }
-        const yaml = toYaml(n, e, untrack(wfId), untrack(wfName), untrack(wfVersion), untrack(wfDescription), untrack(wfMode), untrack(wfResultMessage), untrack(variables), untrack(wfPermissions), untrack(wfAttachments));
+        const yaml = toYaml(n, e, untrack(wfId), untrack(wfName), untrack(wfVersion), untrack(wfDescription), untrack(wfMode), untrack(wfResultMessage), untrack(variables), untrack(wfPermissions), untrack(wfAttachments), untrack(wfTests));
         setYamlOutput(yaml);
       } catch (err) {
         console.error('[WorkflowDesigner] toYaml error:', err);
@@ -1491,6 +1593,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
           media_type: a.media_type,
           size_bytes: a.size_bytes,
         })));
+        setWfTests(parsed.tests ?? []);
       } catch { /* start empty */ }
     }
     pushHistory();
@@ -1597,7 +1700,7 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
       const n = untrack(nodes);
       const e = untrack(edges);
       if (n.length === 0 && !props.initialYaml) { setYamlOutput(''); return; }
-      const y = toYaml(n, e, untrack(wfId), untrack(wfName), untrack(wfVersion), untrack(wfDescription), untrack(wfMode), untrack(wfResultMessage), untrack(variables), untrack(wfPermissions), untrack(wfAttachments));
+      const y = toYaml(n, e, untrack(wfId), untrack(wfName), untrack(wfVersion), untrack(wfDescription), untrack(wfMode), untrack(wfResultMessage), untrack(variables), untrack(wfPermissions), untrack(wfAttachments), untrack(wfTests));
       setYamlOutput(y);
       // Also flush the emit debounce so the parent has the latest YAML
       if (yamlEmitTimer) clearTimeout(yamlEmitTimer);
@@ -1611,6 +1714,74 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
     flushYaml();
     setSavedYamlSnapshot(yamlOutput());
     props.onSave();
+  }
+
+  async function handleRunTests(testNames?: string[]): Promise<void> {
+    const name = wfName();
+    if (!name) return;
+
+    // Auto-save if there are unsaved changes so tests run against the latest version
+    if (isDirty()) {
+      triggerSave();
+      // Brief pause to let the save flush through
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    setRunningTests(true);
+    if (!testNames) setTestResults([]);
+
+    // Subscribe to workflow test progress events so the UI updates
+    // incrementally while the blocking invoke is in-flight.
+    let progressUnlisten: UnlistenFn | null = null;
+    try {
+      progressUnlisten = await listen<any>('workflow:event', (e) => {
+        const topic: string = e.payload?.topic ?? '';
+        const payload = e.payload?.payload;
+        if (!payload || typeof payload !== 'object') return;
+        // Only handle test events for this definition
+        if (payload.definition_name !== name) return;
+        if (topic === 'workflow.test.case_started') {
+          setTestProgress(prev => ({ ...prev, [payload.test_name]: { state: 'running' as const, index: payload.index, total: payload.total } }));
+        } else if (topic === 'workflow.test.case_completed') {
+          setTestProgress(prev => ({ ...prev, [payload.test_name]: { state: payload.passed ? 'passed' as const : 'failed' as const, index: payload.index, total: payload.total } }));
+        }
+      });
+    } catch {
+      // Non-critical — progress just won't show
+    }
+
+    try {
+      const result = await invoke<{ results: WorkflowTestResult[]; all_passed: boolean }>('workflow_run_tests', {
+        definition_name: name,
+        version: null,
+        test_names: testNames ?? null,
+        auto_respond: true,
+      });
+      if (testNames) {
+        // Merge single-test results into existing results
+        setTestResults(prev => {
+          const names = new Set(result.results.map(r => r.test_name));
+          return [...prev.filter(r => !names.has(r.test_name)), ...result.results];
+        });
+      } else {
+        setTestResults(result.results);
+      }
+      setToast({ text: result.all_passed ? `${result.results.length === 1 ? 'Test passed' : `All ${result.results.length} tests passed`}` : `${result.results.filter(r => !r.passed).length} of ${result.results.length} test${result.results.length > 1 ? 's' : ''} failed`, type: result.all_passed ? 'success' : 'error' });
+    } catch (e: any) {
+      setToast({ text: `Test error: ${e?.message ?? e}`, type: 'error' });
+    } finally {
+      setRunningTests(false);
+      setTestProgress({});
+      if (progressUnlisten) progressUnlisten();
+    }
+  }
+
+  async function handleCancelTests(): Promise<void> {
+    try {
+      await invoke('workflow_cancel_tests');
+    } catch {
+      // Best-effort
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent): void {
@@ -2920,6 +3091,16 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
                   <span class="wf-toolbar-badge">{wfAttachments().length}</span>
                 </Show>
               </button>
+              <button
+                class={`wf-toolbar-btn${showTests() ? ' active' : ''}`}
+                onClick={() => setShowTests(!showTests())}
+                title="Workflow tests"
+              >
+                <FlaskConical size={14} />
+                <Show when={wfTests().length > 0}>
+                  <span class="wf-toolbar-badge">{wfTests().length}</span>
+                </Show>
+              </button>
               <Show when={!props.readOnly && props.onAiAssist}>
                 <button
                   class={`wf-toolbar-btn${aiAssistOpen() ? ' active-ai' : ''}`}
@@ -3181,6 +3362,24 @@ const WorkflowDesigner: Component<WorkflowDesignerProps> = (props) => {
         {/* YAML Preview Panel */}
         <Show when={showYaml()}>
           <YamlEditorPanel yamlOutput={yamlOutput()} sectionHeaderStyle={sectionHeaderStyle} />
+        </Show>
+
+        {/* Tests Panel */}
+        <Show when={showTests()}>
+          <TestsPanel
+            testCases={wfTests()}
+            onTestCasesChange={(tests) => { setWfTests(tests); }}
+            onRunTests={() => handleRunTests()}
+            onRunTest={(name) => handleRunTests([name])}
+            onCancelTests={() => handleCancelTests()}
+            testResults={testResults()}
+            running={runningTests()}
+            testProgress={testProgress()}
+            sectionHeaderStyle={sectionHeaderStyle}
+            readOnly={props.readOnly}
+            context={testContext()}
+            unsavedChanges={isDirty()}
+          />
         </Show>
 
         {/* Right Panel: Node Editor */}

@@ -210,6 +210,10 @@ export default function AgentsPanel(props: AgentsPanelProps) {
                     </button>
                   </div>
                   <div class="fd-detail-panel-body">
+                    <div>
+                      <strong>Agent ID:</strong>{' '}
+                      <code style="user-select:all">{agent().agent_id}</code>
+                    </div>
                     <Show when={agent().active_model}>
                       <div>
                         <strong>Model:</strong> {agent().active_model}

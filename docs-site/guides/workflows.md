@@ -500,10 +500,38 @@ Use a `branch` step to handle each category differently:
 
 ### Step 7: Test It
 
-1. Save the workflow
-2. To test before real messages arrive, click **Launch** from the definitions view (⚙ gear icon) — you'll be prompted to provide test input as JSON (e.g., `{"from": "test@example.com", "subject": "Billing help", "body": "I need an invoice"}`)
-3. Watch the instance execute on the **Workflows** page (click **Workflows** in the sidebar) — click into it to see step-by-step progress
-4. Check that the classification is correct and the response makes sense
+Add test cases to your workflow definition to validate behaviour without any real side effects:
+
+```yaml
+tests:
+  - name: billing_route
+    description: "Billing messages go to the billing team"
+    inputs:
+      from: "test@example.com"
+      subject: "Invoice help"
+      body: "I need an invoice copy"
+    shadow_outputs:
+      classify:
+        category: "billing"
+    expectations:
+      status: completed
+      steps_completed: [classify, forward_to_billing]
+      steps_not_reached: [auto_respond]
+
+  - name: general_question_route
+    inputs:
+      from: "user@example.com"
+      subject: "Password reset"
+      body: "How do I reset my password?"
+    shadow_outputs:
+      classify:
+        category: "general_question"
+    expectations:
+      status: completed
+      steps_completed: [classify, auto_respond, send_reply]
+```
+
+Open the **Tests** panel in the workflow designer and click **Run Tests**. Each test runs in shadow mode — no real emails are sent. See [Testing Your Workflows](#testing-your-workflows) below for the full details.
 
 ### Step 8: Activate
 
@@ -512,6 +540,138 @@ Once you're happy with the results, the workflow will automatically fire on new 
 ::: tip Iterate with AI Assist
 Use the **AI Assist** panel in the workflow editor to refine your workflow. Describe what you want to change in natural language — "add a feedback gate before sending billing inquiries" — and HiveMind OS will update the YAML for you.
 :::
+
+## Testing Your Workflows
+
+Workflows that send emails, invoke agents, or call external APIs can be expensive to run incorrectly — thousands of emails sent, LLM tokens burned, or production data modified by accident. The built-in test runner lets you validate workflow behaviour safely using **shadow mode**, where side effects are intercepted rather than executed.
+
+### Writing Test Cases
+
+Test cases live in the workflow YAML under the `tests` key. Each test case simulates a trigger event and asserts on the outcome.
+
+```yaml
+tests:
+  - name: happy_path
+    description: "Full pipeline runs to completion"
+    inputs:
+      from: "customer@example.com"
+      subject: "Help"
+      body: "I need help with my account"
+    expectations:
+      status: completed
+      steps_completed: [classify, auto_respond, send_reply]
+```
+
+You can write tests in the visual designer's **Tests** panel or directly in the YAML editor.
+
+### Mocking Steps with Shadow Outputs
+
+Use `shadow_outputs` to provide a fixed output for specific steps, skipping their real execution. This makes tests fast and deterministic — ideal for isolating one part of the workflow:
+
+```yaml
+tests:
+  - name: test_billing_branch
+    inputs:
+      from: "test@example.com"
+      subject: "Billing"
+      body: "Invoice question"
+    shadow_outputs:
+      classify:
+        category: "billing"
+    expectations:
+      status: completed
+      steps_completed: [classify, forward_to_billing]
+      steps_not_reached: [auto_respond]
+```
+
+In this example, the `classify` step is stubbed to always return `"billing"`, so you can test that the branch routes correctly without waiting for an LLM response.
+
+### Asserting Agent Tool Calls
+
+When an agent step runs (not mocked), shadow mode intercepts its tool calls. Use `expected_tool_calls` to assert the agent called the right tools:
+
+```yaml
+tests:
+  - name: agent_drafts_reply
+    inputs:
+      from: "customer@example.com"
+      subject: "Help"
+      body: "Account question"
+    expected_tool_calls:
+      auto_respond:
+        - tool_id: comm.send_external_message
+          arguments:
+            to: "customer@example.com"
+    expectations:
+      status: completed
+```
+
+Arguments are **partially matched** — only the keys you specify are checked, so the agent can include additional parameters.
+
+::: warning
+You cannot use `expected_tool_calls` and `shadow_outputs` on the same step. A mocked step produces no intercepted actions.
+:::
+
+### Running Tests
+
+1. Open your workflow in the designer
+2. Click the **Tests** tab in the right panel
+3. Click **Run Tests** (or select individual tests to run)
+4. Watch progress — each test shows a live status badge (⏳ running → ✅ passed / ❌ failed)
+5. Click a completed test to see the **Test Result Details** dialog
+
+The result dialog has three tabs:
+
+| Tab | What it shows |
+|-----|---------------|
+| **Steps** | Every step with its final status and output |
+| **Output** | The workflow's final output value |
+| **Actions** | All intercepted actions — tool calls (🔧), ask_user questions (💬), and tool approvals (🔐) — with full details |
+
+### Stopping a Test Run
+
+Click the red **Stop** button in the Tests panel to cancel the current run. The currently executing test will finish, but remaining tests are skipped. The results show which tests ran and which were cancelled.
+
+### What Gets Intercepted
+
+In shadow mode, the test runner intercepts and records:
+
+| Action | What happens |
+|--------|-------------|
+| **Side-effecting tool calls** | Intercepted — recorded with tool ID and arguments |
+| **Read-only tool calls** | Execute normally — the workflow gets real data |
+| **Agent `ask_user` calls** | Auto-answered (first choice or `"proceed"` for freeform) and recorded |
+| **Tool approval requests** | Auto-approved and recorded |
+| **`launch_workflow`** | Intercepted — nested workflow is not actually launched |
+| **`schedule_task`** | Intercepted — no task is actually scheduled |
+| **`signal_agent`** | Intercepted — no message is actually sent |
+
+This means your tests exercise the full workflow logic — conditions, branches, loops, variable assignments — while ensuring nothing escapes into the real world.
+
+### Test Writing Tips
+
+::: tip Start with shadow_outputs
+When starting a new workflow, mock every agent step with `shadow_outputs` first. This lets you test control flow, branching, and variable passing without any LLM calls. Then remove mocks one step at a time to validate agent behaviour.
+:::
+
+::: tip One test per branch
+Write a separate test for each branch path. Use `shadow_outputs` to force the condition that activates each branch, then assert with `steps_completed` and `steps_not_reached` that the right path was taken.
+:::
+
+::: tip Use intercepted_action_counts for safety checks
+Add `intercepted_action_counts` to catch unexpected side effects:
+
+```yaml
+expectations:
+  intercepted_action_counts:
+    tool_calls: 1
+    total: 1
+```
+
+This ensures your workflow isn't accidentally calling more tools than expected.
+:::
+
+For more on the testing concepts, see [Workflows Concept → Testing & Shadow Mode](/concepts/workflows#testing-shadow-mode).
 
 ## Next Steps
 

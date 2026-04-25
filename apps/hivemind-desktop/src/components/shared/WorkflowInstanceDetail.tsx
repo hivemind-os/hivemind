@@ -2,10 +2,14 @@
  * Shared workflow instance detail panel — step chips, variables, output, error.
  * Reused in SessionWorkflows, WorkflowsPage, and FlightDeck WorkflowsPanel.
  */
-import { For, Show } from 'solid-js';
-import type { StepState } from '~/types';
+import { For, Show, createSignal } from 'solid-js';
+import { invoke } from '@tauri-apps/api/core';
+import type { StepState, InterceptedActionPage, ShadowSummary } from '~/types';
 import { highlightYaml } from '../YamlHighlight';
 import { pendingApprovalToasts } from '../AgentApprovalToast';
+import ShadowResultsPanel from '../workflow/ShadowResultsPanel';
+import EventLogList, { type SessionEvent } from '../EventLogList';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/ui';
 import {
   Bell, Bot, Calendar, GitBranch, Hand, Lock, Radio, RotateCcw,
   Square, Timer, TriangleAlert, Wrench, Zap,
@@ -25,6 +29,8 @@ export const statusDotColors: Record<string, string> = {
   paused: '#fbbf24',
   waiting_on_input: '#fbbf24',
   waiting_on_event: '#fbbf24',
+  waiting_for_delay: '#fbbf24',
+  loop_waiting: '#a78bfa',
   pending: '#94a3b8',
   ready: '#60a5fa',
   skipped: '#94a3b8',
@@ -62,16 +68,53 @@ export interface WorkflowInstanceDetailProps {
     variables?: Record<string, any>;
     output?: any;
     error?: string | null;
+    execution_mode?: string;
   };
   /** Called when user clicks a waiting feedback gate step. */
   onOpenFeedbackGate?: (instanceId: number, step: any, state: StepState) => void;
   /** If true, show loading shimmer instead of content. */
   loading?: boolean;
+  /** Fetch intercepted actions for shadow results panel. */
+  fetchInterceptedActions?: (instanceId: number, limit?: number, offset?: number) => Promise<InterceptedActionPage | null>;
+  /** Fetch shadow summary for shadow results panel. */
+  fetchShadowSummary?: (instanceId: number) => Promise<ShadowSummary | null>;
+}
+
+interface PagedEventsResponse {
+  events: SessionEvent[];
+  total: number;
 }
 
 export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProps) {
   const steps = () => props.detail.definition?.steps ?? [];
   const stepStates = () => props.detail.step_states ?? {};
+
+  // Agent event dialog state
+  const [agentDialogId, setAgentDialogId] = createSignal<string | null>(null);
+  const [agentEvents, setAgentEvents] = createSignal<SessionEvent[]>([]);
+  const [agentEventsTotal, setAgentEventsTotal] = createSignal(0);
+  const [agentEventsLoading, setAgentEventsLoading] = createSignal(false);
+
+  async function openAgentEvents(agentId: string) {
+    setAgentDialogId(agentId);
+    setAgentEventsLoading(true);
+    setAgentEvents([]);
+    setAgentEventsTotal(0);
+    try {
+      const resp = await invoke<PagedEventsResponse>('get_bot_events', {
+        agent_id: agentId, offset: 0, limit: 500,
+      });
+      setAgentEvents(resp.events ?? []);
+      setAgentEventsTotal(resp.total ?? 0);
+    } catch {
+      // Bot supervisor not found — try session events fallback is not possible
+      // without a session_id, so just show empty
+      setAgentEvents([]);
+      setAgentEventsTotal(0);
+    } finally {
+      setAgentEventsLoading(false);
+    }
+  }
 
   return (
     <div class="wf-instance-detail">
@@ -97,15 +140,21 @@ export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProp
                   const aid = childAgentId();
                   return aid ? pendingApprovalToasts().filter(a => a.agent_id === aid).length : 0;
                 };
-                const clickable = () => (isWaiting() && isFeedbackGate()) || childApprovals() > 0;
+                const clickable = () => (isWaiting() && isFeedbackGate()) || childApprovals() > 0 || !!childAgentId();
+                const isAgentStep = () => {
+                  const task = getStepTask(step);
+                  return !!(task?.InvokeAgent || task?.invoke_agent || task?.InvokePrompt || task?.invoke_prompt);
+                };
 
                 return (
                   <div
                     class={`wf-step-chip${clickable() ? ' clickable' : ''}`}
-                    title={`${step.id}: ${stepStatus()}${state()?.error ? '\nError: ' + state()!.error : ''}${isWaiting() ? '\nClick to respond' : ''}`}
+                    title={`${step.id}: ${stepStatus()}${state()?.error ? '\nError: ' + state()!.error : ''}${isWaiting() ? '\nClick to respond' : ''}${childAgentId() ? '\nAgent: ' + childAgentId() : ''}`}
                     onClick={() => {
                       if (isWaiting() && isFeedbackGate() && state() && props.onOpenFeedbackGate) {
                         props.onOpenFeedbackGate(props.detail.id, step, state()!);
+                      } else if (childAgentId()) {
+                        openAgentEvents(childAgentId()!);
                       }
                     }}
                   >
@@ -120,6 +169,9 @@ export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProp
                     </Show>
                     <Show when={childApprovals() > 0}>
                       <Lock size={10} style="color:hsl(24 93% 75%);" />
+                    </Show>
+                    <Show when={childAgentId() && isAgentStep()}>
+                      <Bot size={10} style="color:#a78bfa;" />
                     </Show>
                   </div>
                 );
@@ -151,7 +203,72 @@ export default function WorkflowInstanceDetail(props: WorkflowInstanceDetailProp
             <pre>{props.detail.error}</pre>
           </div>
         </Show>
+
+        {/* Shadow Results */}
+        <Show when={props.detail.execution_mode === 'shadow' && props.fetchInterceptedActions && props.fetchShadowSummary}>
+          <ShadowResultsPanel
+            instanceId={props.detail.id}
+            executionMode={props.detail.execution_mode}
+            fetchActions={props.fetchInterceptedActions!}
+            fetchSummary={props.fetchShadowSummary!}
+          />
+        </Show>
+
+        {/* Agent steps summary — list agent IDs for invoke_agent steps */}
+        <Show when={Object.values(stepStates()).some((s: any) => s?.child_agent_id)}>
+          <div class="mb-2 mt-2">
+            <div class="wf-detail-section-title">Agents</div>
+            <div class="flex flex-col gap-1">
+              <For each={steps().filter((s: any) => stepStates()[s.id]?.child_agent_id)}>
+                {(step: any) => {
+                  const agentId = () => stepStates()[step.id]?.child_agent_id!;
+                  const state = () => stepStates()[step.id];
+                  return (
+                    <div
+                      class="flex items-center gap-1.5 rounded-md border border-secondary/50 px-2.5 py-1.5 text-xs cursor-pointer hover:bg-secondary/40 transition-colors"
+                      onClick={() => openAgentEvents(agentId())}
+                    >
+                      <Bot size={12} style="color:#a78bfa; flex-shrink: 0;" />
+                      <span class="font-medium">{step.id}</span>
+                      <span class="text-muted-foreground">→</span>
+                      <span class="font-mono text-muted-foreground" style="font-size: 0.68rem">{agentId()}</span>
+                      <span class={`ml-auto rounded-full px-1.5 py-0.5 text-[0.6rem] font-medium ${
+                        state()?.status === 'completed' ? 'bg-blue-400/15 text-blue-400' :
+                        state()?.status === 'running' ? 'bg-green-400/15 text-green-400' :
+                        state()?.status === 'failed' ? 'bg-red-400/15 text-red-400' :
+                        'bg-secondary text-muted-foreground'
+                      }`}>
+                        {state()?.status ?? 'pending'}
+                      </span>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+        </Show>
       </Show>
+
+      {/* Agent Events Dialog */}
+      <Dialog open={!!agentDialogId()} onOpenChange={(open) => { if (!open) setAgentDialogId(null); }}>
+        <DialogContent class="max-w-[720px] max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle class="flex items-center gap-1.5 text-sm">
+              <Bot size={16} style="color:#a78bfa;" />
+              Agent Events
+              <span class="font-mono text-xs text-muted-foreground">{agentDialogId()}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div class="overflow-y-auto" style="max-height: 65vh;">
+            <EventLogList
+              events={agentEvents()}
+              totalCount={agentEventsTotal()}
+              loading={agentEventsLoading()}
+              hasMore={false}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

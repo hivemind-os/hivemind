@@ -8,8 +8,9 @@ use hive_workflow::store::WorkflowPersistence;
 use hive_workflow::types::{
     InstanceFilter, StepStatus, StepType, TaskDef, TriggerType, WorkflowDefinition, WorkflowStatus,
 };
+use hive_workflow::ExecutionMode;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,6 +82,21 @@ impl TriggerRegistry {
 
     fn remove_definition(&mut self, definition_id: &str) {
         let retain = |t: &ActiveTrigger| t.definition_id != definition_id;
+        for bucket in self.event_exact.values_mut() {
+            bucket.retain(retain);
+        }
+        self.event_exact.retain(|_, v| !v.is_empty());
+        self.event_wildcard.retain(retain);
+        self.mcp_notification.retain(retain);
+        self.incoming_message.retain(retain);
+        self.schedules.retain(retain);
+        self.other.retain(retain);
+    }
+
+    /// Remove all triggers matching a definition name (safety net for stale
+    /// entries that may have been registered under a different definition id).
+    fn remove_definition_by_name(&mut self, name: &str) {
+        let retain = |t: &ActiveTrigger| t.definition_name != name;
         for bucket in self.event_exact.values_mut() {
             bucket.retain(retain);
         }
@@ -184,8 +200,12 @@ impl TriggerManager {
     pub async fn register_definition(&self, def: &WorkflowDefinition) {
         let mut triggers = self.triggers.write().await;
 
-        // Only one active trigger version is allowed per immutable definition id.
+        // Remove any existing triggers for this definition.  We remove by both
+        // id and name to clean up stale entries that may have been registered
+        // under a different id (e.g. if a prior save_definition returned a
+        // transient UUID that didn't match the DB's stable external_id).
         triggers.remove_definition(&def.id);
+        triggers.remove_definition_by_name(&def.name);
 
         for trigger_def in def.trigger_defs() {
             let next_run = match &trigger_def.trigger_type {
@@ -422,6 +442,10 @@ impl TriggerManager {
                 registered_incoming_triggers = triggers.incoming_message.len(),
                 "evaluating incoming message event"
             );
+            // In-batch dedup: if multiple trigger registrations exist for the
+            // same definition name (e.g. due to stale accumulated entries),
+            // only launch one instance per definition per event.
+            let mut seen_in_batch: HashSet<String> = HashSet::new();
             for trigger in &triggers.incoming_message {
                 if let TriggerType::IncomingMessage {
                     channel_id,
@@ -457,6 +481,16 @@ impl TriggerManager {
                         "incoming message trigger evaluation"
                     );
                     if matched {
+                        // In-batch dedup: only one launch per definition name
+                        // per event evaluation.
+                        if !seen_in_batch.insert(trigger.definition_name.clone()) {
+                            info!(
+                                definition = %trigger.definition_name,
+                                "skipping duplicate trigger registration for same definition (in-batch dedup)"
+                            );
+                            continue;
+                        }
+
                         // Persistent dedup: skip if we already triggered this
                         // workflow for the same external_id.  We key on
                         // definition_name (e.g. "user/test1") rather than
@@ -810,7 +844,7 @@ impl TriggerManager {
             drop(svc_guard);
 
             match svc
-                .launch(name, version, inputs.clone(), "trigger-manager", None, None, None, None)
+                .launch(name, version, inputs.clone(), "trigger-manager", None, None, None, None, ExecutionMode::Normal)
                 .await
             {
                 Ok(id) => {
@@ -1458,6 +1492,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: hive_workflow::types::WorkflowMode::default(),
             bundled: false,
             archived: false,
@@ -1494,6 +1529,64 @@ mod tests {
         assert_eq!(active[0].definition_id, "def-1");
         assert_eq!(active[0].definition_name, "user/workflow-renamed");
         assert_eq!(active[0].definition_version, "2.0");
+    }
+
+    /// Regression test: re-saving a workflow definition with a different id
+    /// (e.g. because the YAML omitted the id field and serde generated a new
+    /// UUID) must NOT accumulate duplicate triggers.
+    #[tokio::test]
+    async fn test_register_definition_removes_stale_by_name() {
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus, store);
+
+        // First registration with id "old-uuid"
+        let def_v1 = trigger_definition(
+            "old-uuid",
+            "user/my-email-wf",
+            "1.0",
+            TriggerType::IncomingMessage {
+                channel_id: "conn-1".into(),
+                listen_channel_id: None,
+                filter: None,
+                from_filter: None,
+                subject_filter: None,
+                body_filter: None,
+                mark_as_read: true,
+                ignore_replies: false,
+            },
+        );
+        tm.register_definition(&def_v1).await;
+
+        // Second registration with a DIFFERENT id but same name (simulates
+        // a save where the YAML lacked the id field).
+        let def_v2 = trigger_definition(
+            "new-uuid",
+            "user/my-email-wf",
+            "1.0",
+            TriggerType::IncomingMessage {
+                channel_id: "conn-1".into(),
+                listen_channel_id: None,
+                filter: None,
+                from_filter: None,
+                subject_filter: None,
+                body_filter: None,
+                mark_as_read: true,
+                ignore_replies: false,
+            },
+        );
+        tm.register_definition(&def_v2).await;
+
+        let guard = tm.triggers.read().await;
+        let active: Vec<_> = guard.iter_all().collect();
+        assert_eq!(
+            active.len(),
+            1,
+            "should have exactly 1 trigger, not {} (stale trigger accumulated)",
+            active.len()
+        );
+        assert_eq!(active[0].definition_id, "new-uuid");
     }
 
     #[tokio::test]
@@ -2004,6 +2097,85 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.total, 1, "dedup should prevent second launch for same external_id");
+    }
+
+    /// Regression test: if stale trigger registrations accumulated (due to
+    /// the definition_id mismatch bug), in-batch dedup ensures only one
+    /// workflow instance is launched per definition name per event.
+    #[tokio::test]
+    async fn test_incoming_message_in_batch_dedup_with_stale_triggers() {
+        let bus = EventBus::new(128);
+        let store: Arc<dyn hive_workflow::store::WorkflowPersistence> =
+            Arc::new(WorkflowStore::in_memory().unwrap());
+        let tm = TriggerManager::new(bus.clone(), Arc::clone(&store));
+        let svc = Arc::new(super::WorkflowService::in_memory().unwrap());
+        tm.set_workflow_service(Arc::clone(&svc)).await;
+
+        // Simulate the accumulation bug: 3 trigger registrations for the same
+        // definition name but with different IDs (bypassing register_definition
+        // to directly push stale entries).
+        {
+            let mut triggers = tm.triggers.write().await;
+            for i in 0..3 {
+                triggers.push(ActiveTrigger {
+                    definition_id: format!("stale-uuid-{i}"),
+                    definition_name: "user/email-wf".to_string(),
+                    definition_version: "1.0".to_string(),
+                    trigger_type: TriggerType::IncomingMessage {
+                        channel_id: "gmail-connector".to_string(),
+                        listen_channel_id: None,
+                        filter: None,
+                        from_filter: None,
+                        subject_filter: None,
+                        body_filter: None,
+                        mark_as_read: false,
+                        ignore_replies: false,
+                    },
+                    next_run_ms: None,
+                });
+            }
+        }
+
+        // Save the definition so auto_launch can find it.
+        let def = trigger_definition(
+            "stale-uuid-0",
+            "user/email-wf",
+            "1.0",
+            TriggerType::IncomingMessage {
+                channel_id: "gmail-connector".to_string(),
+                listen_channel_id: None,
+                filter: None,
+                from_filter: None,
+                subject_filter: None,
+                body_filter: None,
+                mark_as_read: false,
+                ignore_replies: false,
+            },
+        );
+        let yaml = serde_yaml::to_string(&def).unwrap();
+        svc.save_definition(&yaml).await.unwrap();
+
+        let payload = incoming_email_payload("gmail-connector", "gmail:msg-batch-dedup");
+        tm.evaluate_event("comm.message.received.gmail-connector", &payload).await;
+
+        let result = svc
+            .list_instances(&InstanceFilter {
+                statuses: vec![],
+                definition_names: vec!["user/email-wf".to_string()],
+                definition_id: None,
+                parent_session_id: None,
+                parent_agent_id: None,
+                mode: None,
+                limit: None,
+                offset: None,
+                include_archived: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            result.total, 1,
+            "in-batch dedup should launch only 1 instance even with 3 stale triggers"
+        );
     }
 
     #[tokio::test]

@@ -147,6 +147,12 @@ pub struct JournalToolCall {
     pub tool_id: String,
     pub input: String,
     pub output: String,
+    /// Provider-assigned tool call ID for multi-turn replay (e.g. `call_abc123`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Whether the tool execution resulted in an error.
+    #[serde(default)]
+    pub is_error: bool,
 }
 
 /// Identifies which phase of the loop strategy produced this entry.
@@ -166,6 +172,9 @@ pub struct JournalEntry {
     pub phase: JournalPhase,
     pub turn: usize,
     pub tool_calls: Vec<JournalToolCall>,
+    /// The model's reasoning text for this turn (preserved for multi-turn replay).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_content: Option<String>,
 }
 
 /// Persistable log of all tool cycles executed during a loop run.
@@ -195,6 +204,72 @@ impl ConversationJournal {
             }
         }
         prompt
+    }
+
+    /// Rebuild multi-turn message history from journal (for resume with native tool calling).
+    ///
+    /// Returns a Vec of `CompletionMessage` with proper assistant/tool turns
+    /// that can be appended after the initial `[system, user(task)]` messages.
+    /// Falls back gracefully: entries without `tool_call_id` or `assistant_content`
+    /// are skipped (the caller should use `reconstruct_react_prompt` for those).
+    pub fn reconstruct_multi_turn_messages(&self) -> Vec<CompletionMessage> {
+        use hive_model::MessageBlock;
+
+        let mut messages = Vec::new();
+        for entry in &self.entries {
+            if !matches!(entry.phase, JournalPhase::ToolCycle) {
+                continue;
+            }
+            // Only produce multi-turn messages if we have tool_call_ids.
+            let has_call_ids = entry.tool_calls.iter().any(|tc| tc.tool_call_id.is_some());
+            if !has_call_ids {
+                continue;
+            }
+
+            // Build assistant message with text + tool_use blocks.
+            let mut blocks = Vec::new();
+            if let Some(ref content) = entry.assistant_content {
+                if !content.is_empty() {
+                    blocks.push(MessageBlock::Text { text: content.clone() });
+                }
+            }
+            for tc in &entry.tool_calls {
+                if let Some(ref call_id) = tc.tool_call_id {
+                    blocks.push(MessageBlock::ToolUse {
+                        id: call_id.clone(),
+                        name: tc.tool_id.clone(),
+                        input: serde_json::from_str(&tc.input).unwrap_or_default(),
+                    });
+                }
+            }
+            if !blocks.is_empty() {
+                messages.push(CompletionMessage {
+                    role: "assistant".into(),
+                    content: entry.assistant_content.clone().unwrap_or_default(),
+                    content_parts: vec![],
+                    blocks,
+                });
+            }
+
+            // Build tool result messages (one per tool call).
+            for tc in &entry.tool_calls {
+                if let Some(ref call_id) = tc.tool_call_id {
+                    let safe_output =
+                        hive_contracts::prompt_sanitize::escape_prompt_tags(&tc.output);
+                    messages.push(CompletionMessage {
+                        role: "tool".into(),
+                        content: safe_output.clone(),
+                        content_parts: vec![],
+                        blocks: vec![MessageBlock::ToolResult {
+                            tool_use_id: call_id.clone(),
+                            content: safe_output,
+                            is_error: tc.is_error,
+                        }],
+                    });
+                }
+            }
+        }
+        messages
     }
 
     /// Number of completed tool iterations (for adaptive budget enforcement).
@@ -345,6 +420,10 @@ pub struct SecurityContext {
     /// Optional connector service handle for resolving output data-class
     /// when enforcing classification on outbound sends.
     pub connector_service: Option<Arc<dyn hive_connectors::ConnectorServiceHandle>>,
+    /// When true, side-effecting external tool calls are intercepted and a
+    /// synthetic success response is returned.  Built-in tools (`core.*`,
+    /// `knowledge.*`) and read-only tools pass through unchanged.
+    pub shadow_mode: bool,
 }
 
 #[derive(Clone)]
@@ -757,6 +836,8 @@ pub enum LoopEvent {
     StallWarning { tool_name: String, repeated_count: usize },
     /// The loop is yielding early because a new user message was enqueued.
     Preempted,
+    /// A side-effecting tool call was intercepted in shadow mode.
+    ToolCallIntercepted { tool_id: String, input: String },
     /// Partial tool-call argument snapshot during streaming.
     ToolCallArgDelta {
         index: usize,
@@ -931,6 +1012,21 @@ impl LoopStrategy for ReActStrategy {
             let mut context = context;
             context.routing.routing_decision = Some(decision.clone());
 
+            // Determine whether the selected provider supports multi-turn tool
+            // history (structured assistant+tool messages).
+            let use_multi_turn = model_router
+                .provider_kind(&decision.selected.provider_id)
+                .map(|k| k.supports_tool_history())
+                .unwrap_or(false);
+
+            if use_multi_turn {
+                tracing::info!(
+                    provider_id = %decision.selected.provider_id,
+                    model = %decision.selected.model,
+                    "ReAct loop: using multi-turn tool history"
+                );
+            }
+
             let mut prompt = context.conversation.prompt.clone();
             let mut tool_iterations = context.conversation.initial_tool_iterations;
             // Include multimodal content parts only on the very first LLM call.
@@ -938,17 +1034,68 @@ impl LoopStrategy for ReActStrategy {
             // Cumulative count of tool results by tool name across iterations.
             let mut tool_result_counts: HashMap<String, u32> = HashMap::new();
 
+            // Multi-turn tool history: structured assistant+tool messages
+            // appended after the initial user message. Only used when the
+            // provider supports native tool calling.
+            let mut tool_history: Vec<CompletionMessage> = if use_multi_turn {
+                // If resuming from a journal, reconstruct multi-turn messages.
+                if let Some(ref journal) = context.conversation.conversation_journal {
+                    journal.lock().reconstruct_multi_turn_messages()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+
             // Adaptive tool-call budget
             let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
 
+            // Stall breaker: track recent ask_user calls to detect repeated
+            // identical questions with the same answer (model stuck in a loop).
+            // Each entry is (question_prefix, answer).
+            let mut ask_user_history: Vec<(String, String)> = Vec::new();
+
             loop {
-                let mut request = CompletionRequest {
-                    prompt: prompt.clone(),
-                    prompt_content_parts: std::mem::take(&mut prompt_content_parts),
-                    messages: context.conversation.history.clone(),
-                    required_capabilities: context.routing.required_capabilities.clone(),
-                    preferred_models: context.routing.preferred_models.clone(),
-                    tools: context.tools_ctx.tools.list_definitions(),
+                let mut request = if use_multi_turn {
+                    // Multi-turn mode: all context in messages, prompt is empty.
+                    let mut messages = context.conversation.history.clone();
+                    // First user message with the task (with optional multimodal parts).
+                    let user_msg = if prompt_content_parts.is_empty() {
+                        CompletionMessage {
+                            role: "user".into(),
+                            content: prompt.clone(),
+                            content_parts: vec![],
+                            blocks: vec![],
+                        }
+                    } else {
+                        CompletionMessage {
+                            role: "user".into(),
+                            content: prompt.clone(),
+                            content_parts: std::mem::take(&mut prompt_content_parts),
+                            blocks: vec![],
+                        }
+                    };
+                    messages.push(user_msg);
+                    messages.extend(tool_history.iter().cloned());
+                    CompletionRequest {
+                        prompt: String::new(),
+                        prompt_content_parts: vec![],
+                        messages,
+                        required_capabilities: context.routing.required_capabilities.clone(),
+                        preferred_models: context.routing.preferred_models.clone(),
+                        tools: context.tools_ctx.tools.list_definitions(),
+                    }
+                } else {
+                    // Legacy mode: growing prompt with XML tags.
+                    CompletionRequest {
+                        prompt: prompt.clone(),
+                        prompt_content_parts: std::mem::take(&mut prompt_content_parts),
+                        messages: context.conversation.history.clone(),
+                        required_capabilities: context.routing.required_capabilities.clone(),
+                        preferred_models: context.routing.preferred_models.clone(),
+                        tools: context.tools_ctx.tools.list_definitions(),
+                    }
                 };
 
                 // Log tool count and any MCP tools reaching the LLM.
@@ -964,6 +1111,43 @@ impl LoopStrategy for ReActStrategy {
                         mcp_count = mcp_tools.len(),
                         mcp_tools = ?mcp_tools,
                         "tools in CompletionRequest"
+                    );
+                }
+
+                // Diagnostic: log the full tool list on the first iteration so
+                // we can compare shadow vs non-shadow runs.
+                if tool_iterations == 0 {
+                    let mut all_tool_ids: Vec<&str> = request.tools.iter().map(|t| t.id.as_str()).collect();
+                    all_tool_ids.sort();
+                    let has_send = all_tool_ids.iter().any(|id| id.contains("send_external"));
+                    tracing::info!(
+                        shadow_mode = context.security.shadow_mode,
+                        tool_count = all_tool_ids.len(),
+                        has_send_external_message = has_send,
+                        tools = ?all_tool_ids,
+                        prompt_len = request.prompt.len(),
+                        history_len = request.messages.len(),
+                        "DIAGNOSTIC: first model call tool list"
+                    );
+                }
+
+                // Diagnostic: log prompt hash and tail on every iteration so we
+                // can compare model inputs between shadow and non-shadow runs.
+                {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    request.prompt.hash(&mut hasher);
+                    let prompt_hash = hasher.finish();
+                    let prompt_tail: String = request.prompt.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
+                    let msgs_summary: Vec<String> = request.messages.iter().map(|m| format!("{}:{}", m.role, m.content.len())).collect();
+                    tracing::info!(
+                        shadow_mode = context.security.shadow_mode,
+                        iteration = tool_iterations,
+                        prompt_len = request.prompt.len(),
+                        prompt_hash = prompt_hash,
+                        prompt_tail = %prompt_tail,
+                        messages = ?msgs_summary,
+                        "DIAGNOSTIC: model input per iteration"
                     );
                 }
 
@@ -1149,6 +1333,21 @@ impl LoopStrategy for ReActStrategy {
                     parse_tool_calls(&response.content)
                 };
 
+                // Diagnostic: log every tool call the model produces, plus
+                // the model's text content (may reveal reasoning differences).
+                {
+                    let call_ids: Vec<&str> = detected_calls.iter().map(|c| c.tool_id.as_str()).collect();
+                    let response_text_preview: String = response.content.chars().take(500).collect();
+                    tracing::info!(
+                        shadow_mode = context.security.shadow_mode,
+                        iteration = tool_iterations,
+                        calls = ?call_ids,
+                        response_text = %response_text_preview,
+                        native_tool_calls = !response.tool_calls.is_empty(),
+                        "DIAGNOSTIC: model response"
+                    );
+                }
+
                 if !detected_calls.is_empty() {
                     let billable_count =
                         detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
@@ -1176,7 +1375,7 @@ impl LoopStrategy for ReActStrategy {
                         }
                     }
 
-                    let (tool_results, journal_tool_calls) = execute_tool_batch(
+                    let (mut tool_results, journal_tool_calls) = execute_tool_batch(
                         &detected_calls,
                         &context,
                         middleware,
@@ -1190,19 +1389,158 @@ impl LoopStrategy for ReActStrategy {
                         *tool_result_counts.entry(jtc.tool_id.clone()).or_insert(0) += 1;
                     }
 
-                    prompt = format!("{prompt}{tool_results}");
-                    // Count individual tool calls, not just iterations, so the
-                    // limit reflects actual work done. Exempt polling/status tools.
-                    tool_iterations +=
-                        detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
+                    // ── Stall breaker: detect repeated ask_user loops ────
+                    // Track ask_user question+answer pairs. If the model asks
+                    // the same question 3+ times and gets the same answer, it's
+                    // stuck in a confirmation loop. Inject a nudge into the
+                    // prompt so the model proceeds instead of re-asking.
+                    for jtc in &journal_tool_calls {
+                        if jtc.tool_id == "core.ask_user" {
+                            let question_prefix: String = serde_json::from_str::<serde_json::Value>(&jtc.input)
+                                .ok()
+                                .and_then(|v| v.get("question").and_then(|q| q.as_str()).map(|s| s.chars().take(120).collect()))
+                                .unwrap_or_default();
+                            let answer: String = serde_json::from_str::<serde_json::Value>(&jtc.output)
+                                .ok()
+                                .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(String::from))
+                                .unwrap_or_default();
+                            ask_user_history.push((question_prefix, answer));
+                        } else {
+                            // A non-ask_user tool call breaks the streak
+                            ask_user_history.clear();
+                        }
+                    }
 
-                    if let Some(ref journal) = context.conversation.conversation_journal {
-                        let mut j = journal.lock();
-                        j.record(JournalEntry {
-                            phase: JournalPhase::ToolCycle,
-                            turn: tool_iterations,
-                            tool_calls: journal_tool_calls,
+                    const STALL_THRESHOLD: usize = 2;
+                    if ask_user_history.len() >= STALL_THRESHOLD {
+                        let last = &ask_user_history[ask_user_history.len() - 1];
+                        let repeats = ask_user_history.iter().rev()
+                            .take_while(|(q, a)| q == &last.0 && a == &last.1)
+                            .count();
+                        if repeats >= STALL_THRESHOLD {
+                            tracing::info!(
+                                repeats,
+                                answer = %last.1,
+                                "stall breaker: injecting nudge after repeated identical ask_user"
+                            );
+                            tool_results.push_str(
+                                "\n\n[System: The user has already confirmed this exact request. \
+                                 Do NOT ask again. Proceed immediately with the appropriate \
+                                 action to fulfill the user's confirmed request.]"
+                            );
+                        }
+                    }
+                    // ── End stall breaker ─────────────────────────────────
+
+                    if use_multi_turn {
+                        // Multi-turn mode: build structured assistant + tool messages.
+                        use hive_model::MessageBlock;
+
+                        let mut assistant_blocks = Vec::new();
+                        if !response.content.is_empty() {
+                            assistant_blocks
+                                .push(MessageBlock::Text { text: response.content.clone() });
+                        }
+
+                        // Zip native tool calls with journal entries to get call IDs.
+                        let mut journal_with_ids = journal_tool_calls.clone();
+                        for (i, jtc) in journal_with_ids.iter_mut().enumerate() {
+                            if let Some(tc) = response.tool_calls.get(i) {
+                                jtc.tool_call_id = Some(tc.id.clone());
+                                assistant_blocks.push(MessageBlock::ToolUse {
+                                    id: tc.id.clone(),
+                                    name: jtc.tool_id.clone(),
+                                    input: serde_json::from_str(&jtc.input)
+                                        .unwrap_or(serde_json::Value::Null),
+                                });
+                            } else {
+                                // Text-parsed tool calls don't have IDs — generate synthetic ones.
+                                let synthetic_id = format!("tool-call-{}", uuid::Uuid::new_v4());
+                                jtc.tool_call_id = Some(synthetic_id.clone());
+                                assistant_blocks.push(MessageBlock::ToolUse {
+                                    id: synthetic_id,
+                                    name: jtc.tool_id.clone(),
+                                    input: serde_json::from_str(&jtc.input)
+                                        .unwrap_or(serde_json::Value::Null),
+                                });
+                            }
+                        }
+
+                        // Push assistant message.
+                        tool_history.push(CompletionMessage {
+                            role: "assistant".into(),
+                            content: response.content.clone(),
+                            content_parts: vec![],
+                            blocks: assistant_blocks,
                         });
+
+                        // Push tool result messages.
+                        for jtc in &journal_with_ids {
+                            if let Some(ref call_id) = jtc.tool_call_id {
+                                let safe_output =
+                                    hive_contracts::prompt_sanitize::escape_prompt_tags(
+                                        &jtc.output,
+                                    );
+                                tool_history.push(CompletionMessage {
+                                    role: "tool".into(),
+                                    content: safe_output.clone(),
+                                    content_parts: vec![],
+                                    blocks: vec![MessageBlock::ToolResult {
+                                        tool_use_id: call_id.clone(),
+                                        content: safe_output,
+                                        is_error: jtc.is_error,
+                                    }],
+                                });
+                            }
+                        }
+
+                        // Inject stall-breaker nudge as a system message if needed.
+                        if !tool_results.contains("[System: The user has already confirmed") {
+                            // No nudge needed.
+                        } else {
+                            tool_history.push(CompletionMessage {
+                                role: "system".into(),
+                                content: "[System: The user has already confirmed this exact request. \
+                                    Do NOT ask again. Proceed immediately with the appropriate \
+                                    action to fulfill the user's confirmed request.]"
+                                    .to_string(),
+                                content_parts: vec![],
+                                blocks: vec![],
+                            });
+                        }
+
+                        // Count individual tool calls.
+                        tool_iterations += detected_calls
+                            .iter()
+                            .filter(|c| !is_budget_exempt(&c.tool_id))
+                            .count();
+
+                        if let Some(ref journal) = context.conversation.conversation_journal {
+                            let mut j = journal.lock();
+                            j.record(JournalEntry {
+                                phase: JournalPhase::ToolCycle,
+                                turn: tool_iterations,
+                                tool_calls: journal_with_ids,
+                                assistant_content: Some(response.content.clone()),
+                            });
+                        }
+                    } else {
+                        // Legacy mode: append XML to prompt.
+                        prompt = format!("{prompt}{tool_results}");
+                        tool_iterations += detected_calls
+                            .iter()
+                            .filter(|c| !is_budget_exempt(&c.tool_id))
+                            .count();
+
+                        if let Some(ref journal) = context.conversation.conversation_journal {
+                            let mut j = journal.lock();
+                            j.record(JournalEntry {
+                                phase: JournalPhase::ToolCycle,
+                                turn: tool_iterations,
+                                tool_calls: journal_tool_calls,
+                                assistant_content: None,
+                            });
+                        }
                     }
 
                     // Check if a new user message is waiting — yield at this checkpoint.
@@ -1484,6 +1822,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                         phase: JournalPhase::Plan { steps: parsed_steps.clone() },
                         turn: 0,
                         tool_calls: Vec::new(),
+                        assistant_content: None,
                     });
                 }
 
@@ -1501,6 +1840,8 @@ impl LoopStrategy for PlanThenExecuteStrategy {
             // Shared adaptive budget across all plan steps.
             let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
             let mut total_tool_calls = 0usize;
+            // Stall breaker for the plan-and-execute loop (same as ReAct).
+            let mut ask_user_history: Vec<(String, String)> = Vec::new();
 
             for (step_idx, step) in steps.iter().enumerate() {
                 // Skip already-completed steps when resuming
@@ -1606,7 +1947,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                             }
                         }
 
-                        let (tool_results, journal_tool_calls) = execute_tool_batch(
+                        let (mut tool_results, journal_tool_calls) = execute_tool_batch(
                             &detected_calls,
                             &context,
                             middleware,
@@ -1622,6 +1963,46 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                             ));
                         }
 
+                        // ── Stall breaker (plan-and-execute) ─────────
+                        for jtc in &journal_tool_calls {
+                            if jtc.tool_id == "core.ask_user" {
+                                let question_prefix: String = serde_json::from_str::<serde_json::Value>(&jtc.input)
+                                    .ok()
+                                    .and_then(|v| v.get("question").and_then(|q| q.as_str()).map(|s| s.chars().take(120).collect()))
+                                    .unwrap_or_default();
+                                let answer: String = serde_json::from_str::<serde_json::Value>(&jtc.output)
+                                    .ok()
+                                    .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(String::from))
+                                    .unwrap_or_default();
+                                ask_user_history.push((question_prefix, answer));
+                            } else {
+                                ask_user_history.clear();
+                            }
+                        }
+                        if ask_user_history.len() >= 2 {
+                            let last = &ask_user_history[ask_user_history.len() - 1];
+                            let repeats = ask_user_history.iter().rev()
+                                .take_while(|(q, a)| q == &last.0 && a == &last.1)
+                                .count();
+                            if repeats >= 2 {
+                                tracing::info!(
+                                    repeats,
+                                    answer = %last.1,
+                                    "stall breaker: injecting nudge after repeated identical ask_user (plan)"
+                                );
+                                tool_results.push_str(
+                                    "\n\n[System: The user has already confirmed this exact request. \
+                                     Do NOT ask again. Proceed immediately with the appropriate \
+                                     action to fulfill the user's confirmed request.]"
+                                );
+                            }
+                        }
+                        // ── End stall breaker ────────────────────────
+
+                        // PlanAndExecute: the step prompt grows with each
+                        // tool iteration. Apply same XML/multi-turn split
+                        // as ReAct for consistency (legacy XML for now —
+                        // PlanAndExecute rebuilds step_prompt each step).
                         step_prompt = format!("{step_prompt}{tool_results}");
                         let billable =
                             detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
@@ -1634,6 +2015,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                                 phase: JournalPhase::ToolCycle,
                                 turn: step_idx + 1,
                                 tool_calls: journal_tool_calls,
+                                assistant_content: Some(response.content.clone()),
                             });
                         }
 
@@ -1668,6 +2050,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                             },
                             turn: step_idx + 1,
                             tool_calls: Vec::new(),
+                            assistant_content: None,
                         });
                     }
 
@@ -1925,6 +2308,8 @@ async fn execute_tool_batch(
             tool_id: o.tool_id,
             input: o.input_str,
             output: cap_tool_output(&o.output),
+            tool_call_id: None,
+            is_error: o.is_error,
         });
     }
     (tool_results, journal_tool_calls)
@@ -2328,6 +2713,54 @@ async fn execute_tool_call(
     }
     if call.tool_id == "knowledge.query" {
         return handle_knowledge_query_tool(&call, context).await;
+    }
+
+    // ── Shadow mode interception ──────────────────────────────────────
+    // When shadow_mode is active, intercept external side-effecting tools.
+    // Built-in orchestration tools (core.*, knowledge.*) are handled above
+    // and always pass through.  Read-only tools also pass through so the
+    // agent can reason over real data.
+    if context.security.shadow_mode {
+        let is_read_only = definition.annotations.read_only_hint == Some(true)
+            || !definition.side_effects;
+        if !is_read_only {
+            tracing::info!(
+                tool_id = %call.tool_id,
+                "shadow mode: intercepting side-effecting tool call"
+            );
+            // Emit an interception event so callers (e.g. workflow test
+            // runner) can record what the agent *would* have done.
+            if let Some(tx) = event_tx {
+                let input_str = serde_json::to_string(&call.input)
+                    .unwrap_or_else(|_| "<unserializable>".to_string());
+                let _ = tx.try_send(LoopEvent::ToolCallIntercepted {
+                    tool_id: call.tool_id.clone(),
+                    input: input_str,
+                });
+            }
+            // Return a clean success so the agent continues normally.
+            // Do NOT include "shadow" or explanatory messages — the LLM
+            // would interpret them as partial failures and retry/re-ask.
+            let synthetic_output = serde_json::json!({
+                "success": true,
+            });
+            let result = hive_tools::ToolResult {
+                output: synthetic_output,
+                data_class: DataClass::Internal,
+            };
+            // Still run after_tool_result middleware so classification and
+            // other hooks see the synthetic result.
+            let mut result = result;
+            for hook in middleware {
+                result = hook.after_tool_result(
+                    context,
+                    &call.tool_id,
+                    Some(&call.input),
+                    result,
+                )?;
+            }
+            return Ok(result);
+        }
     }
 
     // Snapshot the tool input before it's moved into execute()
@@ -3348,6 +3781,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -3475,6 +3909,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3540,6 +3975,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3605,6 +4041,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3665,6 +4102,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3737,6 +4175,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -3802,6 +4241,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -3865,6 +4305,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(workspace_classification)),
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -3962,6 +4403,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4154,6 +4596,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4383,6 +4826,7 @@ mod tests {
                 workspace_classification: Some(Arc::new(wc)),
                 effective_data_class: effective_dc.clone(),
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4622,6 +5066,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4804,6 +5249,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: effective_dc,
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -4968,6 +5414,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: effective_dc,
                 connector_service: Some(Arc::new(MockConnectorSvc)),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -5030,13 +5477,18 @@ Let me know if you need anything else."#;
                     tool_id: "file.read".to_string(),
                     input: r#"{"path":"src/main.rs"}"#.to_string(),
                     output: "fn main() {}".to_string(),
+                    tool_call_id: None,
+                    is_error: false,
                 },
                 JournalToolCall {
                     tool_id: "search".to_string(),
                     input: r#"{"query":"auth"}"#.to_string(),
                     output: "3 results found".to_string(),
+                    tool_call_id: None,
+                    is_error: false,
                 },
             ],
+            assistant_content: None,
         });
 
         let summary = super::build_preemption_summary(&journal);
@@ -5057,7 +5509,10 @@ Let me know if you need anything else."#;
                 tool_id: "file.read".to_string(),
                 input: "{}".to_string(),
                 output: long_output,
+                tool_call_id: None,
+                is_error: false,
             }],
+            assistant_content: None,
         });
 
         let summary = super::build_preemption_summary(&journal);
@@ -5177,6 +5632,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools,
@@ -5251,6 +5707,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -5316,6 +5773,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::new()),
@@ -5575,6 +6033,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -6068,6 +6527,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(registry),
@@ -6139,6 +6599,7 @@ Let me know if you need anything else."#;
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new({

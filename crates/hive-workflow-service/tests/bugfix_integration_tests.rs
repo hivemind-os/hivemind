@@ -436,6 +436,7 @@ async fn test_integ_delete_completed_instance_no_kill() {
             None,
             None,
             None,
+            ExecutionMode::Normal,
         )
         .await
         .unwrap();

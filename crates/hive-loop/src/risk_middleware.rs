@@ -277,6 +277,7 @@ mod tests {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
                 connector_service: None,
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::new(ToolRegistry::default()),

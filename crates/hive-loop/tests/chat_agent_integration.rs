@@ -281,6 +281,7 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
             workspace_classification: None,
             effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
             connector_service: None,
+                shadow_mode: false,
         },
         tools_ctx: ToolsContext {
             tools: tools,
@@ -569,11 +570,13 @@ async fn t08_history_messages_included() {
             role: "user".into(),
             content: "first message".into(),
             content_parts: vec![],
+            blocks: vec![],
         },
         CompletionMessage {
             role: "assistant".into(),
             content: "first reply".into(),
             content_parts: vec![],
+            blocks: vec![],
         },
     ];
 
@@ -2796,6 +2799,7 @@ mod agents {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         }
     }
 
@@ -3555,6 +3559,7 @@ async fn t91_agent_chain_pipeline() {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
+                shadow_mode: false,
         };
         sup.spawn_agent(spec, None, None, None, None).await.unwrap();
     }

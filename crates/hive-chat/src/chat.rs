@@ -979,6 +979,7 @@ pub(crate) fn agent_spec_from_persona(persona: &Persona) -> AgentSpec {
         tool_limits: None,
         persona_id: Some(persona.id.clone()),
         workflow_managed: false,
+                shadow_mode: false,
     }
 }
 
@@ -1558,6 +1559,7 @@ impl ChatService {
             bot_configs: Arc::clone(&bot_configs),
             bot_workspace: Arc::clone(&bot_workspace_path),
             bot_stream_tx: bot_stream_tx.clone(),
+            bot_loggers: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             loop_executor: Arc::clone(&loop_executor),
             model_router: Arc::clone(&model_router_swap),
             personas: Arc::new(Mutex::new(Vec::new())),
@@ -2803,6 +2805,7 @@ impl ChatService {
                 workspace_classification: None,
                 effective_data_class: Arc::new(AtomicU8::new(data_class.to_i64() as u8)),
                 connector_service: self.connector_service.clone(),
+                shadow_mode: false,
             },
             tools_ctx: ToolsContext {
                 tools: Arc::clone(&self.tools),
@@ -4820,6 +4823,11 @@ impl ChatService {
         self.bot_service.has_bot_supervisor()
     }
 
+    /// Returns the base directory where per-bot workspaces are created.
+    pub fn bot_workspace(&self) -> &std::path::Path {
+        self.bot_service.bot_workspace()
+    }
+
     pub async fn shutdown_bot_supervisor(&self) {
         self.bot_service.shutdown_bot_supervisor().await
     }
@@ -6116,6 +6124,7 @@ impl ChatService {
                             role: "system".to_string(),
                             content: spatial_context,
                             content_parts: vec![],
+                            blocks: vec![],
                         },
                     );
                 }
@@ -6128,6 +6137,7 @@ impl ChatService {
                         role: "system".to_string(),
                         content: pending.persona.system_prompt.clone(),
                         content_parts: vec![],
+                        blocks: vec![],
                     },
                 );
             }
@@ -6154,6 +6164,7 @@ impl ChatService {
                     role: "system".to_string(),
                     content: context_map,
                     content_parts: vec![],
+                    blocks: vec![],
                 });
             }
 
@@ -6199,6 +6210,7 @@ impl ChatService {
                         role: "system".to_string(),
                         content: wf_context,
                         content_parts: vec![],
+                        blocks: vec![],
                     });
                 }
             }
@@ -6445,6 +6457,7 @@ impl ChatService {
                     // session even if no sensitive file has been touched.
                     effective_data_class: Arc::new(AtomicU8::new(DataClass::Public.to_i64() as u8)),
                     connector_service: self.connector_service.clone(),
+                shadow_mode: false,
                 },
                 tools_ctx: ToolsContext {
                     tools: session_tools,
@@ -6886,6 +6899,16 @@ impl ChatService {
             session.snapshot.active_intent = None;
             session.snapshot.active_thinking = None;
             session.snapshot.updated_at_ms = now_ms();
+            // Broadcast a redundant Done so the frontend can re-sync now
+            // that the snapshot state is Idle.  The loop already sent Done
+            // through the forwarding task, but at that point the state was
+            // still Running, so the frontend's snapshot poll may have seen
+            // stale data and re-entered streaming mode.
+            let _ = session.stream_tx.send(SessionEvent::Loop(LoopEvent::Done {
+                content: String::new(),
+                provider_id: String::new(),
+                model: String::new(),
+            }));
             return None;
         };
 
@@ -8614,7 +8637,7 @@ fn build_conversation_history(messages: &[ChatMessage]) -> Vec<CompletionMessage
             ChatMessageRole::Notification | ChatMessageRole::System => continue,
         };
         let content_parts = build_content_parts(&content, &msg.attachments);
-        history.push(CompletionMessage { role: role.to_string(), content, content_parts });
+        history.push(CompletionMessage { role: role.to_string(), content, content_parts, blocks: vec![] });
         total_chars += msg.content.len();
     }
 
@@ -9289,6 +9312,12 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 call_id: call_id.clone(),
                 tool_name: tool_name.clone(),
                 arguments_so_far: arguments_so_far.clone(),
+            }
+        }
+        LoopEvent::ToolCallIntercepted { tool_id, input } => {
+            ReasoningEvent::ToolCallIntercepted {
+                tool_id: tool_id.clone(),
+                input: serde_json::from_str(input).unwrap_or_else(|_| json!(input)),
             }
         }
     }
@@ -10088,6 +10117,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,
@@ -11501,6 +11531,7 @@ mod tests {
                 tool_limits: None,
                 persona_id: None,
                 workflow_managed: false,
+                shadow_mode: false,
             },
             status: "blocked".to_string(),
             original_task: Some("plan feature".to_string()),
@@ -11558,6 +11589,7 @@ mod tests {
             permission_rules: vec![],
             tool_limits: None,
             persona_id: None,
+            shadow_mode: false,
         }
     }
 
@@ -11789,6 +11821,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
+                shadow_mode: false,
                 },
                 None,
                 None,
@@ -11838,5 +11871,61 @@ mod tests {
         assert_eq!(supervisor_final.get_all_agents().len(), 1, "agent must survive app tool unregistration");
 
         supervisor.kill_all().await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn begin_next_message_broadcasts_done_when_queue_empty() {
+        // Regression test for the "stuck thinking badge" bug:
+        // When the processing loop drains the queue, the session transitions
+        // to Idle **and** broadcasts a Done event so the frontend can re-sync.
+        let tempdir = tempdir().expect("tempdir");
+        let service = test_chat_service(tempdir.path().join("graph.db"));
+
+        let session = service
+            .create_session(SessionModality::Linear, None, None)
+            .await
+            .expect("create session");
+
+        // Subscribe to the broadcast stream before modifying state.
+        let mut rx = service
+            .subscribe_stream(&session.id)
+            .await
+            .expect("subscribe stream");
+
+        // Simulate the session being in "processing" + Running state with
+        // an empty queue — this is the state right after finish_message()
+        // runs but before begin_next_message() is called on the next loop
+        // iteration.
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
+            record.snapshot.state = ChatRunState::Running;
+            // Ensure queue is empty.
+            record.queue.clear();
+        }
+
+        // Call begin_next_message — should return None and set Idle.
+        let pending = service.begin_next_message(&session.id).await;
+        assert!(pending.is_none(), "no queued message → should return None");
+
+        // Verify the session is now Idle.
+        {
+            let sessions = service.sessions.read().await;
+            let record = sessions.get(&session.id).expect("session record");
+            assert_eq!(record.snapshot.state, ChatRunState::Idle);
+            assert!(!record.processing);
+        }
+
+        // Verify a Done event was broadcast.
+        let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("should receive event within timeout")
+            .expect("broadcast recv should succeed");
+
+        match event {
+            SessionEvent::Loop(LoopEvent::Done { .. }) => { /* expected */ }
+            other => panic!("expected LoopEvent::Done, got: {other:?}"),
+        }
     }
 }

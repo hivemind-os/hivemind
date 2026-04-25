@@ -3,7 +3,8 @@ use crate::expression::{
     evaluate_condition, is_pure_template, resolve_output_map, resolve_path, resolve_template,
     resolve_template_for_prompt, ExpressionContext,
 };
-use crate::store::WorkflowPersistence;
+use crate::shadow_executor::{NullToolInfoProvider, ShadowStepExecutor, ToolInfoProvider};
+use crate::store::{sha256_hex, WorkflowPersistence};
 use crate::types::*;
 use crate::validation::validate_definition;
 use async_trait::async_trait;
@@ -138,6 +139,12 @@ pub struct ExecutionContext {
     pub attachments_dir: Option<String>,
     /// Resolved workflow attachments selected for the current InvokeAgent step.
     pub selected_attachments: Vec<WorkflowAttachment>,
+    /// Execution mode: Normal (real) or Shadow (intercepted side effects).
+    pub execution_mode: ExecutionMode,
+    /// When true, agent interactions (ask_user, tool approvals) are
+    /// automatically responded to. Used by the test runner so tests
+    /// don't block waiting for human input.
+    pub auto_respond_interactions: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +272,9 @@ pub struct WorkflowEngine {
     instance_locks: Arc<RwLock<HashMap<i64, Arc<TokioMutex<()>>>>>,
     /// Base directory for workflow file attachments, if configured.
     attachments_base_dir: Option<std::path::PathBuf>,
+    /// Optional tool metadata provider for shadow mode risk classification.
+    /// When absent, shadow mode intercepts ALL tool calls (fail-closed).
+    tool_info_provider: Option<Arc<dyn ToolInfoProvider>>,
 }
 
 impl WorkflowEngine {
@@ -291,12 +301,30 @@ impl WorkflowEngine {
             paused: Arc::new(RwLock::new(HashSet::new())),
             instance_locks: Arc::new(RwLock::new(HashMap::new())),
             attachments_base_dir: None,
+            tool_info_provider: None,
         }
     }
 
     /// Set the base directory for workflow file attachments.
     pub fn set_attachments_base_dir(&mut self, dir: std::path::PathBuf) {
         self.attachments_base_dir = Some(dir);
+    }
+
+    /// Set the tool metadata provider used for shadow-mode risk classification.
+    /// When set, shadow mode uses this to distinguish safe (read-only) tools
+    /// from risky ones. When absent, all tools are intercepted (fail-closed).
+    pub fn set_tool_info_provider(&mut self, provider: Arc<dyn ToolInfoProvider>) {
+        self.tool_info_provider = Some(provider);
+    }
+
+    /// Access the underlying persistence store.
+    pub fn store(&self) -> &Arc<dyn WorkflowPersistence> {
+        &self.store
+    }
+
+    /// Emit a workflow event through the engine's event emitter.
+    pub async fn emit_event(&self, event: WorkflowEvent) {
+        self.event_emitter.emit(event).await;
     }
 
     /// Create a lightweight clone of this engine by sharing all Arc-wrapped
@@ -312,6 +340,7 @@ impl WorkflowEngine {
             killed: Arc::clone(&self.killed),
             paused: Arc::clone(&self.paused),
             attachments_base_dir: self.attachments_base_dir.clone(),
+            tool_info_provider: self.tool_info_provider.clone(),
         }
     }
 
@@ -347,6 +376,7 @@ impl WorkflowEngine {
             permissions,
             trigger_step_id,
             None,
+            ExecutionMode::Normal,
         )
         .await
     }
@@ -363,6 +393,7 @@ impl WorkflowEngine {
         permissions: Vec<PermissionEntry>,
         trigger_step_id: Option<String>,
         workspace_path: Option<String>,
+        execution_mode: ExecutionMode,
     ) -> Result<i64, WorkflowError> {
         let instance = self
             .setup_instance(
@@ -373,8 +404,49 @@ impl WorkflowEngine {
                 permissions,
                 trigger_step_id,
                 workspace_path,
+                execution_mode,
             )
             .await?;
+        let id = instance.id;
+
+        let lock = self.instance_lock(id).await;
+        let _guard = lock.lock().await;
+
+        self.run_loop(instance).await?;
+
+        Ok(id)
+    }
+
+    /// Launch a workflow in Shadow mode with per-step output overrides for
+    /// unit-test execution.  Blocks until the instance reaches a terminal or
+    /// waiting state.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn launch_test(
+        &self,
+        definition: WorkflowDefinition,
+        inputs: Value,
+        parent_session_id: String,
+        trigger_step_id: Option<String>,
+        shadow_overrides: HashMap<String, serde_json::Value>,
+        auto_respond: bool,
+        workspace_path: Option<String>,
+    ) -> Result<i64, WorkflowError> {
+        let mut instance = self
+            .setup_instance(
+                definition,
+                inputs,
+                parent_session_id,
+                None,
+                vec![],
+                trigger_step_id,
+                workspace_path,
+                ExecutionMode::Shadow,
+            )
+            .await?;
+        instance.shadow_overrides = shadow_overrides;
+        instance.auto_respond_interactions = auto_respond;
+        // Persist the overrides so they survive re-entry
+        self.store.update_instance(&instance)?;
         let id = instance.id;
 
         let lock = self.instance_lock(id).await;
@@ -398,6 +470,7 @@ impl WorkflowEngine {
         permissions: Vec<PermissionEntry>,
         trigger_step_id: Option<String>,
         workspace_path: Option<String>,
+        execution_mode: ExecutionMode,
     ) -> Result<i64, WorkflowError> {
         let instance = self
             .setup_instance(
@@ -408,6 +481,7 @@ impl WorkflowEngine {
                 permissions,
                 trigger_step_id,
                 workspace_path,
+                execution_mode,
             )
             .await?;
         let ret_id = instance.id;
@@ -471,6 +545,7 @@ impl WorkflowEngine {
         permissions: Vec<PermissionEntry>,
         trigger_step_id: Option<String>,
         workspace_path: Option<String>,
+        execution_mode: ExecutionMode,
     ) -> Result<WorkflowInstance, WorkflowError> {
         validate_definition(&definition)?;
 
@@ -549,6 +624,9 @@ impl WorkflowEngine {
             goto_activated_steps: HashSet::new(),
             goto_source_steps: HashSet::new(),
             active_loops: HashMap::new(),
+            execution_mode,
+            shadow_overrides: HashMap::new(),
+            auto_respond_interactions: false,
         };
 
         // Persist and get the auto-assigned ID
@@ -561,6 +639,7 @@ impl WorkflowEngine {
                 definition_name: instance.definition.name.clone(),
                 parent_session_id: parent_session_id.clone(),
                 mode: instance.definition.mode,
+                execution_mode: instance.execution_mode,
             })
             .await;
 
@@ -813,6 +892,125 @@ impl WorkflowEngine {
                     status: format!("Step {step_id} is not waiting on input"),
                 });
             }
+        }
+
+        // Check if this is a loop preview pause response
+        let is_preview_resume = instance
+            .active_loops
+            .get(step_id)
+            .map_or(false, |ls| ls.preview_paused);
+
+        if is_preview_resume {
+            // Parse response — gate responses arrive as {"selected": "...", "text": "..."}
+            let selected = response
+                .get("selected")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let gate_request_id = instance
+                .step_states
+                .get(step_id)
+                .and_then(|s| s.interaction_request_id.clone());
+
+            if selected == "Abort" {
+                // Complete the loop early with partial results
+                let processed_count = instance
+                    .active_loops
+                    .get(step_id)
+                    .map(|ls| ls.iteration as u64 + 1)
+                    .unwrap_or(0);
+                let total_count = instance
+                    .active_loops
+                    .get(step_id)
+                    .and_then(|ls| ls.collection.as_ref().map(|c| c.len() as u64))
+                    .unwrap_or(0);
+                instance.active_loops.remove(step_id);
+                if let Some(state) = instance.step_states.get_mut(step_id) {
+                    state.status = StepStatus::Completed;
+                    state.completed_at_ms = Some(now_ms());
+                    state.outputs = Some(serde_json::json!({
+                        "iteration_count": processed_count,
+                        "completed": false,
+                        "aborted": true,
+                        "processed_count": processed_count,
+                        "total_count": total_count,
+                    }));
+                    state.interaction_request_id = None;
+                    state.interaction_prompt = None;
+                    state.interaction_choices = None;
+                    state.interaction_allow_freeform = None;
+                }
+            } else {
+                // "Continue All" — resume the loop by setting LoopWaiting
+                // The pre-pass will see body steps as done and reset to Pending.
+                if let Some(state) = instance.step_states.get_mut(step_id) {
+                    state.status = StepStatus::LoopWaiting;
+                    state.interaction_request_id = None;
+                    state.interaction_prompt = None;
+                    state.interaction_choices = None;
+                    state.interaction_allow_freeform = None;
+                }
+            }
+
+            // Common: update workflow status and persist
+            if instance.status == WorkflowStatus::WaitingOnInput {
+                instance.status = WorkflowStatus::Running;
+            }
+            instance.updated_at_ms = now_ms();
+            {
+                let store = &self.store;
+                store.update_instance(&instance)?;
+            }
+
+            self.event_emitter
+                .emit(WorkflowEvent::InteractionResponded {
+                    instance_id,
+                    step_id: step_id.to_string(),
+                    request_id: gate_request_id,
+                    response_text: Some(selected.to_string()),
+                })
+                .await;
+
+            // Spawn background run_loop continuation
+            let engine = self.clone_engine();
+            let inst_id = instance_id;
+            drop(_guard);
+            tokio::spawn(async move {
+                let lock = engine.instance_lock(inst_id).await;
+                let _guard = lock.lock().await;
+                let instance = match engine.load_instance(inst_id).await {
+                    Ok(i) => i,
+                    Err(e) => {
+                        warn!(instance_id = %inst_id, error = %e, "failed to load instance after preview response");
+                        engine.instance_locks.write().await.remove(&inst_id);
+                        return;
+                    }
+                };
+                if let Err(e) = engine.run_loop(instance).await {
+                    warn!(instance_id = %inst_id, error = %e, "workflow execution failed after preview response");
+                    match engine.store.get_instance(inst_id) {
+                        Ok(Some(mut inst)) if !matches!(
+                            inst.status,
+                            WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Killed
+                        ) => {
+                            inst.status = WorkflowStatus::Failed;
+                            inst.error = Some(format!("{e}"));
+                            inst.completed_at_ms = Some(now_ms());
+                            inst.updated_at_ms = now_ms();
+                            if let Err(persist_err) = engine.store.update_instance(&inst) {
+                                warn!(instance_id = %inst_id, error = %persist_err, "failed to persist Failed status");
+                            }
+                            engine.event_emitter.emit(WorkflowEvent::InstanceFailed {
+                                instance_id: inst_id,
+                                error: inst.error.clone().unwrap_or_default(),
+                            }).await;
+                        }
+                        _ => {}
+                    }
+                    engine.instance_locks.write().await.remove(&inst_id);
+                }
+            }.instrument(tracing::info_span!("service", service = "workflows")));
+
+            return Ok(());
         }
 
         // Resolve output mappings (immutable borrow of instance for context)
@@ -1127,6 +1325,22 @@ impl WorkflowEngine {
     }
 
     async fn run_loop(&self, mut instance: WorkflowInstance) -> Result<(), WorkflowError> {
+        // Wrap the step executor for shadow mode — intercept risky actions
+        let effective_executor: Arc<dyn StepExecutor> =
+            if instance.execution_mode == ExecutionMode::Shadow {
+                let tip: Arc<dyn ToolInfoProvider> = self
+                    .tool_info_provider
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(NullToolInfoProvider));
+                Arc::new(ShadowStepExecutor::new(
+                    self.step_executor.clone(),
+                    tip,
+                    self.store.clone(),
+                ))
+            } else {
+                self.step_executor.clone()
+            };
+
         let mut goto_activation_count: usize = 0;
         let mut running_recovery_attempts: usize = 0;
         loop {
@@ -1316,6 +1530,28 @@ impl WorkflowEngine {
                 instance.updated_at_ms = now_ms();
                 let store = &self.store;
                 store.update_instance(&instance)?;
+
+                // Record successful normal-mode run for first-run protection.
+                if instance.status == WorkflowStatus::Completed
+                    && instance.execution_mode == ExecutionMode::Normal
+                {
+                    let def_json =
+                        serde_json::to_string(&instance.definition).unwrap_or_default();
+                    let hash = sha256_hex(&def_json);
+                    if let Err(e) = store.record_successful_run(
+                        &instance.definition.name,
+                        &instance.definition.version,
+                        &hash,
+                        instance.completed_at_ms.unwrap_or_else(now_ms),
+                    ) {
+                        warn!(
+                            instance_id = instance.id,
+                            error = %e,
+                            "Failed to record successful run metadata"
+                        );
+                    }
+                }
+
                 // Clean up in-memory state for terminal and idle instances.
                 // Locks are recreated on-demand when an instance resumes.
                 if matches!(
@@ -1350,6 +1586,8 @@ impl WorkflowEngine {
                         .to_string()
                 }),
                 selected_attachments: instance.definition.attachments.clone(),
+                execution_mode: instance.execution_mode,
+                auto_respond_interactions: instance.auto_respond_interactions,
             };
 
             let mut handles = Vec::new();
@@ -1374,12 +1612,14 @@ impl WorkflowEngine {
                     // Clear GoTo activation flag once the step starts executing
                     instance.goto_activated_steps.remove(step_id);
 
-                    let executor = self.step_executor.clone();
+                    let executor = effective_executor.clone();
                     let mut ctx = exec_ctx.clone();
                     ctx.step_id = step_def.id.clone();
                     let expr_ctx = build_expression_context(&instance, Some(&step_def.id));
                     let emitter = self.event_emitter.clone();
                     let inst_id = instance.id;
+                    // Check for test-case shadow override for this step
+                    let shadow_override = instance.shadow_overrides.get(step_id).cloned();
                     // Clone loop state for ForEach/While control flow steps
                     let loop_state = instance.active_loops.get(step_id).cloned();
                     let semaphore = Arc::clone(&self.step_semaphore);
@@ -1409,7 +1649,12 @@ impl WorkflowEngine {
                             // not cancel externally-spawned side effects. StepExecutor
                             // implementations should be cancellation-aware (i.e. use
                             // select! or cancellation tokens) to ensure cleanup on timeout.
-                            let result = if let Some(timeout) = step_def.timeout_secs {
+                            // If a test-case shadow override is provided for
+                            // this step, skip real/shadow execution entirely and
+                            // return the override as the step output.
+                            let result = if let Some(overridden_output) = shadow_override {
+                                StepOutcome::Completed { outputs: overridden_output }
+                            } else if let Some(timeout) = step_def.timeout_secs {
                                 match tokio::time::timeout(
                                     std::time::Duration::from_secs(timeout),
                                     execute_step(
@@ -1731,6 +1976,14 @@ impl WorkflowEngine {
                         let loop_state = if let Some(mut ls) =
                             instance.active_loops.remove(&step_id)
                         {
+                            // Snapshot body outputs before resetting them
+                            // (accumulate for preview if preview_count is active).
+                            if ls.preview_results.is_some() && !ls.preview_paused {
+                                let snapshot = collect_body_outputs(&instance, &body_steps);
+                                if let Some(ref mut results) = ls.preview_results {
+                                    results.push(snapshot);
+                                }
+                            }
                             // Continuing — increment iteration
                             ls.iteration += 1;
                             ls
@@ -1742,10 +1995,12 @@ impl WorkflowEngine {
                                 item_var: None,
                                 body_step_ids: body_steps.clone(),
                                 max_iterations: None,
+                                preview_paused: false,
+                                preview_results: None,
                             };
                             // Populate ForEach-specific fields
                             if let StepType::ControlFlow {
-                                control: ControlFlowDef::ForEach { collection, item_var, .. },
+                                control: ControlFlowDef::ForEach { collection, item_var, preview_count, .. },
                             } = &step_def.step_type
                             {
                                 let expr_ctx = build_expression_context(&instance, Some(&step_id));
@@ -1767,6 +2022,10 @@ impl WorkflowEngine {
                                     ls.collection = Some(arr);
                                 }
                                 ls.item_var = Some(item_var.clone());
+                                // Initialize preview results accumulator if preview is active
+                                if preview_count.map_or(false, |pc| pc > 0) {
+                                    ls.preview_results = Some(Vec::new());
+                                }
                             }
                             // Populate While-specific fields
                             if let StepType::ControlFlow {
@@ -1854,6 +2113,85 @@ impl WorkflowEngine {
                                 outputs: None,
                             })
                             .await;
+                    }
+                    StepOutcome::LoopPreviewPause { body_steps, completed, total } => {
+                        // Snapshot current body step outputs before pausing
+                        let body_snapshot = collect_body_outputs(&instance, &body_steps);
+
+                        // Update loop state: mark preview as fired
+                        if let Some(ls) = instance.active_loops.get_mut(&step_id) {
+                            ls.preview_paused = true;
+                            // Accumulate preview results
+                            let results = ls.preview_results.get_or_insert_with(Vec::new);
+                            results.push(body_snapshot);
+                        }
+
+                        // Create feedback request for user review
+                        let remaining = total - completed;
+                        let prompt = format!(
+                            "Processed {completed}/{total} items. Review the results and decide whether to continue with the remaining {remaining} items.",
+                        );
+                        let choices_owned = vec![
+                            "Continue All".to_string(),
+                            "Abort".to_string(),
+                        ];
+
+                        match effective_executor
+                            .create_feedback_request(
+                                instance.id,
+                                &step_id,
+                                &prompt,
+                                Some(&choices_owned),
+                                false,
+                                &exec_ctx,
+                            )
+                            .await
+                        {
+                            Ok(request_id) => {
+                                if let Some(state) = instance.step_states.get_mut(&step_id) {
+                                    state.status = StepStatus::WaitingOnInput;
+                                    state.interaction_request_id = Some(request_id);
+                                    state.interaction_prompt = Some(prompt);
+                                    state.interaction_choices = Some(vec![
+                                        "Continue All".to_string(),
+                                        "Abort".to_string(),
+                                    ]);
+                                    state.interaction_allow_freeform = Some(false);
+                                }
+                                self.event_emitter
+                                    .emit(WorkflowEvent::StepWaiting {
+                                        instance_id: instance.id,
+                                        step_id: step_id.clone(),
+                                        waiting_type: "input".to_string(),
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                // Feedback request failed — fall through to continue
+                                // the loop rather than stranding the instance.
+                                warn!(
+                                    step_id = %step_id,
+                                    error = %e,
+                                    "Preview feedback request failed, continuing loop"
+                                );
+                                // Reset body steps and set LoopWaiting so the
+                                // pre-pass will advance to the next iteration.
+                                for body_id in &body_steps {
+                                    if let Some(state) = instance.step_states.get_mut(body_id) {
+                                        state.status = StepStatus::Pending;
+                                        state.outputs = None;
+                                        state.error = None;
+                                        state.started_at_ms = None;
+                                        state.completed_at_ms = None;
+                                        state.retry_count = 0;
+                                        state.retry_delay_secs = None;
+                                    }
+                                }
+                                if let Some(state) = instance.step_states.get_mut(&step_id) {
+                                    state.status = StepStatus::LoopWaiting;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1946,16 +2284,7 @@ impl WorkflowEngine {
                         "re-entering run_loop for recovered instance"
                     );
 
-                    let engine = WorkflowEngine {
-                        store: Arc::clone(&self.store),
-                        step_executor: Arc::clone(&self.step_executor),
-                        event_emitter: Arc::clone(&self.event_emitter),
-                        step_semaphore: Arc::clone(&self.step_semaphore),
-                        instance_locks: Arc::clone(&self.instance_locks),
-                        killed: Arc::clone(&self.killed),
-                        paused: Arc::clone(&self.paused),
-                        attachments_base_dir: self.attachments_base_dir.clone(),
-                    };
+                    let engine = self.clone_engine();
                     let handle = tokio::spawn(async move {
                         let lock = engine.instance_lock(inst_id).await;
                         let _guard = lock.lock().await;
@@ -2243,6 +2572,12 @@ enum StepOutcome {
     },
     /// The loop has finished — proceed to the step's `next` successors.
     LoopComplete,
+    /// The loop has reached its preview checkpoint and should pause for user review.
+    LoopPreviewPause {
+        body_steps: Vec<String>,
+        completed: usize,
+        total: usize,
+    },
 }
 
 async fn execute_step(
@@ -2633,7 +2968,7 @@ async fn execute_control_flow(
             }
         }
         ControlFlowDef::EndWorkflow => StepOutcome::EndWorkflow,
-        ControlFlowDef::ForEach { collection, item_var: _, body } => {
+        ControlFlowDef::ForEach { collection, item_var: _, body, preview_count } => {
             // Resolve the collection on first iteration; reuse from loop_state after.
             // `next_iteration` is the index that will be used IF we proceed.
             let (resolved_collection, next_iteration) = if let Some(ref ls) = loop_state {
@@ -2681,6 +3016,20 @@ async fn execute_control_flow(
             };
 
             if next_iteration < resolved_collection.len() {
+                // Check preview checkpoint: pause after preview_count items
+                // if we haven't paused yet.
+                if let Some(pc) = preview_count {
+                    if *pc > 0
+                        && next_iteration == *pc as usize
+                        && !loop_state.as_ref().map_or(false, |ls| ls.preview_paused)
+                    {
+                        return StepOutcome::LoopPreviewPause {
+                            body_steps: body.clone(),
+                            completed: *pc as usize,
+                            total: resolved_collection.len(),
+                        };
+                    }
+                }
                 // There are more items — start/continue iteration
                 StepOutcome::LoopIteration { body_steps: body.clone() }
             } else {
@@ -2721,6 +3070,19 @@ fn other_type_name(v: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+/// Collect body step outputs into a single JSON object for preview snapshots.
+fn collect_body_outputs(instance: &WorkflowInstance, body_steps: &[String]) -> Value {
+    let mut map = serde_json::Map::new();
+    for body_id in body_steps {
+        if let Some(state) = instance.step_states.get(body_id) {
+            if let Some(ref outputs) = state.outputs {
+                map.insert(body_id.clone(), outputs.clone());
+            }
+        }
+    }
+    Value::Object(map)
 }
 
 // ---------------------------------------------------------------------------
@@ -3281,6 +3643,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3415,6 +3778,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3497,6 +3861,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3622,6 +3987,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3732,6 +4098,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3803,6 +4170,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3879,6 +4247,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -3969,6 +4338,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4070,6 +4440,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4161,6 +4532,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4304,6 +4676,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4388,6 +4761,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4467,6 +4841,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4627,6 +5002,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -4832,6 +5208,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
@@ -5010,6 +5387,7 @@ mod tests {
             requested_tools: vec![],
             permissions: vec![],
             attachments: vec![],
+            tests: vec![],
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,

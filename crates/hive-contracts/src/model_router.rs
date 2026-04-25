@@ -26,6 +26,20 @@ pub enum ProviderKind {
     Mock,
 }
 
+impl ProviderKind {
+    /// Whether this provider supports multi-turn tool history (structured
+    /// assistant+tool messages instead of XML-in-prompt).
+    pub fn supports_tool_history(&self) -> bool {
+        matches!(
+            self,
+            ProviderKind::OpenAiCompatible
+                | ProviderKind::Anthropic
+                | ProviderKind::MicrosoftFoundry
+                | ProviderKind::GitHubCopilot
+        )
+    }
+}
+
 static EMPTY_CAPABILITIES: LazyLock<BTreeSet<Capability>> = LazyLock::new(BTreeSet::new);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

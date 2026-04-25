@@ -124,6 +124,12 @@ pub enum ReasoningEvent {
         http_status: Option<u16>,
         backoff_ms: u64,
     },
+    /// A side-effecting tool call was intercepted in shadow mode.
+    /// The tool was NOT executed; a synthetic success was returned to the agent.
+    ToolCallIntercepted {
+        tool_id: String,
+        input: serde_json::Value,
+    },
     /// Partial tool-call argument snapshot during LLM streaming.
     ToolCallArgDelta {
         index: usize,
