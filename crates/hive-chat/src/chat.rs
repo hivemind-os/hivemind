@@ -1013,8 +1013,7 @@ pub struct ChatService {
     code_act_config: hive_contracts::CodeActConfig,
     /// Shared session registry for CodeAct code execution (session reuse across turns).
     code_session_registry: Arc<hive_code_executor::SessionRegistry>,
-    /// Background task that periodically reaps idle CodeAct sessions.
-    _code_session_reaper: Arc<tokio::task::JoinHandle<()>>,
+
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
     mcp: Option<Arc<McpService>>,
@@ -1621,16 +1620,6 @@ impl ChatService {
             kg_pool: Arc::clone(&shared_kg_pool),
         };
 
-        // Spawn a background task to periodically reap idle CodeAct sessions.
-        let reaper_registry = Arc::clone(&code_session_registry);
-        let code_session_reaper = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                reaper_registry.reap_idle().await;
-            }
-        });
-
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             session_seq: Arc::new(AtomicU64::new(1)),
@@ -1654,7 +1643,6 @@ impl ChatService {
             tool_limits: Arc::new(tool_limits),
             code_act_config,
             code_session_registry,
-            _code_session_reaper: Arc::new(code_session_reaper),
             skills_service: bot_service.skills_service.clone(),
             mcp,
             mcp_catalog,

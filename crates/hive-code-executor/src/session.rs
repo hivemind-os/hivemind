@@ -222,6 +222,11 @@ impl SessionRegistry {
             }
         }
 
+        // Opportunistic reap: clean up idle sessions on the creation path.
+        // This avoids needing an external tokio::spawn timer, which can panic
+        // if ChatService is constructed outside a Tokio runtime.
+        self.reap_idle().await;
+
         // Slow path: create a new session
         self.evict_if_needed().await;
 
