@@ -27,6 +27,13 @@ pub struct CodeBlock {
 /// Code blocks whose language tag ends with `:noexec` (e.g. ` ```python:noexec`)
 /// are skipped — this convention lets the LLM show code examples without
 /// triggering execution.
+///
+/// **Streaming invariant:** This function expects `content` to be the *complete*
+/// assistant response (i.e. after streaming has finished). Calling it on a
+/// partial/still-streaming message may produce incorrect results because an
+/// incomplete fenced block (no closing ```) is treated as unclosed and ignored.
+/// The CodeAct loop satisfies this by only calling `extract_python_blocks` on
+/// the fully-assembled response text.
 pub fn extract_python_blocks(content: &str) -> Vec<CodeBlock> {
     let mut blocks = Vec::new();
     let bytes = content.as_bytes();

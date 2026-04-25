@@ -13,13 +13,21 @@ use hive_code_executor::{BridgedToolInfo, CodeActToolMode};
 /// 2. Which tool functions are available as Python calls
 /// 3. How execution results (stdout/stderr) appear as observations
 /// 4. When to use native tool calls vs code execution
+///
+/// When `persistent` is true (session registry available), the prompt mentions
+/// state persists across code blocks. Otherwise it says each block runs fresh.
 pub fn build_code_act_instructions(
     bridged_tools: &[BridgedToolInfo],
     native_tool_ids: &[String],
+    persistent: bool,
 ) -> String {
     let mut parts = Vec::new();
 
-    parts.push(CODE_ACT_HEADER.to_string());
+    parts.push(if persistent {
+        CODE_ACT_HEADER_PERSISTENT.to_string()
+    } else {
+        CODE_ACT_HEADER_ONESHOT.to_string()
+    });
 
     // List bridged tool functions
     let tool_funcs: Vec<&BridgedToolInfo> = bridged_tools
@@ -129,7 +137,7 @@ fn json_type_to_python_hint(ty: &str) -> &str {
 
 // ── Prompt fragments ──────────────────────────────────────────────────
 
-const CODE_ACT_HEADER: &str = r#"
+const CODE_ACT_HEADER_PERSISTENT: &str = r#"
 ## Code Execution
 
 You have access to a **persistent Python environment**. To take actions, write Python code inside fenced code blocks:
@@ -144,6 +152,25 @@ print(result)
 - Variables, imports, and state **persist** across code blocks within this conversation.
 - Use `print()` to output results — printed output appears as observations.
 - You can write multiple code blocks in a single response; they execute sequentially.
+- If code raises an exception, you'll see the traceback and can fix it in the next block.
+- You may also use standard Python libraries (json, os, pathlib, re, math, etc.).
+"#;
+
+const CODE_ACT_HEADER_ONESHOT: &str = r#"
+## Code Execution
+
+You can write Python code to take actions. Write code inside fenced code blocks:
+
+```python
+# Your code here
+result = some_function(arg)
+print(result)
+```
+
+**Key behaviors:**
+- Each code block runs in a **fresh environment** — variables and imports do not persist across messages.
+- Use `print()` to output results — printed output appears as observations.
+- You can write multiple code blocks in a single response; they execute sequentially within that message.
 - If code raises an exception, you'll see the traceback and can fix it in the next block.
 - You may also use standard Python libraries (json, os, pathlib, re, math, etc.).
 "#;
@@ -202,7 +229,7 @@ mod tests {
         ];
 
         let native_ids = vec!["core.ask_user".to_string()];
-        let prompt = build_code_act_instructions(&tools, &native_ids);
+        let prompt = build_code_act_instructions(&tools, &native_ids, true);
 
         assert!(prompt.contains("filesystem_read(path: str)"));
         assert!(prompt.contains("Read a file"));
@@ -213,10 +240,17 @@ mod tests {
 
     #[test]
     fn instructions_with_no_tools() {
-        let prompt = build_code_act_instructions(&[], &[]);
+        let prompt = build_code_act_instructions(&[], &[], true);
         assert!(prompt.contains("persistent Python environment"));
         assert!(!prompt.contains("Available Python Functions"));
         assert!(!prompt.contains("Structured Tool Calls"));
+    }
+
+    #[test]
+    fn oneshot_prompt_does_not_mention_persistence() {
+        let prompt = build_code_act_instructions(&[], &[], false);
+        assert!(prompt.contains("fresh environment"));
+        assert!(!prompt.contains("persistent Python environment"));
     }
 
     #[test]

@@ -164,6 +164,8 @@ pub enum JournalPhase {
     Plan { steps: Vec<String> },
     /// PlanThenExecute: a step completed with its accumulated result text.
     StepComplete { step_index: usize, result: String },
+    /// A CodeAct iteration: the LLM wrote code and/or made native tool calls.
+    CodeExecution,
 }
 
 /// One journal entry: a completed phase with its tool calls.
@@ -2110,8 +2112,17 @@ impl LoopStrategy for PlanThenExecuteStrategy {
 
 /// Adapter that implements `ToolCallHandler` by dispatching to the `ToolRegistry`.
 /// This is how Python code calls host tools via the bridge protocol.
+///
+/// Unlike the old implementation that called `tool.execute()` directly, this
+/// routes every bridged tool call through `execute_tool_call` — the same
+/// pipeline used by native tool calls — so that permission checks, approval
+/// gates, middleware hooks, data-class enforcement, shadow-mode interception,
+/// and connector rules all apply.
 struct BridgedToolCallHandler {
-    tools: Arc<ToolRegistry>,
+    context: Arc<LoopContext>,
+    middleware: Vec<Arc<dyn LoopMiddleware>>,
+    event_tx: Option<tokio::sync::mpsc::Sender<LoopEvent>>,
+    interaction_gate: Option<Arc<UserInteractionGate>>,
 }
 
 #[async_trait::async_trait]
@@ -2120,22 +2131,34 @@ impl hive_code_executor::ToolCallHandler for BridgedToolCallHandler {
         &self,
         request: hive_code_executor::ToolCallRequest,
     ) -> hive_code_executor::ToolCallResponse {
-        let tool = match self.tools.get(&request.tool_id) {
-            Some(t) => t,
-            None => {
-                return hive_code_executor::ToolCallResponse {
-                    request_id: request.request_id,
-                    result: None,
-                    error: Some(format!("tool not found: {}", request.tool_id)),
-                    truncated: false,
-                };
-            }
+        let call = ToolCall {
+            tool_id: request.tool_id.clone(),
+            input: request.args.clone(),
         };
-        match tool.execute(request.args.clone()).await {
+
+        let gate_ref = self.interaction_gate.as_deref();
+        let tx_ref = self.event_tx.as_ref();
+
+        match execute_tool_call(
+            &self.context,
+            call,
+            &self.middleware,
+            tx_ref,
+            gate_ref,
+            None, // assistant_content — not applicable for bridged calls
+        )
+        .await
+        {
             Ok(result) => hive_code_executor::ToolCallResponse {
                 request_id: request.request_id,
                 result: Some(serde_json::json!(result.output)),
                 error: None,
+                truncated: false,
+            },
+            Err(LoopError::ToolDenied { reason, .. }) => hive_code_executor::ToolCallResponse {
+                request_id: request.request_id,
+                result: None,
+                error: Some(format!("Tool denied: {}", reason)),
                 truncated: false,
             },
             Err(e) => hive_code_executor::ToolCallResponse {
@@ -2185,6 +2208,11 @@ impl LoopStrategy for CodeActStrategy {
             let mut context = context;
             context.routing.routing_decision = Some(decision.clone());
 
+            // Wrap in Arc so the BridgedToolCallHandler can share the context
+            // (it needs to call execute_tool_call which takes &LoopContext).
+            // All mutations to context happen above this point.
+            let context = Arc::new(context);
+
             let use_multi_turn = model_router
                 .provider_kind(&decision.selected.provider_id)
                 .map(|k| k.supports_tool_history())
@@ -2226,8 +2254,9 @@ impl LoopStrategy for CodeActStrategy {
             }
 
             // ── Build CodeAct system prompt supplement ────────────────
+            let has_persistent_session = context.session_registry.is_some();
             let code_act_instructions =
-                build_code_act_instructions(&bridged_tools, &native_tool_ids);
+                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session);
 
             // ── Initialize the code executor ─────────────────────────
             // Build executor config from the CodeActConfig on the context.
@@ -2296,7 +2325,10 @@ impl LoopStrategy for CodeActStrategy {
 
             // ── Build tool call handler for Python→host tool bridge ───
             let tool_handler = BridgedToolCallHandler {
-                tools: Arc::clone(&context.tools_ctx.tools),
+                context: Arc::clone(&context),
+                middleware: middleware.to_vec(),
+                event_tx: event_tx.clone(),
+                interaction_gate: interaction_gate.clone(),
             };
             let exec_options = ExecutionOptions {
                 tool_call_handler: Some(&tool_handler),
@@ -2577,6 +2609,33 @@ impl LoopStrategy for CodeActStrategy {
 
                 let mut observations = Vec::new();
 
+                // ── Executor liveness check + recovery ───────────────
+                if !executor.is_alive().await {
+                    tracing::warn!("CodeAct executor is dead — attempting recovery");
+                    if let Err(e) = executor.reset().await {
+                        let err_msg = format!("[Code Executor Recovery Failed]\nExecutor died and could not be restarted: {e}");
+                        observations.push(err_msg);
+                    } else {
+                        // Re-inject bridge code after recovery
+                        if !bridge_code.trim().is_empty() {
+                            match executor
+                                .execute_with_tools(&bridge_code, Language::Python, &exec_options)
+                                .await
+                            {
+                                Ok(r) if r.is_error => {
+                                    tracing::warn!(stderr = %r.stderr, "bridge re-init had errors after recovery");
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, "bridge re-init failed after recovery");
+                                }
+                                _ => {
+                                    tracing::info!("CodeAct executor recovered and bridge re-initialized");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── Execute code blocks ──────────────────────────────
                 for block in &code_blocks {
                     if let Some(ref tx) = event_tx {
@@ -2662,6 +2721,26 @@ impl LoopStrategy for CodeActStrategy {
 
                 // ── Feed observations back to the model ──────────────
                 let observation_text = observations.join("\n\n");
+
+                // ── Record in conversation journal for mid-task resume ──
+                if let Some(ref journal) = context.conversation.conversation_journal {
+                    let journal_calls: Vec<JournalToolCall> = code_blocks.iter().map(|b| {
+                        JournalToolCall {
+                            tool_id: "code_execution".to_string(),
+                            input: b.code.clone(),
+                            output: observation_text.clone(),
+                            tool_call_id: None,
+                            is_error: false,
+                        }
+                    }).collect();
+                    let mut j = journal.lock();
+                    j.record(JournalEntry {
+                        phase: JournalPhase::CodeExecution,
+                        turn: tool_iterations,
+                        tool_calls: journal_calls,
+                        assistant_content: Some(response.content.clone()),
+                    });
+                }
 
                 if use_multi_turn {
                     // Add assistant message with the model's response

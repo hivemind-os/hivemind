@@ -86,6 +86,8 @@ pub struct AgentExecutionContext {
     /// The persona ID of the session that owns this execution context. Used to
     /// detect when a child agent needs a different tool registry.
     pub session_persona_id: Option<String>,
+    /// Shared CodeAct session registry for executor reuse in child agents.
+    pub code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
 }
 
 /// Handle held by the supervisor for each spawned agent.
@@ -140,6 +142,8 @@ pub struct AgentRunner {
     pub conversation_journal: Option<Arc<Mutex<ConversationJournal>>>,
     /// Handler for knowledge.query tool calls.
     pub knowledge_query_handler: Option<Arc<dyn KnowledgeQueryHandler>>,
+    /// Shared CodeAct session registry for executor reuse across agent turns.
+    pub code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
     /// Accumulated multi-turn conversation history for keep_alive agents.
     conversation_history: Vec<CompletionMessage>,
     /// Token cancelled externally to interrupt in-flight work.
@@ -168,6 +172,7 @@ impl AgentRunner {
             skill_catalog: None,
             conversation_journal: None,
             knowledge_query_handler: None,
+            code_session_registry: None,
             conversation_history: Vec::new(),
             cancellation_token: CancellationToken::new(),
         }
@@ -233,6 +238,7 @@ impl AgentRunner {
             skill_catalog,
             conversation_journal: None,
             knowledge_query_handler: None,
+            code_session_registry: None,
             conversation_history: Vec::new(),
             cancellation_token: CancellationToken::new(),
         }
@@ -738,7 +744,7 @@ impl AgentRunner {
             },
             tool_limits: self.spec.tool_limits.clone().unwrap_or_default(),
             code_act_config: hive_contracts::CodeActConfig::default(),
-            session_registry: None,
+            session_registry: self.code_session_registry.clone(),
             preempt_signal: None,
             cancellation_token: Some(self.cancellation_token.clone()),
         }

@@ -54,7 +54,7 @@ export interface Persona {
   name: string;
   description: string;
   system_prompt: string;
-  loop_strategy: 'react' | 'sequential' | 'plan_then_execute';
+  loop_strategy: 'react' | 'sequential' | 'plan_then_execute' | 'code_act';
   preferred_models?: string[] | null;
   secondary_models?: string[] | null;
   allowed_tools: string[];

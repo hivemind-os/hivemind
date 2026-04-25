@@ -19,13 +19,33 @@ use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
 /// Sentinel markers for the REPL protocol (same as subprocess).
-const SENTINEL_START: &str = "__HIVEMIND_EXEC_START__";
-const SENTINEL_END: &str = "__HIVEMIND_EXEC_END__";
+/// Augmented with a per-session nonce to prevent accidental collision.
 const SENTINEL_ERROR: &str = "__HIVEMIND_EXEC_ERROR__";
 
-/// Python REPL wrapper that runs inside the WASM sandbox.
-/// Same protocol as the subprocess executor but running inside CPython-WASI.
-const PYTHON_WRAPPER: &str = r#"
+/// Generate a random 16-char hex nonce for sentinel uniqueness.
+fn generate_nonce() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{:016x}", seed)
+}
+
+fn sentinel_start(nonce: &str) -> String {
+    format!("__HIVEMIND_EXEC_START_{nonce}__")
+}
+
+fn sentinel_end(nonce: &str) -> String {
+    format!("__HIVEMIND_EXEC_END_{nonce}__")
+}
+
+/// Generate the Python REPL wrapper with per-session nonce sentinels.
+fn generate_python_wrapper(nonce: &str) -> String {
+    let start = sentinel_start(nonce);
+    let end = sentinel_end(nonce);
+    format!(
+        r#"
 import sys, io, traceback
 
 _original_stdout = sys.stdout
@@ -37,7 +57,7 @@ def _hivemind_exec_loop():
         if not line:
             break
         line = line.strip()
-        if line != "__HIVEMIND_EXEC_START__":
+        if line != "{start}":
             continue
 
         code_lines = []
@@ -45,7 +65,7 @@ def _hivemind_exec_loop():
             line = _original_stdin.readline()
             if not line:
                 return
-            if line.strip() == "__HIVEMIND_EXEC_END__":
+            if line.strip() == "{end}":
                 break
             code_lines.append(line)
 
@@ -71,18 +91,22 @@ def _hivemind_exec_loop():
         stdout_val = captured_stdout.getvalue()
         stderr_val = captured_stderr.getvalue()
 
-        _original_stdout.write("__HIVEMIND_EXEC_START__\n")
+        _original_stdout.write("{start}\n")
         if is_error:
             _original_stdout.write("__HIVEMIND_EXEC_ERROR__\n")
         _original_stdout.write(stdout_val)
         if stderr_val:
             _original_stdout.write("\n__HIVEMIND_STDERR__\n")
             _original_stdout.write(stderr_val)
-        _original_stdout.write("\n__HIVEMIND_EXEC_END__\n")
+        _original_stdout.write("\n{end}\n")
         _original_stdout.flush()
 
 _hivemind_exec_loop()
-"#;
+"#,
+        start = start,
+        end = end,
+    )
+}
 
 /// State for a running WASM Python instance.
 struct WasmInstance {
@@ -106,6 +130,8 @@ pub struct WasmExecutor {
     module: Arc<Module>,
     /// Path to the extracted Python stdlib directory.
     stdlib_dir: PathBuf,
+    /// Per-session nonce for sentinel uniqueness.
+    nonce: String,
 }
 
 impl WasmExecutor {
@@ -142,6 +168,7 @@ impl WasmExecutor {
             engine,
             module,
             stdlib_dir: stdlib_dir.to_path_buf(),
+            nonce: generate_nonce(),
         };
 
         // Spawn the initial WASM instance
@@ -164,6 +191,7 @@ impl WasmExecutor {
             engine,
             module,
             stdlib_dir,
+            nonce: generate_nonce(),
         }
     }
 
@@ -183,6 +211,7 @@ impl WasmExecutor {
         let module = Arc::clone(&self.module);
         let stdlib_dir = self.stdlib_dir.clone();
         let memory_limit = (self.config.memory_limit_mb as usize) * 1024 * 1024;
+        let nonce = self.nonce.clone();
 
         // Create bidirectional channels for stdin/stdout.
         // Host writes to host_stdin_writer → WASM reads from wasm_stdin_reader
@@ -201,6 +230,7 @@ impl WasmExecutor {
                 memory_limit,
                 wasm_stdin_reader,
                 wasm_stdout_writer,
+                &nonce,
             )
             .await
             {
@@ -242,7 +272,9 @@ impl WasmExecutor {
             .ok_or_else(|| ExecutorError::NotReady("WASM instance not running".into()))?;
 
         // Send code to the WASM Python REPL
-        let payload = format!("{SENTINEL_START}\n{code}\n{SENTINEL_END}\n");
+        let s_start = sentinel_start(&self.nonce);
+        let s_end = sentinel_end(&self.nonce);
+        let payload = format!("{s_start}\n{code}\n{s_end}\n");
         inst.stdin_writer
             .write_all(payload.as_bytes())
             .await
@@ -271,7 +303,7 @@ impl WasmExecutor {
         let max_output = self.config.max_output_bytes;
 
         // Read output until end sentinel, handling tool calls mid-stream
-        let result = self.read_execution_output(inst, options, max_output).await;
+        let result = self.read_execution_output(inst, options, max_output, &s_start, &s_end).await;
 
         epoch_handle.abort();
 
@@ -304,6 +336,8 @@ impl WasmExecutor {
         inst: &mut WasmInstance,
         options: &ExecutionOptions<'_>,
         max_output: usize,
+        s_start: &str,
+        s_end: &str,
     ) -> Result<ExecutionResult, ExecutorError> {
         let mut stdout = String::new();
         let mut stderr = String::new();
@@ -369,7 +403,7 @@ impl WasmExecutor {
                 continue;
             }
 
-            if trimmed == SENTINEL_START {
+            if trimmed == s_start {
                 started = true;
                 continue;
             }
@@ -384,7 +418,7 @@ impl WasmExecutor {
                 in_stderr = true;
                 continue;
             }
-            if trimmed == SENTINEL_END {
+            if trimmed == s_end {
                 break;
             }
 
@@ -427,6 +461,7 @@ async fn run_wasm_instance(
     memory_limit: usize,
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
+    nonce: &str,
 ) -> Result<(), ExecutorError> {
     use wasmtime_wasi::pipe::{AsyncReadStream, AsyncWriteStream};
     use wasmtime_wasi::{AsyncStdinStream, AsyncStdoutStream};
@@ -449,7 +484,8 @@ async fn run_wasm_instance(
         })?;
 
     // Pass args to CPython: python.wasm -c <wrapper_script>
-    wasi_builder.args(&["python.wasm", "-c", PYTHON_WRAPPER]);
+    let wrapper = generate_python_wrapper(nonce);
+    wasi_builder.args(&["python.wasm", "-c", &wrapper]);
 
     // Set environment variables for reproducible behavior
     wasi_builder.env("PYTHONDONTWRITEBYTECODE", "1");

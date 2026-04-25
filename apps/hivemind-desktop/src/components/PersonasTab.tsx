@@ -93,6 +93,8 @@ const loopStrategyLabel = (strategy: Persona['loop_strategy']) => {
       return 'Sequential';
     case 'plan_then_execute':
       return 'Plan Then Execute';
+    case 'code_act':
+      return 'CodeAct';
     case 'react':
     default:
       return 'React';
@@ -105,6 +107,8 @@ const loopStrategyDescription = (strategy: Persona['loop_strategy']) => {
       return 'Executes tool calls one at a time in sequence.';
     case 'plan_then_execute':
       return 'Creates a plan first, then executes each step.';
+    case 'code_act':
+      return 'Writes and executes Python code to accomplish tasks. Tools are available as Python functions.';
     case 'react':
     default:
       return 'Thinks and acts in alternating steps. Best for general-purpose tasks.';
@@ -981,6 +985,7 @@ const PersonasTab = (props: PersonasTabProps) => {
                   <option value="react">React</option>
                   <option value="sequential">Sequential</option>
                   <option value="plan_then_execute">Plan Then Execute</option>
+                  <option value="code_act">CodeAct</option>
                 </select>
               </label>
               <p class="muted" style="font-size:0.8em;margin:2px 0 0">

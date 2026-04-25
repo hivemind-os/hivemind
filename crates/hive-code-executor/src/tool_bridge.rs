@@ -149,23 +149,37 @@ def __hivemind_call_tool__(tool_id, args):
     .to_string()
 }
 
+/// Escape a string for safe interpolation into a Python string literal (double-quoted).
+///
+/// Handles backslashes, quotes, and newlines so that the resulting Python
+/// source is syntactically valid regardless of the input.
+fn escape_python_str(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 /// Generate a Python function stub for one tool.
 fn generate_tool_stub(tool: &BridgedToolInfo) -> String {
     let func_name = tool_id_to_python_name(&tool.tool_id);
     let (params, body_args) = build_params_from_schema(&tool.input_schema);
     let docstring = build_docstring(&tool.description, &tool.input_schema);
+    let escaped_tool_id = escape_python_str(&tool.tool_id);
 
     format!(
         r#"def {func_name}({params}):
     """{docstring}"""
     {body_args}
-    return __hivemind_call_tool__("{tool_id}", _args)
+    return __hivemind_call_tool__("{escaped_tool_id}", _args)
 "#,
         func_name = func_name,
         params = params,
         docstring = docstring,
         body_args = body_args,
-        tool_id = tool.tool_id,
+        escaped_tool_id = escaped_tool_id,
     )
 }
 
@@ -208,6 +222,31 @@ fn json_type_to_python(ty: &str) -> &str {
         "integer" => "int",
         "boolean" => "bool",
         "array" => "list",
+        "object" => "dict",
+        _ => "object",
+    }
+}
+
+/// Richer type hint that inspects the full property schema, e.g. array items.
+fn json_type_to_python_rich(prop: &Value) -> &'static str {
+    let ty = prop.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    match ty {
+        "array" => {
+            if let Some(items) = prop.get("items") {
+                match items.get("type").and_then(|t| t.as_str()) {
+                    Some("string") => return "list[str]",
+                    Some("number") => return "list[float]",
+                    Some("integer") => return "list[int]",
+                    Some("boolean") => return "list[bool]",
+                    _ => {}
+                }
+            }
+            "list"
+        }
+        "string" => "str",
+        "number" => "float",
+        "integer" => "int",
+        "boolean" => "bool",
         "object" => "dict",
         _ => "object",
     }
@@ -256,19 +295,15 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
 
         for (name, prop) in &sorted_props {
             let py_name = sanitize_param_name(name);
-            let type_hint = prop
-                .get("type")
-                .and_then(|t| t.as_str())
-                .map(json_type_to_python)
-                .unwrap_or("object");
+            let type_hint = json_type_to_python_rich(prop);
 
             if required.contains(&name.as_str()) {
                 params.push(format!("{py_name}: {type_hint}"));
-                body_lines.push(format!("    _args[\"{name}\"] = {py_name}"));
+                body_lines.push(format!("    _args[\"{}\"] = {py_name}", escape_python_str(name)));
             } else {
                 params.push(format!("{py_name}: {type_hint} = None"));
                 body_lines.push(format!(
-                    "    if {py_name} is not None: _args[\"{name}\"] = {py_name}"
+                    "    if {py_name} is not None: _args[\"{}\"] = {py_name}", escape_python_str(name)
                 ));
             }
         }
@@ -295,11 +330,11 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
 
         if required.contains(&name.as_str()) {
             required_params.push(format!("{py_name}: {type_hint}"));
-            body_lines.push(format!("    _args[\"{name}\"] = {py_name}"));
+            body_lines.push(format!("    _args[\"{}\"] = {py_name}", escape_python_str(name)));
         } else {
             optional_params.push(format!("{py_name}: {type_hint} = None"));
             body_lines.push(format!(
-                "    if {py_name} is not None: _args[\"{name}\"] = {py_name}"
+                "    if {py_name} is not None: _args[\"{}\"] = {py_name}", escape_python_str(name)
             ));
         }
     }
@@ -327,7 +362,7 @@ fn sanitize_param_name(name: &str) -> String {
 
 /// Build a docstring from the tool description and schema.
 fn build_docstring(description: &str, schema: &Value) -> String {
-    let mut doc = description.replace('\\', "\\\\").replace('"', "'");
+    let mut doc = escape_python_str(description);
     // Truncate very long descriptions
     if doc.len() > 200 {
         doc.truncate(200);

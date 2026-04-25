@@ -17,19 +17,35 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 /// Sentinel markers used to delineate code execution boundaries in the
-/// subprocess output stream.
-const SENTINEL_START: &str = "__HIVEMIND_EXEC_START__";
-const SENTINEL_END: &str = "__HIVEMIND_EXEC_END__";
+/// subprocess output stream. Augmented with a per-session nonce to prevent
+/// accidental collision with user-printed text.
 const SENTINEL_ERROR: &str = "__HIVEMIND_EXEC_ERROR__";
 
-/// Python wrapper script that sets up the REPL protocol.
-/// Reads code blocks delimited by sentinels from stdin, executes them,
-/// and writes output delimited by sentinels to stdout.
-///
-/// The wrapper stores references to the original stdout/stdin so that
-/// the tool bridge function (`__hivemind_call_tool__`) can communicate
-/// with the host even when user code has redirected stdout.
-const PYTHON_WRAPPER: &str = r#"
+/// Generate a random 16-char hex nonce for sentinel uniqueness.
+fn generate_nonce() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{:016x}", seed)
+}
+
+/// Build sentinel strings from a nonce.
+fn sentinel_start(nonce: &str) -> String {
+    format!("__HIVEMIND_EXEC_START_{nonce}__")
+}
+
+fn sentinel_end(nonce: &str) -> String {
+    format!("__HIVEMIND_EXEC_END_{nonce}__")
+}
+
+/// Generate the Python wrapper script with per-session nonce sentinels.
+fn generate_python_wrapper(nonce: &str) -> String {
+    let start = sentinel_start(nonce);
+    let end = sentinel_end(nonce);
+    format!(
+        r#"
 import sys, io, traceback
 
 # Store original I/O handles BEFORE any redirection.
@@ -44,7 +60,7 @@ def _hivemind_exec_loop():
         if not line:
             break
         line = line.strip()
-        if line != "__HIVEMIND_EXEC_START__":
+        if line != "{start}":
             continue
 
         # Collect code lines until end sentinel
@@ -53,7 +69,7 @@ def _hivemind_exec_loop():
             line = _original_stdin.readline()
             if not line:
                 return
-            if line.strip() == "__HIVEMIND_EXEC_END__":
+            if line.strip() == "{end}":
                 break
             code_lines.append(line)
 
@@ -83,23 +99,29 @@ def _hivemind_exec_loop():
 
         # Write results with sentinels to the ORIGINAL stdout
         # (not sys.stdout, which user code might have replaced)
-        _original_stdout.write("__HIVEMIND_EXEC_START__\n")
+        _original_stdout.write("{start}\n")
         if is_error:
             _original_stdout.write("__HIVEMIND_EXEC_ERROR__\n")
         _original_stdout.write(stdout_val)
         if stderr_val:
             _original_stdout.write("\n__HIVEMIND_STDERR__\n")
             _original_stdout.write(stderr_val)
-        _original_stdout.write("\n__HIVEMIND_EXEC_END__\n")
+        _original_stdout.write("\n{end}\n")
         _original_stdout.flush()
 
 _hivemind_exec_loop()
-"#;
+"#,
+        start = start,
+        end = end,
+    )
+}
 
 /// A code executor backed by a persistent Python subprocess.
 pub struct SubprocessExecutor {
     child: Mutex<Option<ChildProcess>>,
     config: ExecutorConfig,
+    /// Per-session nonce for sentinel uniqueness.
+    nonce: String,
 }
 
 struct ChildProcess {
@@ -111,10 +133,12 @@ struct ChildProcess {
 impl SubprocessExecutor {
     /// Create a new subprocess executor, spawning the Python process.
     pub async fn new(config: ExecutorConfig) -> Result<Self, ExecutorError> {
-        let child = Self::spawn_python(&config).await?;
+        let nonce = generate_nonce();
+        let child = Self::spawn_python(&config, &nonce).await?;
         Ok(Self {
             child: Mutex::new(Some(child)),
             config,
+            nonce,
         })
     }
 
@@ -137,7 +161,9 @@ impl SubprocessExecutor {
             .ok_or_else(|| ExecutorError::NotReady("executor has been shut down".into()))?;
 
         // Send code to the subprocess
-        let payload = format!("{SENTINEL_START}\n{code}\n{SENTINEL_END}\n");
+        let s_start = sentinel_start(&self.nonce);
+        let s_end = sentinel_end(&self.nonce);
+        let payload = format!("{s_start}\n{code}\n{s_end}\n");
         proc.stdin
             .write_all(payload.as_bytes())
             .await
@@ -205,7 +231,7 @@ impl SubprocessExecutor {
                     continue;
                 }
 
-                if trimmed == SENTINEL_START {
+                if trimmed == s_start {
                     started = true;
                     continue;
                 }
@@ -220,7 +246,7 @@ impl SubprocessExecutor {
                     in_stderr = true;
                     continue;
                 }
-                if trimmed == SENTINEL_END {
+                if trimmed == s_end {
                     break;
                 }
 
@@ -262,7 +288,8 @@ impl SubprocessExecutor {
         }
     }
 
-    async fn spawn_python(config: &ExecutorConfig) -> Result<ChildProcess, ExecutorError> {
+    async fn spawn_python(config: &ExecutorConfig, nonce: &str) -> Result<ChildProcess, ExecutorError> {
+        let wrapper = generate_python_wrapper(nonce);
         // On Windows, `python3` often resolves to a Microsoft Store alias that
         // spawns successfully but exits immediately. Try `python` first on Windows.
         #[cfg(target_os = "windows")]
@@ -277,7 +304,7 @@ impl SubprocessExecutor {
             let mut cmd = Command::new(name);
             cmd.arg("-u") // unbuffered
                 .arg("-c")
-                .arg(PYTHON_WRAPPER)
+                .arg(&wrapper)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -340,7 +367,7 @@ impl CodeExecutor for SubprocessExecutor {
             let _ = proc.child.kill().await;
         }
         // Spawn fresh process
-        *guard = Some(Self::spawn_python(&self.config).await?);
+        *guard = Some(Self::spawn_python(&self.config, &self.nonce).await?);
         tracing::debug!("subprocess executor reset — fresh Python process");
         Ok(())
     }
@@ -358,6 +385,21 @@ impl CodeExecutor for SubprocessExecutor {
     async fn is_alive(&self) -> bool {
         let guard = self.child.lock().await;
         guard.is_some()
+    }
+}
+
+/// Kill the child process on drop to prevent zombie processes.
+impl Drop for SubprocessExecutor {
+    fn drop(&mut self) {
+        // Use try_lock to avoid blocking in the destructor.
+        // If the lock is held (e.g. during execution), the child will
+        // be cleaned up when the process exits.
+        if let Ok(mut guard) = self.child.try_lock() {
+            if let Some(ref mut proc) = guard.as_mut() {
+                // Best-effort kill — can't await in Drop, so use start_kill
+                let _ = proc.child.start_kill();
+            }
+        }
     }
 }
 

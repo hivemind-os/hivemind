@@ -1013,6 +1013,8 @@ pub struct ChatService {
     code_act_config: hive_contracts::CodeActConfig,
     /// Shared session registry for CodeAct code execution (session reuse across turns).
     code_session_registry: Arc<hive_code_executor::SessionRegistry>,
+    /// Background task that periodically reaps idle CodeAct sessions.
+    _code_session_reaper: Arc<tokio::task::JoinHandle<()>>,
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
     mcp: Option<Arc<McpService>>,
@@ -1559,6 +1561,26 @@ impl ChatService {
         let web_search_config_swap =
             Arc::new(ArcSwap::from_pointee(hive_contracts::WebSearchConfig::default()));
 
+        // Create the CodeAct session registry (once, shared across all conversations).
+        let code_session_registry = {
+            let session_config = hive_code_executor::SessionConfig {
+                executor: hive_code_executor::ExecutorConfig {
+                    execution_timeout_secs: code_act_config.execution_timeout_secs,
+                    max_output_bytes: code_act_config.max_output_bytes,
+                    memory_limit_mb: 256,
+                    working_directory: None,
+                    allow_network: code_act_config.allow_network,
+                },
+                idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
+            };
+            Arc::new(hive_code_executor::SessionRegistry::new_auto(
+                session_config,
+                code_act_config.max_sessions,
+                None, // uses PYTHON_WASM_PATH env var
+                None, // uses PYTHON_WASM_STDLIB env var
+            ))
+        };
+
         let bot_service = crate::bot_service::BotService {
             bot_supervisor: Arc::clone(&bot_supervisor),
             bot_configs: Arc::clone(&bot_configs),
@@ -1587,6 +1609,7 @@ impl ChatService {
             web_search_config: Arc::clone(&web_search_config_swap),
             plugin_host: plugin_host.clone(),
             plugin_registry: plugin_registry.clone(),
+            code_session_registry: Arc::clone(&code_session_registry),
         };
 
         let indexing_service = crate::indexing_service::IndexingService {
@@ -1598,25 +1621,15 @@ impl ChatService {
             kg_pool: Arc::clone(&shared_kg_pool),
         };
 
-        // Create the CodeAct session registry (once, shared across all conversations).
-        let code_session_registry = {
-            let session_config = hive_code_executor::SessionConfig {
-                executor: hive_code_executor::ExecutorConfig {
-                    execution_timeout_secs: code_act_config.execution_timeout_secs,
-                    max_output_bytes: code_act_config.max_output_bytes,
-                    memory_limit_mb: 256,
-                    working_directory: None,
-                    allow_network: code_act_config.allow_network,
-                },
-                idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
-            };
-            Arc::new(hive_code_executor::SessionRegistry::new_auto(
-                session_config,
-                code_act_config.max_sessions,
-                None, // uses PYTHON_WASM_PATH env var
-                None, // uses PYTHON_WASM_STDLIB env var
-            ))
-        };
+        // Spawn a background task to periodically reap idle CodeAct sessions.
+        let reaper_registry = Arc::clone(&code_session_registry);
+        let code_session_reaper = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                reaper_registry.reap_idle().await;
+            }
+        });
 
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -1641,6 +1654,7 @@ impl ChatService {
             tool_limits: Arc::new(tool_limits),
             code_act_config,
             code_session_registry,
+            _code_session_reaper: Arc::new(code_session_reaper),
             skills_service: bot_service.skills_service.clone(),
             mcp,
             mcp_catalog,
@@ -4018,7 +4032,7 @@ impl ChatService {
                     self.plugin_registry.clone(),
                 ));
 
-            let supervisor = Arc::new(AgentSupervisor::with_executor_and_persona_factory(
+            let mut supervisor = AgentSupervisor::with_executor_and_persona_factory(
                 256,
                 None,
                 Arc::clone(&self.loop_executor),
@@ -4035,7 +4049,9 @@ impl ChatService {
                 })),
                 Some(persona_tool_factory),
                 active_persona_id.clone(),
-            ));
+            );
+            supervisor.set_code_session_registry(Arc::clone(&self.code_session_registry));
+            let supervisor = Arc::new(supervisor);
             let stream_tx = session.stream_tx.clone();
             let session_logger = session.logger.clone();
             session.supervisor = Some(Arc::clone(&supervisor));
