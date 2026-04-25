@@ -1011,6 +1011,8 @@ pub struct ChatService {
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
     code_act_config: hive_contracts::CodeActConfig,
+    /// Shared session registry for CodeAct code execution (session reuse across turns).
+    code_session_registry: Arc<hive_code_executor::SessionRegistry>,
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
     mcp: Option<Arc<McpService>>,
@@ -1596,6 +1598,26 @@ impl ChatService {
             kg_pool: Arc::clone(&shared_kg_pool),
         };
 
+        // Create the CodeAct session registry (once, shared across all conversations).
+        let code_session_registry = {
+            let session_config = hive_code_executor::SessionConfig {
+                executor: hive_code_executor::ExecutorConfig {
+                    execution_timeout_secs: code_act_config.execution_timeout_secs,
+                    max_output_bytes: code_act_config.max_output_bytes,
+                    memory_limit_mb: 256,
+                    working_directory: None,
+                    allow_network: code_act_config.allow_network,
+                },
+                idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
+            };
+            Arc::new(hive_code_executor::SessionRegistry::new_auto(
+                session_config,
+                code_act_config.max_sessions,
+                None, // uses PYTHON_WASM_PATH env var
+                None, // uses PYTHON_WASM_STDLIB env var
+            ))
+        };
+
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             session_seq: Arc::new(AtomicU64::new(1)),
@@ -1618,6 +1640,7 @@ impl ChatService {
             compaction_config: compaction_config_swap,
             tool_limits: Arc::new(tool_limits),
             code_act_config,
+            code_session_registry,
             skills_service: bot_service.skills_service.clone(),
             mcp,
             mcp_catalog,
@@ -2829,6 +2852,7 @@ impl ChatService {
             },
             tool_limits: (*self.tool_limits).clone(),
             code_act_config: self.code_act_config.clone(),
+            session_registry: Some(Arc::clone(&self.code_session_registry)),
             preempt_signal: None,
             cancellation_token: None,
         };        match self.loop_executor.call_tool(&context, tool_id, input).await {
@@ -6482,6 +6506,7 @@ impl ChatService {
                 },
                 tool_limits: (*self.tool_limits).clone(),
                 code_act_config: self.code_act_config.clone(),
+                session_registry: Some(Arc::clone(&self.code_session_registry)),
                 preempt_signal: None, // Set below after reading session state.
                 cancellation_token: None,
             };

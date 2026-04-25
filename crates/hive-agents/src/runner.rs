@@ -738,6 +738,7 @@ impl AgentRunner {
             },
             tool_limits: self.spec.tool_limits.clone().unwrap_or_default(),
             code_act_config: hive_contracts::CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: Some(self.cancellation_token.clone()),
         }

@@ -464,6 +464,7 @@ mod tests {
             },
             tool_limits: hive_contracts::ToolLimitsConfig::default(),
             code_act_config: hive_contracts::CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         }

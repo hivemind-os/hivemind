@@ -635,3 +635,147 @@ async fn e2e_tool_results_in_computation() {
         executor.shutdown().await.ok();
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// SessionRegistry integration tests
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Test 13: SessionRegistry creates and reuses sessions.
+#[tokio::test]
+async fn e2e_registry_session_reuse() {
+    let config = hive_code_executor::SessionConfig {
+        executor: default_config(),
+        idle_timeout: std::time::Duration::from_secs(60),
+    };
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+
+    // First access creates a new session
+    let session1 = registry.get_or_create("conv-1").await.unwrap();
+    assert_eq!(registry.active_count(), 1);
+
+    // Set state in the session
+    let result = session1
+        .executor()
+        .execute("x = 42; print(f'x={x}')", Language::Python)
+        .await
+        .unwrap();
+    assert!(result.stdout.contains("x=42"), "expected x=42, got: {}", result.stdout);
+
+    // Second access to same conversation reuses the session
+    let session1b = registry.get_or_create("conv-1").await.unwrap();
+    assert_eq!(registry.active_count(), 1); // still 1
+
+    // State persists across get_or_create calls
+    let result = session1b
+        .executor()
+        .execute("print(f'x={x}')", Language::Python)
+        .await
+        .unwrap();
+    assert!(
+        result.stdout.contains("x=42"),
+        "expected persistent x=42, got: {}",
+        result.stdout
+    );
+
+    // Different conversation creates a new session
+    let _session2 = registry.get_or_create("conv-2").await.unwrap();
+    assert_eq!(registry.active_count(), 2);
+
+    // Clean up
+    registry.shutdown_all().await;
+    assert_eq!(registry.active_count(), 0);
+}
+
+/// Test 14: SessionRegistry respects max_sessions via LRU eviction.
+#[tokio::test]
+async fn e2e_registry_lru_eviction() {
+    let config = hive_code_executor::SessionConfig {
+        executor: default_config(),
+        idle_timeout: std::time::Duration::from_secs(60),
+    };
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 2, None, None);
+
+    // Fill to capacity
+    let _s1 = registry.get_or_create("conv-a").await.unwrap();
+    let _s2 = registry.get_or_create("conv-b").await.unwrap();
+    assert_eq!(registry.active_count(), 2);
+
+    // Creating a third should evict the LRU (conv-a, since conv-b was accessed last)
+    let _s3 = registry.get_or_create("conv-c").await.unwrap();
+    assert_eq!(registry.active_count(), 2); // still at max
+
+    // conv-a should have been evicted
+    assert!(registry.get("conv-a").is_none(), "conv-a should have been evicted");
+    assert!(registry.get("conv-b").is_some(), "conv-b should still exist");
+    assert!(registry.get("conv-c").is_some(), "conv-c should still exist");
+
+    registry.shutdown_all().await;
+}
+
+/// Test 15: SessionRegistry reset clears session state.
+#[tokio::test]
+async fn e2e_registry_reset_session() {
+    let config = hive_code_executor::SessionConfig {
+        executor: default_config(),
+        idle_timeout: std::time::Duration::from_secs(60),
+    };
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+
+    let session = registry.get_or_create("conv-reset").await.unwrap();
+    session
+        .executor()
+        .execute("my_var = 'hello'", Language::Python)
+        .await
+        .unwrap();
+
+    // Reset the session
+    registry.reset("conv-reset").await.unwrap();
+
+    // State should be cleared
+    let session = registry.get_or_create("conv-reset").await.unwrap();
+    let result = session
+        .executor()
+        .execute("print(my_var)", Language::Python)
+        .await
+        .unwrap();
+    assert!(result.is_error, "expected NameError after reset, got success");
+    assert!(
+        result.stderr.contains("NameError"),
+        "expected NameError, got: {}",
+        result.stderr
+    );
+
+    registry.shutdown_all().await;
+}
+
+/// Test 16: SessionRegistry remove destroys a session.
+#[tokio::test]
+async fn e2e_registry_remove_session() {
+    let config = hive_code_executor::SessionConfig {
+        executor: default_config(),
+        idle_timeout: std::time::Duration::from_secs(60),
+    };
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+
+    let _session = registry.get_or_create("conv-remove").await.unwrap();
+    assert_eq!(registry.active_count(), 1);
+
+    registry.remove("conv-remove").await.unwrap();
+    assert_eq!(registry.active_count(), 0);
+    assert!(registry.get("conv-remove").is_none());
+
+    // Re-creating after remove gives a fresh session
+    let session = registry.get_or_create("conv-remove").await.unwrap();
+    let result = session
+        .executor()
+        .execute("print('fresh')", Language::Python)
+        .await
+        .unwrap();
+    assert!(
+        result.stdout.contains("fresh"),
+        "expected 'fresh', got: {}",
+        result.stdout
+    );
+
+    registry.shutdown_all().await;
+}

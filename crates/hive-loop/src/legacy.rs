@@ -464,6 +464,10 @@ pub struct LoopContext {
     /// CodeAct executor settings (timeouts, memory limits, network access).
     /// Defaults to `CodeActConfig::default()` if not explicitly set.
     pub code_act_config: CodeActConfig,
+    /// Shared session registry for CodeAct code execution.
+    /// When set, the CodeAct strategy reuses sessions across conversation turns
+    /// instead of creating a fresh executor each time.
+    pub session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
     /// When set, the loop checks this signal after each tool batch.
     /// If `true`, the loop yields early so the next queued message
     /// can be processed at the current checkpoint.
@@ -2228,15 +2232,25 @@ impl LoopStrategy for CodeActStrategy {
             // ── Initialize the code executor ─────────────────────────
             // Build executor config from the CodeActConfig on the context.
             let ca_cfg = &context.code_act_config;
-            let executor: Arc<dyn CodeExecutor> = {
+            let session_id = context.conversation.session_id.clone();
+            let using_registry = context.session_registry.is_some();
+
+            let executor: Arc<dyn CodeExecutor> = if let Some(ref registry) = context.session_registry {
+                // Session registry manages lifecycle: reuse or create session
+                let session = registry
+                    .get_or_create(&session_id)
+                    .await
+                    .map_err(|e| simple_model_error(format!("failed to get code session: {e}")))?;
+                session.executor_arc()
+            } else {
+                // Fallback: create a one-shot executor (no session reuse)
                 let exec_config = ExecutorConfig {
                     execution_timeout_secs: ca_cfg.execution_timeout_secs,
                     max_output_bytes: ca_cfg.max_output_bytes,
-                    memory_limit_mb: 256, // not yet in CodeActConfig
+                    memory_limit_mb: 256,
                     working_directory: None,
                     allow_network: ca_cfg.allow_network,
                 };
-                // Try WASM-sandboxed executor first; fall back to subprocess.
                 match (
                     std::env::var("PYTHON_WASM_PATH"),
                     std::env::var("PYTHON_WASM_STDLIB"),
@@ -2249,13 +2263,13 @@ impl LoopStrategy for CodeActStrategy {
                                 .await
                             {
                                 Ok(exec) => {
-                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor");
+                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
                                     Arc::new(exec)
                                 }
                                 Err(e) => {
                                     tracing::warn!(
                                         error = %e,
-                                        "WASM executor failed to initialize, falling back to subprocess"
+                                        "WASM executor failed, falling back to subprocess"
                                     );
                                     Arc::new(SubprocessExecutor::new(exec_config).await.map_err(
                                         |e| {
@@ -2267,18 +2281,12 @@ impl LoopStrategy for CodeActStrategy {
                                 }
                             }
                         } else {
-                            tracing::info!(
-                                "CodeAct: WASM binary not found, using subprocess executor"
-                            );
                             Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
                                 simple_model_error(format!("failed to start code executor: {e}"))
                             })?)
                         }
                     }
                     _ => {
-                        tracing::info!(
-                            "CodeAct: PYTHON_WASM_PATH/PYTHON_WASM_STDLIB not set, using subprocess executor"
-                        );
                         Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
                             simple_model_error(format!("failed to start code executor: {e}"))
                         })?)
@@ -2523,7 +2531,11 @@ impl LoopStrategy for CodeActStrategy {
 
                 // If no code blocks and no native tool calls → done
                 if code_blocks.is_empty() && native_calls.is_empty() {
-                    let _ = executor.shutdown().await;
+                    // Only shutdown if we created a one-shot executor (no registry).
+                    // When using the session registry, it manages session lifecycle.
+                    if !using_registry {
+                        let _ = executor.shutdown().await;
+                    }
                     if let Some(ref tx) = event_tx {
                         let _ = tx.try_send(LoopEvent::Done {
                             content: response.content.clone(),
@@ -2556,7 +2568,9 @@ impl LoopStrategy for CodeActStrategy {
                         }
                     }
                     crate::tool_budget::BudgetDecision::HardStop { ceiling } => {
-                        let _ = executor.shutdown().await;
+                        if !using_registry {
+                            let _ = executor.shutdown().await;
+                        }
                         return Err(LoopError::HardCeilingReached { ceiling });
                     }
                 }
@@ -4430,6 +4444,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4542,6 +4557,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4609,6 +4625,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4676,6 +4693,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4738,6 +4756,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4812,6 +4831,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4879,6 +4899,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -4944,6 +4965,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5043,6 +5065,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5237,6 +5260,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5468,6 +5492,7 @@ mod tests {
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -5709,6 +5734,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         }
@@ -5893,6 +5919,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -6059,6 +6086,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -6278,6 +6306,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: Some(signal),
             cancellation_token: None,
         };
@@ -6354,6 +6383,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };
@@ -6421,6 +6451,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: Some(signal),
             cancellation_token: None,
         };
@@ -6682,6 +6713,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         }
@@ -7177,6 +7209,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: Some(token.clone()),
         };
@@ -7254,6 +7287,7 @@ Let me know if you need anything else."#;
             },
             tool_limits: ToolLimitsConfig::default(),
             code_act_config: CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         };

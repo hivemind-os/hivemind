@@ -87,6 +87,11 @@ impl Session {
         self.executor.as_ref()
     }
 
+    /// Get a cloned `Arc` of the underlying code executor.
+    pub fn executor_arc(&self) -> Arc<dyn CodeExecutor> {
+        Arc::clone(&self.executor)
+    }
+
     /// Touch the session (update last activity timestamp).
     pub fn touch(&self) {
         *self.last_activity.lock() = Instant::now();
@@ -137,6 +142,73 @@ impl SessionRegistry {
             max_sessions,
             wasm_runtime: None,
         }
+    }
+
+    /// Create a registry that automatically selects the best backend.
+    ///
+    /// If `python_wasm_path` and `python_wasm_stdlib` point to existing files,
+    /// uses the WASM-sandboxed executor. Otherwise falls back to subprocess.
+    /// When both paths are `None`, checks `PYTHON_WASM_PATH` and
+    /// `PYTHON_WASM_STDLIB` environment variables.
+    pub fn new_auto(
+        config: SessionConfig,
+        max_sessions: usize,
+        python_wasm_path: Option<&std::path::Path>,
+        python_wasm_stdlib: Option<&std::path::Path>,
+    ) -> Self {
+        let wasm_path = python_wasm_path
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::var("PYTHON_WASM_PATH").ok().map(PathBuf::from));
+        let stdlib_path = python_wasm_stdlib
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::var("PYTHON_WASM_STDLIB").ok().map(PathBuf::from));
+
+        if let (Some(wasm_path), Some(stdlib_path)) = (wasm_path, stdlib_path) {
+            if wasm_path.exists() && stdlib_path.exists() {
+                match Self::try_create_wasm_registry(config.clone(), max_sessions, &wasm_path, &stdlib_path) {
+                    Ok(registry) => {
+                        tracing::info!("CodeAct: SessionRegistry using WASM backend");
+                        return registry;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to create WASM registry, falling back to subprocess");
+                    }
+                }
+            }
+        }
+
+        tracing::info!("CodeAct: SessionRegistry using subprocess backend");
+        Self::new_subprocess(config, max_sessions)
+    }
+
+    fn try_create_wasm_registry(
+        config: SessionConfig,
+        max_sessions: usize,
+        wasm_path: &std::path::Path,
+        stdlib_path: &std::path::Path,
+    ) -> Result<Self, crate::executor::ExecutorError> {
+        use wasmtime::{Config as WasmConfig, Engine as WasmEngine, Module as WasmModule};
+
+        let mut engine_config = WasmConfig::new();
+        engine_config.async_support(true);
+        engine_config.epoch_interruption(true);
+
+        let engine = WasmEngine::new(&engine_config).map_err(|e| {
+            crate::executor::ExecutorError::NotReady(format!("Wasmtime engine: {e}"))
+        })?;
+
+        tracing::info!(path = %wasm_path.display(), "Compiling CPython WASI module for session registry");
+        let module = WasmModule::from_file(&engine, wasm_path).map_err(|e| {
+            crate::executor::ExecutorError::NotReady(format!("python.wasm compilation: {e}"))
+        })?;
+
+        let runtime = Arc::new(WasmRuntime {
+            engine: Arc::new(engine),
+            module: Arc::new(module),
+            stdlib_dir: stdlib_path.to_path_buf(),
+        });
+
+        Ok(Self::new_wasm(config, max_sessions, runtime))
     }
 
     /// Get or create a session for the given conversation ID.

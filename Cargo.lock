@@ -3782,6 +3782,7 @@ dependencies = [
  "hive-agents",
  "hive-canvas",
  "hive-classification",
+ "hive-code-executor",
  "hive-connectors",
  "hive-context-map",
  "hive-contracts",
