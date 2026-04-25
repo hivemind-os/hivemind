@@ -2375,12 +2375,11 @@ impl LoopStrategy for CodeActStrategy {
             let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
 
             loop {
-                // Build the system prompt with CodeAct instructions appended
-                let system_prompt = if tool_iterations == 0 {
-                    format!("{prompt}\n\n{code_act_instructions}")
-                } else {
-                    prompt.clone()
-                };
+                // Build the system prompt with CodeAct instructions appended.
+                // Instructions MUST be present on every iteration, not just the first —
+                // otherwise the LLM loses all context about code execution, network access,
+                // available tools, etc. on subsequent iterations.
+                let system_prompt = format!("{prompt}\n\n{code_act_instructions}");
 
                 let mut request = if use_multi_turn {
                     let mut messages = context.conversation.history.clone();

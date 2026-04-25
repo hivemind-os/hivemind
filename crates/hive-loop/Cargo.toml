@@ -38,3 +38,4 @@ hive-process = { path = "../hive-process" }
 arc-swap.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-stream.workspace = true
