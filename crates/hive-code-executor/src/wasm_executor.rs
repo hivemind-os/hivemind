@@ -485,9 +485,24 @@ async fn run_wasm_instance(
     wasi_builder.stdout(stdout_stream);
     wasi_builder.inherit_stderr(); // stderr goes to host for debugging
 
-    // Preopen Python stdlib (read-only)
+    // Preopen Python stdlib (read-only).
+    //
+    // CPython's compiled-in prefix is /usr/local.  During very early init it
+    // searches {prefix}/lib/python312.zip and {prefix}/lib/python3.12/ for
+    // critical bootstrap modules like `encodings`.  The vmware-labs WASI
+    // tarball ships the stdlib as:
+    //   lib/python312.zip       – bulk of the stdlib (including encodings)
+    //   lib/python3.12/os.py    – os module (loaded before zipimport)
+    //   lib/python3.12/lib-dynload/  – C extension stubs
+    //
+    // We mount the *parent* directory (containing both the zip and the
+    // version-specific subdirectory) at /usr/local/lib/ so CPython's
+    // standard path resolution finds everything it needs.
+    let stdlib_parent = stdlib_dir
+        .parent()
+        .unwrap_or(stdlib_dir);
     wasi_builder
-        .preopened_dir(stdlib_dir, "/usr/lib/python3", DirPerms::READ, FilePerms::READ)
+        .preopened_dir(stdlib_parent, "/usr/local/lib", DirPerms::READ, FilePerms::READ)
         .map_err(|e| {
             ExecutorError::NotReady(format!("failed to preopen stdlib dir: {e}"))
         })?;
@@ -520,10 +535,13 @@ async fn run_wasm_instance(
     let wrapper = generate_python_wrapper(nonce);
     wasi_builder.args(&["python.wasm", "-c", &wrapper]);
 
-    // Set environment variables for reproducible behavior
+    // Set environment variables for reproducible behavior.
+    // PYTHONHOME=/usr/local tells CPython where its prefix is, matching the
+    // preopened /usr/local/lib/ mount above.
+    wasi_builder.env("PYTHONHOME", "/usr/local");
     wasi_builder.env("PYTHONDONTWRITEBYTECODE", "1");
     wasi_builder.env("PYTHONNOUSERSITE", "1");
-    wasi_builder.env("PYTHONPATH", "/usr/lib/python3");
+    wasi_builder.env("PYTHONPATH", "/usr/local/lib/python3.12");
     wasi_builder.env("TMPDIR", "/tmp");
     if workspace_dir.is_some() {
         wasi_builder.env("HOME", "/workspace");

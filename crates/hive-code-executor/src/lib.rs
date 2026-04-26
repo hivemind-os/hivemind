@@ -59,7 +59,7 @@ pub struct PythonWasmPaths {
 ///
 /// Returns `None` if no valid runtime is found.
 pub fn resolve_python_wasm(hivemind_home: Option<&std::path::Path>) -> Option<PythonWasmPaths> {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     // Helper: check that both paths exist
     let check = |wasm: PathBuf, stdlib: PathBuf| -> Option<PythonWasmPaths> {
