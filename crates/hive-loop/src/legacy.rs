@@ -2575,33 +2575,22 @@ impl LoopStrategy for CodeActStrategy {
                             working_directory: workspace_str.clone(),
                             allow_network: ca_cfg.allow_network,
                         };
-                        match (
-                            std::env::var("PYTHON_WASM_PATH"),
-                            std::env::var("PYTHON_WASM_STDLIB"),
-                        ) {
-                            (Ok(wasm_path), Ok(stdlib_path)) => {
-                                let wasm_path = std::path::PathBuf::from(&wasm_path);
-                                let stdlib_path = std::path::PathBuf::from(&stdlib_path);
-                                if wasm_path.exists() && stdlib_path.exists() {
-                                    let e = WasmExecutor::new(exec_config, &wasm_path, &stdlib_path)
-                                        .await
-                                        .map_err(|e| {
-                                            simple_model_error(format!("failed to start WASM executor: {e}"))
-                                        })?;
-                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
-                                    Arc::new(e) as Arc<dyn CodeExecutor>
-                                } else {
-                                    return Err(simple_model_error(
-                                        "CodeAct requires the WASM Python runtime (python.wasm). \
-                                         PYTHON_WASM_PATH or PYTHON_WASM_STDLIB points to missing files.".into()
-                                    ));
-                                }
+                        let wasm_paths = hive_code_executor::resolve_python_wasm(None);
+                        match wasm_paths {
+                            Some(paths) => {
+                                let e = WasmExecutor::new(exec_config, &paths.wasm_binary, &paths.stdlib_dir)
+                                    .await
+                                    .map_err(|e| {
+                                        simple_model_error(format!("failed to start WASM executor: {e}"))
+                                    })?;
+                                tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
+                                Arc::new(e) as Arc<dyn CodeExecutor>
                             }
-                            _ => {
+                            None => {
                                 return Err(simple_model_error(
                                     "CodeAct requires the WASM Python runtime. \
-                                     Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables \
-                                     or configure a session registry.".into()
+                                     Run `scripts/download-python-wasm` or set PYTHON_WASM_PATH \
+                                     and PYTHON_WASM_STDLIB environment variables.".into()
                                 ));
                             }
                         }

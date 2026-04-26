@@ -1561,8 +1561,7 @@ impl ChatService {
             Arc::new(ArcSwap::from_pointee(hive_contracts::WebSearchConfig::default()));
 
         // Create the CodeAct session registry (once, shared across all conversations).
-        // Requires WASM Python runtime — logs a warning if unavailable but doesn't
-        // prevent startup. CodeAct sessions will fail at runtime with a clear error.
+        // Resolves python.wasm from env vars, hivemind_home, or sibling of exe.
         let code_session_registry = {
             let session_config = hive_code_executor::SessionConfig {
                 executor: hive_code_executor::ExecutorConfig {
@@ -1574,18 +1573,20 @@ impl ChatService {
                 },
                 idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
             };
+            let wasm_paths = hive_code_executor::resolve_python_wasm(Some(&hivemind_home));
             match hive_code_executor::SessionRegistry::new_auto(
                 session_config,
                 code_act_config.max_sessions,
-                None, // uses PYTHON_WASM_PATH env var
-                None, // uses PYTHON_WASM_STDLIB env var
+                wasm_paths.as_ref().map(|p| p.wasm_binary.as_path()),
+                wasm_paths.as_ref().map(|p| p.stdlib_dir.as_path()),
             ) {
                 Ok(registry) => Some(Arc::new(registry)),
                 Err(e) => {
                     tracing::warn!(
                         error = %e,
                         "CodeAct WASM runtime unavailable — CodeAct personas will not work. \
-                         Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB or bundle python.wasm."
+                         Install python.wasm to {}/runtimes/python-wasm/ or set PYTHON_WASM_PATH.",
+                        hivemind_home.display()
                     );
                     None
                 }

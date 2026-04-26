@@ -4,7 +4,10 @@
       "bin/hive-daemon.exe": "hive-daemon.exe",
       "bin/hive-cli.exe": "hive-cli.exe",
       "bin/hive-runtime-worker.exe": "hive-runtime-worker.exe",
-      "vc_redist.exe": "vc_redist.exe"
+      "vc_redist.exe": "vc_redist.exe",
+      "python-wasm/bin/python.wasm": "python-wasm/bin/python.wasm",
+      "python-wasm/lib/python3.12": "python-wasm/lib/python3.12",
+      "python-wasm/lib/python312.zip": "python-wasm/lib/python312.zip"
     }
   }
 }
