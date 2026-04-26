@@ -2352,17 +2352,26 @@ impl LoopStrategy for CodeActStrategy {
             let mut budget = crate::tool_budget::AdaptiveBudget::new(&context.tool_limits);
 
             loop {
-                // Build the system prompt with CodeAct instructions appended.
-                // Instructions MUST be present on every iteration, not just the first —
-                // otherwise the LLM loses all context about code execution, network access,
-                // available tools, etc. on subsequent iterations.
-                let system_prompt = format!("{prompt}\n\n{code_act_instructions}");
-
+                // CodeAct instructions go into the SYSTEM message so models
+                // treat them as authoritative directives, not user chatter.
+                // The user's actual request stays in a clean user message.
                 let mut request = if use_multi_turn {
                     let mut messages = context.conversation.history.clone();
+                    // Inject CodeAct instructions into the system message.
+                    if let Some(sys_msg) = messages.iter_mut().find(|m| m.role == "system") {
+                        sys_msg.content = format!("{}\n\n{}", sys_msg.content, code_act_instructions);
+                    } else {
+                        // No system message in history — add one with just the instructions.
+                        messages.insert(0, CompletionMessage {
+                            role: "system".into(),
+                            content: code_act_instructions.clone(),
+                            content_parts: vec![],
+                            blocks: vec![],
+                        });
+                    }
                     let user_msg = CompletionMessage {
                         role: "user".into(),
-                        content: system_prompt.clone(),
+                        content: prompt.clone(),
                         content_parts: std::mem::take(&mut prompt_content_parts),
                         blocks: vec![],
                     };
@@ -2377,10 +2386,24 @@ impl LoopStrategy for CodeActStrategy {
                         tools: native_tool_defs.clone(),
                     }
                 } else {
+                    // Non-multi-turn: prompt goes as the final user message via
+                    // the provider's message builder. Prepend CodeAct instructions
+                    // to the system message in history.
+                    let mut history = context.conversation.history.clone();
+                    if let Some(sys_msg) = history.iter_mut().find(|m| m.role == "system") {
+                        sys_msg.content = format!("{}\n\n{}", sys_msg.content, code_act_instructions);
+                    } else {
+                        history.insert(0, CompletionMessage {
+                            role: "system".into(),
+                            content: code_act_instructions.clone(),
+                            content_parts: vec![],
+                            blocks: vec![],
+                        });
+                    }
                     CompletionRequest {
-                        prompt: system_prompt.clone(),
+                        prompt: prompt.clone(),
                         prompt_content_parts: std::mem::take(&mut prompt_content_parts),
-                        messages: context.conversation.history.clone(),
+                        messages: history,
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: native_tool_defs.clone(),
