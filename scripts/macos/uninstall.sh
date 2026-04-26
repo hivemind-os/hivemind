@@ -1,15 +1,17 @@
 #!/bin/bash
 # Uninstall HiveMind OS from macOS.
 #
-# Usage: sudo scripts/macos/uninstall.sh
+# Usage: sudo hivemind-uninstall
+#   or:  sudo scripts/macos/uninstall.sh
 #
 # This removes:
 #   - The LaunchAgent (stops auto-restart)
-#   - The daemon process
+#   - The daemon and runtime-worker processes
 #   - /Applications/HiveMind OS.app
 #   - /usr/local/bin/hive-daemon
 #   - /usr/local/bin/hive-cli
 #   - /usr/local/bin/hive-runtime-worker
+#   - /usr/local/bin/hivemind-uninstall
 #   - The installer receipt
 #
 # Does NOT remove user data in ~/.hivemind (secrets, config, logs).
@@ -47,6 +49,7 @@ done
 # 2. Kill any lingering daemon processes
 echo "    Stopping daemon processes..."
 killall hive-daemon 2>/dev/null || true
+killall hive-runtime-worker 2>/dev/null || true
 sleep 1
 
 # 3. Remove installed files
@@ -55,6 +58,7 @@ rm -rf "/Applications/HiveMind OS.app"
 rm -f /usr/local/bin/hive-daemon
 rm -f /usr/local/bin/hive-cli
 rm -f /usr/local/bin/hive-runtime-worker
+rm -f /usr/local/bin/hivemind-uninstall
 
 # 4. Forget the installer receipt so re-installs work cleanly
 echo "    Removing installer receipt..."
