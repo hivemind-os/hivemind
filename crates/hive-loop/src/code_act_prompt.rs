@@ -4,7 +4,7 @@
 //! system prompt. These tell the LLM to write Python code in fenced blocks,
 //! list available bridged tool functions, and explain the observation format.
 
-use hive_code_executor::{BridgedToolInfo, CodeActToolMode};
+use hive_code_executor::{BridgedToolInfo, CodeActToolMode, tool_id_to_python_name};
 
 /// Build the CodeAct supplement that is appended to the persona system prompt.
 ///
@@ -141,9 +141,7 @@ fn build_function_signature(tool: &BridgedToolInfo) -> String {
 }
 
 fn tool_id_to_display_name(id: &str) -> String {
-    id.chars()
-        .map(|c| if c == '.' || c == '-' { '_' } else { c })
-        .collect()
+    tool_id_to_python_name(id)
 }
 
 fn json_type_to_python_hint(ty: &str) -> &str {

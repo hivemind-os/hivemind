@@ -37,7 +37,7 @@ pub use session::{Session, SessionConfig, SessionRegistry, WasmRuntime};
 pub use wasm_executor::WasmExecutor;
 pub use tool_bridge::{
     BridgedToolInfo, CodeActToolMode, ExecutionOptions, ToolCallHandler,
-    ToolCallRequest, ToolCallResponse,
+    ToolCallRequest, ToolCallResponse, tool_id_to_python_name,
 };
 
 /// Resolved paths to the CPython WASI runtime.

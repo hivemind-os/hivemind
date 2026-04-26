@@ -2,6 +2,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
+use tar::Archive;
+
 const HF_BASE: &str = "https://huggingface.co";
 const BGE_REPO: &str = "BAAI/bge-small-en-v1.5";
 
@@ -133,18 +136,11 @@ fn stage_python_wasm(desktop_dir: &Path) -> PathBuf {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
-    let tar_path = temp_dir.join(PYTHON_WASM_ASSET);
-    fs::write(&tar_path, &tar_bytes).expect("failed to write tarball");
-
     println!("  Extracting...");
-    let status = std::process::Command::new("tar")
-        .args(["-xzf", &tar_path.to_string_lossy()])
-        .current_dir(&temp_dir)
-        .status()
-        .expect("failed to run tar");
-    if !status.success() {
-        panic!("tar extraction failed");
-    }
+    let tar_gz = std::io::Cursor::new(&tar_bytes);
+    let decoder = GzDecoder::new(tar_gz);
+    let mut archive = Archive::new(decoder);
+    archive.unpack(&temp_dir).expect("failed to extract tarball");
 
     // Stage into normalized layout: python-wasm/{bin/python.wasm, lib/python3.12/, lib/python312.zip}
     let bin_dir = staging.join("bin");

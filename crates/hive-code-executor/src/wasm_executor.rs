@@ -138,6 +138,8 @@ pub struct WasmExecutor {
     stdlib_dir: PathBuf,
     /// Per-session nonce for sentinel uniqueness.
     nonce: String,
+    /// Per-session temp directory (cleaned up on shutdown).
+    tmp_dir: PathBuf,
 }
 
 impl WasmExecutor {
@@ -168,13 +170,17 @@ impl WasmExecutor {
         let module = Arc::new(module);
         tracing::info!("CPython WASI module compiled successfully");
 
+        let nonce = generate_nonce();
+        let tmp_dir = std::env::temp_dir().join(format!("hivemind-wasm-{}", &nonce));
+
         let executor = Self {
             instance: Mutex::new(None),
             config,
             engine,
             module,
             stdlib_dir: stdlib_dir.to_path_buf(),
-            nonce: generate_nonce(),
+            nonce,
+            tmp_dir,
         };
 
         // Spawn the initial WASM instance
@@ -191,13 +197,16 @@ impl WasmExecutor {
         module: Arc<Module>,
         stdlib_dir: PathBuf,
     ) -> Self {
+        let nonce = generate_nonce();
+        let tmp_dir = std::env::temp_dir().join(format!("hivemind-wasm-{}", &nonce));
         Self {
             instance: Mutex::new(None),
             config,
             engine,
             module,
             stdlib_dir,
-            nonce: generate_nonce(),
+            nonce,
+            tmp_dir,
         }
     }
 
@@ -219,6 +228,7 @@ impl WasmExecutor {
         let memory_limit = (self.config.memory_limit_mb as usize) * 1024 * 1024;
         let nonce = self.nonce.clone();
         let workspace_dir = self.config.working_directory.clone();
+        let tmp_dir = self.tmp_dir.clone();
 
         // Create bidirectional channels for stdin/stdout.
         // Host writes to host_stdin_writer → WASM reads from wasm_stdin_reader
@@ -239,6 +249,7 @@ impl WasmExecutor {
                 wasm_stdin_reader,
                 wasm_stdout_writer,
                 &nonce,
+                &tmp_dir,
             )
             .await
             {
@@ -471,6 +482,7 @@ async fn run_wasm_instance(
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
     nonce: &str,
+    tmp_dir: &Path,
 ) -> Result<(), ExecutorError> {
     use wasmtime_wasi::pipe::{AsyncReadStream, AsyncWriteStream};
     use wasmtime_wasi::{AsyncStdinStream, AsyncStdoutStream};
@@ -521,12 +533,11 @@ async fn run_wasm_instance(
     }
 
     // Preopen a scratch/tmp directory for Python's tempfile module
-    let tmp_dir = std::env::temp_dir().join(format!("hivemind-wasm-{}", nonce));
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| {
+    std::fs::create_dir_all(tmp_dir).map_err(|e| {
         ExecutorError::NotReady(format!("failed to create tmp dir: {e}"))
     })?;
     wasi_builder
-        .preopened_dir(&tmp_dir, "/tmp", DirPerms::all(), FilePerms::all())
+        .preopened_dir(tmp_dir, "/tmp", DirPerms::all(), FilePerms::all())
         .map_err(|e| {
             ExecutorError::NotReady(format!("failed to preopen tmp dir: {e}"))
         })?;
@@ -634,6 +645,8 @@ impl CodeExecutor for WasmExecutor {
         if let Some(inst) = guard.take() {
             inst.wasm_task.abort();
         }
+        // Best-effort cleanup of per-session temp directory
+        let _ = std::fs::remove_dir_all(&self.tmp_dir);
         tracing::debug!("WASM executor shut down");
         Ok(())
     }

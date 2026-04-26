@@ -42,22 +42,22 @@ pub fn extract_python_blocks(content: &str) -> Vec<CodeBlock> {
 
     while pos < len {
         // Find opening fence: ``` at start of line (or start of string)
-        let fence_start = match find_fence_open(content, pos) {
-            Some(offset) => offset,
+        let (fence_start, fence_len) = match find_fence_open(content, pos) {
+            Some(result) => result,
             None => break,
         };
 
-        // Extract the language tag (everything after ``` on the same line)
-        let tag_start = fence_start + 3;
+        // Extract the language tag (everything after the backticks on the same line)
+        let tag_start = fence_start + fence_len;
         let line_end = content[tag_start..]
             .find('\n')
             .map(|i| tag_start + i)
             .unwrap_or(len);
         let language_tag = content[tag_start..line_end].trim().to_lowercase();
 
-        // Find closing fence: ``` on its own line
+        // Find closing fence: matching or longer backtick run on its own line
         let code_start = if line_end < len { line_end + 1 } else { len };
-        let (code_end, fence_close_end) = match find_fence_close(content, code_start) {
+        let (code_end, fence_close_end) = match find_fence_close(content, code_start, fence_len) {
             Some((ce, fce)) => (ce, fce),
             None => {
                 // Unclosed fence — skip to end
@@ -104,7 +104,8 @@ fn is_python_tag(tag: &str) -> bool {
 
 /// Find the start of a ``` fence at or after `from`.
 /// The fence must be at the beginning of a line (or at position 0).
-fn find_fence_open(content: &str, from: usize) -> Option<usize> {
+/// Returns `(offset, fence_len)` where fence_len is the number of backticks.
+fn find_fence_open(content: &str, from: usize) -> Option<(usize, usize)> {
     let mut pos = from;
     let bytes = content.as_bytes();
     let len = bytes.len();
@@ -114,9 +115,12 @@ fn find_fence_open(content: &str, from: usize) -> Option<usize> {
         if bytes[pos] == b'`' && bytes[pos + 1] == b'`' && bytes[pos + 2] == b'`' {
             // Verify it's at line start
             if pos == 0 || bytes[pos - 1] == b'\n' {
-                // Make sure this isn't a longer fence like ```` (4+ backticks)
-                // We accept 3+ backticks as a fence opener
-                return Some(pos);
+                // Count total backticks in this fence
+                let mut fence_len = 3;
+                while pos + fence_len < len && bytes[pos + fence_len] == b'`' {
+                    fence_len += 1;
+                }
+                return Some((pos, fence_len));
             }
         }
         // Advance to next line
@@ -128,10 +132,10 @@ fn find_fence_open(content: &str, from: usize) -> Option<usize> {
     None
 }
 
-/// Find the closing ``` fence starting from `from`.
+/// Find the closing fence starting from `from` with at least `fence_len` backticks.
 /// Returns (code_end, fence_close_end) — code_end is the byte before the
-/// closing fence line, fence_close_end is past the closing ``` and its newline.
-fn find_fence_close(content: &str, from: usize) -> Option<(usize, usize)> {
+/// closing fence line, fence_close_end is past the closing fence and its newline.
+fn find_fence_close(content: &str, from: usize, fence_len: usize) -> Option<(usize, usize)> {
     let bytes = content.as_bytes();
     let len = bytes.len();
     let mut pos = from;
@@ -144,7 +148,8 @@ fn find_fence_close(content: &str, from: usize) -> Option<(usize, usize)> {
             .unwrap_or(len);
         let line = content[line_start..line_end].trim();
 
-        if line == "```" || line.starts_with("```\r") {
+        // Closing fence must be at least fence_len backticks and nothing else
+        if line.len() >= fence_len && line.chars().all(|c| c == '`') {
             let fence_close_end = if line_end < len { line_end + 1 } else { len };
             return Some((line_start, fence_close_end));
         }

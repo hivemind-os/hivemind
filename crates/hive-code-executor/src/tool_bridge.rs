@@ -191,7 +191,7 @@ fn generate_tool_stub(tool: &BridgedToolInfo) -> String {
 /// - Dots → underscores
 /// - Dashes → underscores
 /// - Prefix with `_` if the result is a Python keyword or starts with a digit
-fn tool_id_to_python_name(id: &str) -> String {
+pub fn tool_id_to_python_name(id: &str) -> String {
     let mut name: String = id.chars().map(|c| if c == '.' || c == '-' { '_' } else { c }).collect();
 
     // Avoid Python keywords

@@ -154,6 +154,11 @@ else
     tar -xzf "$WASM_TEMP/python-wasm.tar.gz" -C "$WASM_TEMP"
     mkdir -p "$WASM_STAGING/bin" "$WASM_STAGING/lib"
     WASM_FILE=$(find "$WASM_TEMP/bin" -name 'python*.wasm' | head -1)
+    if [ -z "$WASM_FILE" ]; then
+        echo "ERROR: No python*.wasm found in extracted archive"
+        rm -rf "$WASM_TEMP"
+        exit 1
+    fi
     cp "$WASM_FILE" "$WASM_STAGING/bin/python.wasm"
     cp -r "$WASM_TEMP/usr/local/lib/python3.12" "$WASM_STAGING/lib/python3.12"
     [ -f "$WASM_TEMP/usr/local/lib/python312.zip" ] && \

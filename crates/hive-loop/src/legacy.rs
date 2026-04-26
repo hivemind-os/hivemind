@@ -2656,8 +2656,9 @@ impl LoopStrategy for CodeActStrategy {
                             None => {
                                 return Err(simple_model_error(
                                     "CodeAct requires the WASM Python runtime. \
-                                     Run `scripts/download-python-wasm` or set PYTHON_WASM_PATH \
-                                     and PYTHON_WASM_STDLIB environment variables.".into()
+                                     Run `scripts/download-python-wasm.sh` (macOS/Linux) or \
+                                     `scripts/download-python-wasm.ps1` (Windows), or set \
+                                     PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables.".into()
                                 ));
                             }
                         }
@@ -2803,11 +2804,12 @@ impl LoopStrategy for CodeActStrategy {
 
                 // ── Record in conversation journal for mid-task resume ──
                 if let Some(ref journal) = context.conversation.conversation_journal {
-                    let journal_calls: Vec<JournalToolCall> = code_blocks.iter().map(|b| {
+                    let journal_calls: Vec<JournalToolCall> = code_blocks.iter().enumerate().map(|(i, b)| {
+                        let output = observations.get(i).cloned().unwrap_or_default();
                         JournalToolCall {
                             tool_id: "code_execution".to_string(),
                             input: b.code.clone(),
-                            output: observation_text.clone(),
+                            output,
                             tool_call_id: None,
                             is_error: false,
                         }

@@ -794,8 +794,8 @@ const App = () => {
   const displayStreamingContent = createMemo(() => {
     const raw = streamingContent();
     if (!raw || !isCodeActSession()) return raw;
-    // Strip ```python ... ``` fenced blocks (complete and in-progress)
-    return raw.replace(/```(?:python|py)?\n[\s\S]*?(?:```|$)/g, '').trim();
+    // Strip ```python ... ``` / ```py ... ``` fenced blocks (complete and in-progress)
+    return raw.replace(/```(?:python|py)\n[\s\S]*?(?:```|$)/g, '').trim();
   });
 
   let streamSyncEpoch = 0;
