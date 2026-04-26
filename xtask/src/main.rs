@@ -266,6 +266,46 @@ fn run_macos_build(root: &Path, arch: &str) {
     }
 }
 
+/// Download the VC++ Redistributable into `dest` if it doesn't already exist.
+/// Returns `true` if the file was downloaded (so the caller can clean it up).
+fn stage_vc_redist(dest: &Path, target: &str) -> bool {
+    if dest.exists() {
+        println!("  vc_redist.exe already present at {}", dest.display());
+        return false;
+    }
+
+    let url = if target.starts_with("aarch64") {
+        "https://aka.ms/vs/17/release/vc_redist.arm64.exe"
+    } else {
+        "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    };
+
+    println!("  Downloading VC++ Redistributable from {url}...");
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .expect("failed to build HTTP client");
+
+    let resp = client
+        .get(url)
+        .send()
+        .unwrap_or_else(|e| panic!("failed to download vc_redist.exe: {e}"));
+    if !resp.status().is_success() {
+        panic!("HTTP {} downloading vc_redist.exe", resp.status());
+    }
+    let bytes = resp.bytes().unwrap_or_else(|e| panic!("failed to read vc_redist.exe: {e}"));
+    if bytes.len() < 1_000_000 {
+        panic!("vc_redist.exe is unexpectedly small ({} bytes)", bytes.len());
+    }
+
+    fs::write(dest, &bytes).unwrap_or_else(|e| panic!("failed to write vc_redist.exe: {e}"));
+    println!(
+        "  vc_redist.exe downloaded ({:.1} MB)",
+        bytes.len() as f64 / 1_048_576.0
+    );
+    true
+}
+
 fn run_windows_build(root: &Path, target: &str) {
     println!("==> Building Windows NSIS installer for {target}...");
 
@@ -318,11 +358,15 @@ fn run_windows_build(root: &Path, target: &str) {
             .unwrap_or_else(|e| panic!("failed to copy {} to staging: {e}", src.display()));
     }
 
-    // 3. Stage python-wasm runtime so Tauri bundles it as a resource
+    // 3. Download VC++ Redistributable so the NSIS installer can bundle it
+    let vc_redist_path = desktop_dir.join("src-tauri").join("vc_redist.exe");
+    let vc_redist_downloaded = stage_vc_redist(&vc_redist_path, target);
+
+    // 4. Stage python-wasm runtime so Tauri bundles it as a resource
     println!("  Staging python-wasm runtime...");
     let wasm_staging = stage_python_wasm(&desktop_dir);
 
-    // 4. Build Tauri NSIS installer with the bundled binaries.
+    // 5. Build Tauri NSIS installer with the bundled binaries.
     //    The config override tells Tauri to include the staged binaries as
     //    resources, which places them alongside the main exe on Windows.
     println!("  Building Tauri installer...");
@@ -346,6 +390,9 @@ fn run_windows_build(root: &Path, target: &str) {
     // Clean up staging directories
     let _ = fs::remove_dir_all(&staging_dir);
     let _ = fs::remove_dir_all(&wasm_staging);
+    if vc_redist_downloaded {
+        let _ = fs::remove_file(&vc_redist_path);
+    }
 
     if !status.success() {
         eprintln!("Tauri build failed");

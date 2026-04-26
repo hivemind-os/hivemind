@@ -220,6 +220,8 @@ cp -R "$APP_BUNDLE" "$PKG_ROOT/Applications/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-daemon" "$PKG_ROOT/usr/local/bin/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-cli" "$PKG_ROOT/usr/local/bin/"
 cp "$REPO_ROOT/target/$TARGET/release/hive-runtime-worker" "$PKG_ROOT/usr/local/bin/"
+cp "$SCRIPT_DIR/uninstall.sh" "$PKG_ROOT/usr/local/bin/hivemind-uninstall"
+chmod 755 "$PKG_ROOT/usr/local/bin/hivemind-uninstall"
 
 # 5. Build the component package
 #    Generate a component plist and set BundleIsRelocatable to false so that
