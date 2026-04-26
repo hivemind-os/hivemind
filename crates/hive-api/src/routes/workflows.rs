@@ -800,17 +800,29 @@ pub(crate) async fn wf_event_stream(
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
     let mut rx = state.event_bus.subscribe_queued_bounded("workflow", 10_000);
 
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
-        while let Some(envelope) = rx.recv().await {
-            let data = serde_json::to_string(&serde_json::json!({
-                "topic": envelope.topic,
-                "payload": envelope.payload,
-                "timestamp_ms": envelope.timestamp_ms,
-            }))
-            .unwrap_or_default();
-            yield Ok(Event::default()
-                .event(&envelope.topic)
-                .data(data));
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                msg = rx.recv() => {
+                    match msg {
+                        Some(envelope) => {
+                            let data = serde_json::to_string(&serde_json::json!({
+                                "topic": envelope.topic,
+                                "payload": envelope.payload,
+                                "timestamp_ms": envelope.timestamp_ms,
+                            }))
+                            .unwrap_or_default();
+                            yield Ok(Event::default()
+                                .event(&envelope.topic)
+                                .data(data));
+                        }
+                        None => break,
+                    }
+                }
+            }
         }
     };
 

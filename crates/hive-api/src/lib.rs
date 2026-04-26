@@ -60,7 +60,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::CorsLayer;
 use tracing::Instrument;
@@ -252,7 +252,7 @@ impl UserStatusRuntime {
 #[derive(Clone)]
 pub struct AppState {
     pub start_time: Instant,
-    pub shutdown: Arc<Notify>,
+    pub shutdown: CancellationToken,
     /// Crypto-secure token generated on daemon startup.  Clients must
     /// present this as `Authorization: Bearer <token>` on every
     /// non-exempt API request.
@@ -420,7 +420,7 @@ impl AppState {
         config: HiveMindConfig,
         audit: AuditLogger,
         event_bus: EventBus,
-        shutdown: Arc<Notify>,
+        shutdown: CancellationToken,
         auth_token: String,
     ) -> anyhow::Result<Self> {
         let paths = discover_paths()?;
@@ -1714,7 +1714,7 @@ impl AppState {
         config: HiveMindConfig,
         audit: AuditLogger,
         event_bus: EventBus,
-        shutdown: Arc<Notify>,
+        shutdown: CancellationToken,
         chat: Arc<ChatService>,
     ) -> Self {
         let sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>> =
@@ -2792,7 +2792,7 @@ mod tests {
             .expect("test config should build a valid model router");
         chat.swap_router(router);
 
-        AppState::with_chat(cfg, audit, bus, Arc::new(Notify::new()), chat)
+        AppState::with_chat(cfg, audit, bus, CancellationToken::new(), chat)
     }
 
     async fn read_json<T: DeserializeOwned>(response: axum::response::Response) -> T {
@@ -3657,7 +3657,7 @@ mod tests {
             HiveMindConfig::default(),
             audit,
             bus,
-            Arc::new(Notify::new()),
+            CancellationToken::new(),
             chat,
         ));
 

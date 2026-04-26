@@ -379,16 +379,23 @@ pub(crate) async fn api_workspace_index_status_stream(
         .await
         .ok_or((StatusCode::NOT_FOUND, "session not found".to_string()))?;
 
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         let mut rx = rx;
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(Event::default().data(data));
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            let data = serde_json::to_string(&event).unwrap_or_default();
+                            yield Ok(Event::default().data(data));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             }
         }
     };
@@ -495,16 +502,23 @@ pub(crate) async fn api_chat_stream(
 {
     let rx = state.chat.subscribe_stream(&session_id).await.map_err(chat_error)?;
 
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         let mut rx = rx;
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(Event::default().data(data));
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            let data = serde_json::to_string(&event).unwrap_or_default();
+                            yield Ok(Event::default().data(data));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             }
         }
     };
@@ -727,20 +741,27 @@ pub(crate) async fn api_status_event_stream(
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
     let mut rx = state.user_status.subscribe();
     let current = state.user_status.get();
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         // Send current status as initial event.
         yield Ok(Event::default().data(
             serde_json::to_string(&json!({ "status": current })).unwrap_or_default()
         ));
         loop {
-            match rx.recv().await {
-                Ok(status) => {
-                    yield Ok(Event::default().data(
-                        serde_json::to_string(&json!({ "status": status })).unwrap_or_default()
-                    ));
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(status) => {
+                            yield Ok(Event::default().data(
+                                serde_json::to_string(&json!({ "status": status })).unwrap_or_default()
+                            ));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             }
         }
     };
@@ -757,6 +778,7 @@ pub(crate) async fn api_approval_event_stream(
     let mut rx = state.chat.subscribe_approvals();
     let initial = state.chat.list_all_pending_approvals().await;
     tracing::debug!(count = initial.len(), "approval SSE: sending initial batch");
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         for (session_id, a) in initial {
             let ev = crate::chat::ApprovalStreamEvent::Added {
@@ -773,19 +795,25 @@ pub(crate) async fn api_approval_event_stream(
         }
         tracing::debug!("approval SSE: streaming live events");
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    tracing::debug!(?event, "approval SSE: forwarding live event");
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(Event::default().data(data));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    tracing::debug!("approval SSE: broadcast channel closed");
-                    break;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "approval SSE: lagged behind");
-                    continue;
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            tracing::debug!(?event, "approval SSE: forwarding live event");
+                            let data = serde_json::to_string(&event).unwrap_or_default();
+                            yield Ok(Event::default().data(data));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            tracing::debug!("approval SSE: broadcast channel closed");
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(skipped = n, "approval SSE: lagged behind");
+                            continue;
+                        }
+                    }
                 }
             }
         }

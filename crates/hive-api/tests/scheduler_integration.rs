@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 /// Boot a test server with an in-memory scheduler.
-async fn boot_scheduler_server() -> (String, Arc<Notify>, TempDir) {
+async fn boot_scheduler_server() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -18,7 +18,7 @@ async fn boot_scheduler_server() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -64,7 +64,7 @@ async fn boot_scheduler_server() -> (String, Arc<Notify>, TempDir) {
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -126,7 +126,7 @@ async fn test_create_and_get_task() {
     assert_eq!(task["status"], "pending");
     assert_eq!(task["schedule"]["type"], "once");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -147,7 +147,7 @@ async fn test_list_tasks() {
     assert!(names.contains(&"task_alpha"));
     assert!(names.contains(&"task_beta"));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -170,7 +170,7 @@ async fn test_delete_task() {
         .expect("GET after delete");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -201,7 +201,7 @@ async fn test_cancel_task() {
     let task: Value = resp.json().await.expect("json");
     assert_eq!(task["status"], "cancelled");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -216,7 +216,7 @@ async fn test_get_nonexistent_task_returns_404() {
         .expect("GET nonexistent");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -244,5 +244,5 @@ async fn test_create_task_with_cron_schedule() {
     assert_eq!(task["schedule"]["expression"], "0 */5 * * * * *");
     assert_eq!(task["action"]["type"], "http_webhook");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }

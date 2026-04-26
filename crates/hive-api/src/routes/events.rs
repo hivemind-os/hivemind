@@ -32,10 +32,22 @@ pub(crate) async fn api_event_bus_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let mut rx = state.event_bus.subscribe_queued_bounded("", 10_000);
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
-        while let Some(envelope) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&envelope) {
-                yield Ok(Event::default().event("event").data(json));
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                msg = rx.recv() => {
+                    match msg {
+                        Some(envelope) => {
+                            if let Ok(json) = serde_json::to_string(&envelope) {
+                                yield Ok(Event::default().event("event").data(json));
+                            }
+                        }
+                        None => break,
+                    }
+                }
             }
         }
     };

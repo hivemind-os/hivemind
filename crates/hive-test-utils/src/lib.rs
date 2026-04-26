@@ -16,7 +16,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +159,7 @@ impl Default for MockProvider {
 pub struct TestDaemon {
     pub base_url: String,
     pub event_bus: EventBus,
-    shutdown: Arc<Notify>,
+    shutdown: CancellationToken,
     handle: JoinHandle<Result<()>>,
     tempdir: TempDir,
 }
@@ -184,7 +184,7 @@ impl TestDaemon {
     }
 
     pub async fn stop(self) -> Result<()> {
-        self.shutdown.notify_waiters();
+        self.shutdown.cancel();
         self.handle.await.context("failed to join the test daemon task")??;
         Ok(())
     }
@@ -264,7 +264,7 @@ impl TestDaemonBuilder {
         let audit = AuditLogger::new(tempdir.path().join("audit.log"))
             .context("failed to create test audit log")?;
         let event_bus = EventBus::new(32);
-        let shutdown = Arc::new(Notify::new());
+        let shutdown = CancellationToken::new();
 
         // Use the provided model router or build the default one.
         let model_router = match self.model_router {
@@ -318,7 +318,7 @@ impl TestDaemonBuilder {
         let handle = tokio::spawn(async move {
             axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
-                    server_shutdown.notified().await;
+                    server_shutdown.cancelled().await;
                 })
                 .await
                 .map_err(anyhow::Error::from)

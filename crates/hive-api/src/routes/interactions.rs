@@ -348,6 +348,8 @@ pub(crate) async fn api_interactions_stream(
         loop {
             // Wait for any source to signal a change, or the periodic refresh.
             tokio::select! {
+                biased;
+                _ = state.shutdown.cancelled() => break,
                 approval = approval_rx.recv() => {
                     match approval {
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

@@ -7,10 +7,10 @@ use hive_core::{AuditLogger, EventBus, HiveMindConfig};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 /// Helper that boots a test server and returns (base_url, shutdown_notify, tempdir).
-async fn boot_test_server() -> (String, Arc<Notify>, TempDir) {
+async fn boot_test_server() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral port");
     let addr = listener.local_addr().expect("local addr");
@@ -20,7 +20,7 @@ async fn boot_test_server() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -65,7 +65,7 @@ async fn boot_test_server() -> (String, Arc<Notify>, TempDir) {
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -74,7 +74,7 @@ async fn boot_test_server() -> (String, Arc<Notify>, TempDir) {
 }
 
 /// Helper that boots a test server *with* local model service initialised.
-async fn boot_test_server_with_local_models() -> (String, Arc<Notify>, TempDir) {
+async fn boot_test_server_with_local_models() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral port");
     let addr = listener.local_addr().expect("local addr");
@@ -84,7 +84,7 @@ async fn boot_test_server_with_local_models() -> (String, Arc<Notify>, TempDir) 
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -144,7 +144,7 @@ async fn boot_test_server_with_local_models() -> (String, Arc<Notify>, TempDir) 
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -171,7 +171,7 @@ async fn local_models_list_returns_503_when_service_not_initialised() {
         .await
         .expect("request");
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -183,7 +183,7 @@ async fn local_models_hardware_returns_503_when_service_not_initialised() {
         .await
         .expect("request");
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -195,7 +195,7 @@ async fn local_models_search_returns_503_when_service_not_initialised() {
         .await
         .expect("request");
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +214,7 @@ async fn local_models_list_returns_empty_when_no_models_installed() {
     let body: LocalModelSummary = resp.json().await.expect("json");
     assert_eq!(body.installed_count, 0);
     assert!(body.models.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -226,7 +226,7 @@ async fn local_models_get_returns_404_for_unknown_model() {
         .await
         .expect("request");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -239,7 +239,7 @@ async fn local_models_remove_returns_404_for_unknown_model() {
         .await
         .expect("request");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -255,7 +255,7 @@ async fn local_models_hardware_returns_valid_info() {
     assert!(!body.hardware.cpu.name.is_empty());
     assert!(body.hardware.cpu.cores_logical >= 1);
     assert_eq!(body.usage.models_loaded, 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -263,5 +263,5 @@ async fn healthz_still_works_with_local_models_enabled() {
     let (base_url, shutdown, _dir) = boot_test_server_with_local_models().await;
     let resp = authed_client().get(format!("{base_url}/healthz")).send().await.expect("request");
     assert!(resp.status().is_success());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }

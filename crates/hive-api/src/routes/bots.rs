@@ -76,6 +76,7 @@ pub(crate) async fn api_bots_stream(
     let agents = state.chat.list_bots().await;
     let telemetry = state.chat.bot_telemetry().await.ok();
     let mut rx = state.chat.subscribe_bot_events();
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         let snapshot = serde_json::json!({
             "type": "snapshot",
@@ -85,13 +86,19 @@ pub(crate) async fn api_bots_stream(
         yield Ok(Event::default().data(serde_json::to_string(&snapshot).unwrap_or_default()));
 
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(Event::default().data(data));
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            let data = serde_json::to_string(&event).unwrap_or_default();
+                            yield Ok(Event::default().data(data));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             }
         }
     };

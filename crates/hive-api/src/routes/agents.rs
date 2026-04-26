@@ -113,26 +113,32 @@ pub(crate) async fn api_agent_stage_stream(
 
         let mut rx = rx;
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let data = serde_json::to_string(&event).unwrap_or_default();
-                    yield Ok(Event::default().data(data));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::warn!(session_id = %sid, skipped, "agent stage SSE lagged — sending recovery snapshot");
-                    // Re-emit a full snapshot so the frontend catches up on
-                    // any missed events (questions, status changes, etc.).
-                    if let Ok(agents) = state.chat.list_session_agents(&sid).await {
-                        let telemetry = state.chat.session_agent_telemetry(&sid).await.ok();
-                        let pending_questions = state.chat.list_pending_questions_for_session(&sid).await;
-                        let snap = serde_json::json!({
-                            "type": "snapshot",
-                            "agents": agents,
-                            "telemetry": telemetry,
-                            "pending_questions": pending_questions,
-                        });
-                        yield Ok(Event::default().data(serde_json::to_string(&snap).unwrap_or_default()));
+            tokio::select! {
+                biased;
+                _ = state.shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            let data = serde_json::to_string(&event).unwrap_or_default();
+                            yield Ok(Event::default().data(data));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(session_id = %sid, skipped, "agent stage SSE lagged — sending recovery snapshot");
+                            // Re-emit a full snapshot so the frontend catches up on
+                            // any missed events (questions, status changes, etc.).
+                            if let Ok(agents) = state.chat.list_session_agents(&sid).await {
+                                let telemetry = state.chat.session_agent_telemetry(&sid).await.ok();
+                                let pending_questions = state.chat.list_pending_questions_for_session(&sid).await;
+                                let snap = serde_json::json!({
+                                    "type": "snapshot",
+                                    "agents": agents,
+                                    "telemetry": telemetry,
+                                    "pending_questions": pending_questions,
+                                });
+                                yield Ok(Event::default().data(serde_json::to_string(&snap).unwrap_or_default()));
+                            }
+                        }
                     }
                 }
             }

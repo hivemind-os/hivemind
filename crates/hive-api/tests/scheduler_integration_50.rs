@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 
 /// Boot a test server backed by an in-memory scheduler. Returns the base URL,
 /// a shutdown notifier, the TempDir (must stay alive), and the SchedulerService.
-async fn boot() -> (String, Arc<Notify>, TempDir, Arc<SchedulerService>) {
+async fn boot() -> (String, CancellationToken, TempDir, Arc<SchedulerService>) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -29,7 +29,7 @@ async fn boot() -> (String, Arc<Notify>, TempDir, Arc<SchedulerService>) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -76,7 +76,7 @@ async fn boot() -> (String, Arc<Notify>, TempDir, Arc<SchedulerService>) {
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -194,7 +194,7 @@ async fn t01_create_returns_201_with_id() {
     let task = create(&c, &base, emit_task("t01")).await;
     assert!(task["id"].as_str().unwrap().starts_with("task-"));
     assert_eq!(task["status"], "pending");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -206,7 +206,7 @@ async fn t02_get_returns_created_task() {
     let (status, fetched) = get_task(&c, &base, id).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(fetched["name"], "t02");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -215,7 +215,7 @@ async fn t03_get_nonexistent_returns_404() {
     let c = authed_client();
     let (status, _) = get_task(&c, &base, "no-such-task").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -224,7 +224,7 @@ async fn t04_list_empty_returns_empty_array() {
     let c = authed_client();
     let tasks = list(&c, &base).await;
     assert!(tasks.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -236,7 +236,7 @@ async fn t05_list_returns_all_created() {
     }
     let tasks = list(&c, &base).await;
     assert_eq!(tasks.len(), 5);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -249,7 +249,7 @@ async fn t06_delete_removes_task() {
     assert_eq!(r.status(), StatusCode::NO_CONTENT);
     let (status, _) = get_task(&c, &base, id).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -258,7 +258,7 @@ async fn t07_delete_nonexistent_returns_404() {
     let c = authed_client();
     let r = c.delete(format!("{base}/api/v1/scheduler/tasks/nope")).send().await.unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -271,7 +271,7 @@ async fn t08_cancel_sets_cancelled() {
     assert_eq!(r.status(), StatusCode::OK);
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["status"], "cancelled");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -280,7 +280,7 @@ async fn t09_cancel_nonexistent_returns_404() {
     let c = authed_client();
     let r = c.post(format!("{base}/api/v1/scheduler/tasks/nope/cancel")).send().await.unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -294,7 +294,7 @@ async fn t10_cancel_already_cancelled_is_idempotent() {
     assert_eq!(r.status(), StatusCode::OK);
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["status"], "cancelled");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -307,7 +307,7 @@ async fn t11_once_schedule_has_immediate_next_run() {
     let c = authed_client();
     let task = create(&c, &base, emit_task("t11")).await;
     assert!(task["next_run_ms"].as_u64().is_some());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -320,7 +320,7 @@ async fn t12_scheduled_has_future_next_run() {
     let next = task["next_run_ms"].as_u64().unwrap();
     let created = task["created_at_ms"].as_u64().unwrap();
     assert!(next >= created + 3_500_000, "next_run_ms should be in the future");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -330,7 +330,7 @@ async fn t13_cron_schedule_stores_expression() {
     let task = create(&c, &base, cron_task("t13", "0 */2 * * * * *")).await;
     assert_eq!(task["schedule"]["type"], "cron");
     assert_eq!(task["schedule"]["expression"], "0 */2 * * * * *");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -341,7 +341,7 @@ async fn t14_cron_schedule_stores_expression() {
     assert_eq!(task["schedule"]["type"], "cron");
     assert_eq!(task["schedule"]["expression"], "0 0 * * * *");
     assert!(task["next_run_ms"].as_u64().is_some());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -360,7 +360,7 @@ async fn t15_action_types_round_trip() {
     let ev = create(&c, &base, emit_task("t15_ev")).await;
     assert_eq!(ev["action"]["type"], "emit_event");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -382,7 +382,7 @@ async fn t16_update_name() {
     assert_eq!(r.status(), StatusCode::OK);
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["name"], "t16_updated");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -400,7 +400,7 @@ async fn t17_update_description() {
     assert_eq!(r.status(), StatusCode::OK);
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["description"], "new desc");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -419,7 +419,7 @@ async fn t18_update_schedule() {
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["schedule"]["type"], "cron");
     assert_eq!(body["schedule"]["expression"], "0 * * * * * *");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -439,7 +439,7 @@ async fn t19_update_action() {
     assert_eq!(r.status(), StatusCode::OK);
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["action"]["type"], "http_webhook");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -453,7 +453,7 @@ async fn t20_update_nonexistent_returns_404() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -467,7 +467,7 @@ async fn t21_owner_session_id_persisted() {
     let task = create(&c, &base, owned_task("t21", "session-abc", None)).await;
     assert_eq!(task["owner_session_id"], "session-abc");
     assert!(task["owner_agent_id"].is_null());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -477,7 +477,7 @@ async fn t22_owner_agent_id_persisted() {
     let task = create(&c, &base, owned_task("t22", "s1", Some("agent-x"))).await;
     assert_eq!(task["owner_session_id"], "s1");
     assert_eq!(task["owner_agent_id"], "agent-x");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -493,7 +493,7 @@ async fn t23_filter_by_session_id() {
     for t in &filtered {
         assert_eq!(t["owner_session_id"], "session-1");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -509,7 +509,7 @@ async fn t24_filter_by_agent_id() {
     for t in &filtered {
         assert_eq!(t["owner_agent_id"], "agent-a");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -523,7 +523,7 @@ async fn t25_filter_by_session_and_agent() {
     let filtered = list_filtered(&c, &base, "session_id=s1&agent_id=agent-x").await;
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0]["name"], "t25_a");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -539,7 +539,7 @@ async fn t26_runs_empty_for_new_task() {
     let (status, runs) = get_runs(&c, &base, id).await;
     assert_eq!(status, StatusCode::OK);
     assert!(runs.as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -548,7 +548,7 @@ async fn t27_runs_endpoint_returns_404_for_missing_task() {
     let c = authed_client();
     let (status, _) = get_runs(&c, &base, "missing-id").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -839,7 +839,7 @@ async fn t36_agent_tool_creates_once_task() {
     assert!(output["id"].as_str().unwrap().starts_with("task-"));
     assert_eq!(output["owner_session_id"], "session-A");
     assert_eq!(output["status"], "pending");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -875,7 +875,7 @@ async fn t37_agent_tool_lists_only_own_session_tasks() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0]["name"], "my-task");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -902,7 +902,7 @@ async fn t38_agent_tool_cancels_task() {
             .unwrap();
     assert_eq!(cancelled.output["status"], "cancelled");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -937,7 +937,7 @@ async fn t39_agent_tool_updates_task() {
     assert_eq!(updated.output["name"], "updated-name");
     assert_eq!(updated.output["description"], "new description");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -978,7 +978,7 @@ async fn t40_agent_tool_deletes_and_gets_runs() {
             .unwrap();
     assert_eq!(del_result.output["deleted"], task_id);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -1224,7 +1224,7 @@ async fn t45_agent_creates_cron_webhook_task() {
     assert_eq!(task.name, "healthcheck");
     assert_eq!(task.description, "Periodic health check");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ============================================================================
@@ -1253,7 +1253,7 @@ async fn t46_mixed_schedule_types_coexist() {
     assert!(types.contains(&"once"));
     assert!(types.contains(&"scheduled"));
     assert!(types.contains(&"cron"));
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1278,7 +1278,7 @@ async fn t47_concurrent_create_and_cancel() {
     let pending: Vec<_> = tasks.iter().filter(|t| t["status"] == "pending").collect();
     assert_eq!(cancelled.len(), 5);
     assert_eq!(pending.len(), 5);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1306,7 +1306,7 @@ async fn t48_multi_owner_isolation() {
     let a1 = list_filtered(&c, &base, "agent_id=agent-1").await;
     assert_eq!(a1.len(), 3);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1479,7 +1479,7 @@ async fn t51_create_invoke_agent_task_via_api() {
     assert_eq!(task["action"]["task"], "Summarize yesterday's activity");
     assert_eq!(task["action"]["friendly_name"], "daily-summary");
     assert_eq!(task["action"]["timeout_secs"], 120);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1507,7 +1507,7 @@ async fn t52_create_call_tool_task_via_api() {
     assert_eq!(task["action"]["type"], "call_tool");
     assert_eq!(task["action"]["tool_id"], "comm.send_external_message");
     assert_eq!(task["action"]["arguments"]["to"], "#team-channel");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1534,7 +1534,7 @@ async fn t53_create_composite_action_task_via_api() {
     assert_eq!(task["action"]["type"], "composite_action");
     assert_eq!(task["action"]["actions"].as_array().unwrap().len(), 2);
     assert_eq!(task["action"]["stop_on_failure"], true);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // -- Round-trip via get --
@@ -1564,7 +1564,7 @@ async fn t54_invoke_agent_round_trips_through_get() {
     assert_eq!(fetched["action"]["task"], "Review PRs");
     // Optional fields should be null/absent
     assert!(fetched["action"]["friendly_name"].is_null());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // -- Execution: InvokeAgent without runner → graceful failure --
