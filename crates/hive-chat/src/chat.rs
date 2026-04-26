@@ -11198,25 +11198,32 @@ mod tests {
             .await
             .expect("create session");
 
-        // First message starts processing (should_spawn = true, processing set to true).
+        // Manually set processing = true so enqueue_message won't spawn a
+        // real background worker (which would race with us in the test).
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
+        }
+
+        // First message while processing → queued but no spawn.
         let resp1 = service
             .enqueue_message(&session.id, make_request("first message"))
             .await
             .expect("enqueue first");
         assert!(
             matches!(resp1, SendMessageResponse::Queued { .. }),
-            "first message should be queued and spawn worker"
+            "first message should be queued"
         );
 
-        // Verify session is now processing and signal is false.
+        // Verify session is processing and preempt signal is set from first enqueue.
+        // (because processing was already true, first enqueue sets the signal)
         {
-            let sessions = service.sessions.read().await;
-            let record = sessions.get(&session.id).expect("session record");
-            assert!(record.processing, "session should be processing after first enqueue");
-            assert!(
-                !record.preempt_signal.load(std::sync::atomic::Ordering::Acquire),
-                "signal should be false before second enqueue"
-            );
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            assert!(record.processing, "session should still be processing");
+            // Reset signal for the actual test of second enqueue.
+            record.preempt_signal.store(false, std::sync::atomic::Ordering::Release);
         }
 
         // Second message arrives while processing → should set signal.
@@ -11283,18 +11290,14 @@ mod tests {
             .await
             .expect("create session");
 
-        // First message starts processing.
-        service
-            .enqueue_message(&session.id, make_request("first message"))
-            .await
-            .expect("enqueue first");
-
-        // Simulate the agent asking a question by creating a pending
-        // interaction on the gate and inserting a question message.
+        // Simulate: the agent is currently processing a turn and has asked
+        // a question. We set up state directly to avoid spawning a real
+        // background worker (which would race with our assertions).
         let request_id = "question-test-123".to_string();
         {
             let mut sessions = service.sessions.write().await;
             let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
             let _rx = record.interaction_gate.create_request(
                 request_id.clone(),
                 InteractionKind::Question {
