@@ -2717,6 +2717,7 @@ mod tests {
         ModelsConfig, ProviderAuthConfig, ProviderKindConfig, ProviderOptionsConfig,
     };
     use hive_tools::{ToolDefinition, ToolResult};
+    use hive_workflow::ExecutionMode;
     use serde::de::DeserializeOwned;
     use serde_json::json;
     use tempfile::tempdir_in;

@@ -12,7 +12,7 @@
 
 use hive_code_executor::{
     BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions,
-    ExecutorConfig, Language, SubprocessExecutor, ToolCallHandler,
+    ExecutorConfig, Language, ToolCallHandler,
     ToolCallRequest, ToolCallResponse, WasmExecutor,
 };
 use serde_json::json;
@@ -28,16 +28,6 @@ fn default_config() -> ExecutorConfig {
         memory_limit_mb: 256,
         working_directory: None,
         allow_network: false,
-    }
-}
-
-async fn make_subprocess() -> Option<Arc<dyn CodeExecutor>> {
-    match SubprocessExecutor::new(default_config()).await {
-        Ok(exec) => Some(Arc::new(exec)),
-        Err(e) => {
-            eprintln!("Skipping subprocess tests: {e}");
-            None
-        }
     }
 }
 
@@ -62,9 +52,6 @@ async fn make_wasm() -> Option<Arc<dyn CodeExecutor>> {
 /// Get all available executor backends for testing.
 async fn all_executors() -> Vec<(&'static str, Arc<dyn CodeExecutor>)> {
     let mut executors = Vec::new();
-    if let Some(exec) = make_subprocess().await {
-        executors.push(("subprocess", exec));
-    }
     if let Some(exec) = make_wasm().await {
         executors.push(("wasm", exec));
     }
@@ -647,10 +634,10 @@ async fn e2e_registry_session_reuse() {
         executor: default_config(),
         idle_timeout: std::time::Duration::from_secs(60),
     };
-    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None).unwrap();
 
     // First access creates a new session
-    let session1 = registry.get_or_create("conv-1").await.unwrap();
+    let session1 = registry.get_or_create("conv-1", None).await.unwrap();
     assert_eq!(registry.active_count(), 1);
 
     // Set state in the session
@@ -662,7 +649,7 @@ async fn e2e_registry_session_reuse() {
     assert!(result.stdout.contains("x=42"), "expected x=42, got: {}", result.stdout);
 
     // Second access to same conversation reuses the session
-    let session1b = registry.get_or_create("conv-1").await.unwrap();
+    let session1b = registry.get_or_create("conv-1", None).await.unwrap();
     assert_eq!(registry.active_count(), 1); // still 1
 
     // State persists across get_or_create calls
@@ -678,7 +665,7 @@ async fn e2e_registry_session_reuse() {
     );
 
     // Different conversation creates a new session
-    let _session2 = registry.get_or_create("conv-2").await.unwrap();
+    let _session2 = registry.get_or_create("conv-2", None).await.unwrap();
     assert_eq!(registry.active_count(), 2);
 
     // Clean up
@@ -693,15 +680,15 @@ async fn e2e_registry_lru_eviction() {
         executor: default_config(),
         idle_timeout: std::time::Duration::from_secs(60),
     };
-    let registry = hive_code_executor::SessionRegistry::new_auto(config, 2, None, None);
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 2, None, None).unwrap();
 
     // Fill to capacity
-    let _s1 = registry.get_or_create("conv-a").await.unwrap();
-    let _s2 = registry.get_or_create("conv-b").await.unwrap();
+    let _s1 = registry.get_or_create("conv-a", None).await.unwrap();
+    let _s2 = registry.get_or_create("conv-b", None).await.unwrap();
     assert_eq!(registry.active_count(), 2);
 
     // Creating a third should evict the LRU (conv-a, since conv-b was accessed last)
-    let _s3 = registry.get_or_create("conv-c").await.unwrap();
+    let _s3 = registry.get_or_create("conv-c", None).await.unwrap();
     assert_eq!(registry.active_count(), 2); // still at max
 
     // conv-a should have been evicted
@@ -719,9 +706,9 @@ async fn e2e_registry_reset_session() {
         executor: default_config(),
         idle_timeout: std::time::Duration::from_secs(60),
     };
-    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None).unwrap();
 
-    let session = registry.get_or_create("conv-reset").await.unwrap();
+    let session = registry.get_or_create("conv-reset", None).await.unwrap();
     session
         .executor()
         .execute("my_var = 'hello'", Language::Python)
@@ -732,7 +719,7 @@ async fn e2e_registry_reset_session() {
     registry.reset("conv-reset").await.unwrap();
 
     // State should be cleared
-    let session = registry.get_or_create("conv-reset").await.unwrap();
+    let session = registry.get_or_create("conv-reset", None).await.unwrap();
     let result = session
         .executor()
         .execute("print(my_var)", Language::Python)
@@ -755,9 +742,9 @@ async fn e2e_registry_remove_session() {
         executor: default_config(),
         idle_timeout: std::time::Duration::from_secs(60),
     };
-    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None);
+    let registry = hive_code_executor::SessionRegistry::new_auto(config, 10, None, None).unwrap();
 
-    let _session = registry.get_or_create("conv-remove").await.unwrap();
+    let _session = registry.get_or_create("conv-remove", None).await.unwrap();
     assert_eq!(registry.active_count(), 1);
 
     registry.remove("conv-remove").await.unwrap();
@@ -765,7 +752,7 @@ async fn e2e_registry_remove_session() {
     assert!(registry.get("conv-remove").is_none());
 
     // Re-creating after remove gives a fresh session
-    let session = registry.get_or_create("conv-remove").await.unwrap();
+    let session = registry.get_or_create("conv-remove", None).await.unwrap();
     let result = session
         .executor()
         .execute("print('fresh')", Language::Python)

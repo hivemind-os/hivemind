@@ -147,7 +147,12 @@ impl ModelProvider for ScriptProvider {
             finish_reason: Some(FinishReason::Stop),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
-        };// ── MockTool ────────────────────────────────────────────────────────────────
+        };
+        Ok(Box::pin(tokio_stream::once(Ok(chunk))))
+    }
+}
+
+// ── MockTool ────────────────────────────────────────────────────────────────
 
 /// Configurable mock [`Tool`] with a builder API.
 struct MockTool {
@@ -300,6 +305,8 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
             session_messaged: Arc::new(AtomicBool::new(false)),
         },
         tool_limits: hive_contracts::ToolLimitsConfig::default(),
+        code_act_config: hive_contracts::CodeActConfig::default(),
+        session_registry: None,
         preempt_signal: None,
         cancellation_token: None,
     }
@@ -2006,11 +2013,13 @@ async fn t57_plan_then_execute_resume_from_step() {
         },
         turn: 0,
         tool_calls: vec![],
+        assistant_content: None,
     });
     journal.record(hive_loop::JournalEntry {
         phase: JournalPhase::StepComplete { step_index: 0, result: "did A".to_string() },
         turn: 1,
         tool_calls: vec![],
+        assistant_content: None,
     });
 
     // Only need responses for steps B and C (step A is already done)
