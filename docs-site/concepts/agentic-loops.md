@@ -41,6 +41,26 @@ Execute a predefined sequence of steps in order. Each step completes before the 
 
 Create a full plan first, then execute each step methodically. The agent generates a numbered list of steps, then works through them one by one, each with its own tool-call budget. Better for complex, multi-step tasks where you want structure.
 
+### `code_act`
+
+Instead of structured tool calls, the agent writes **Python code** to take actions. The model generates fenced `python` code blocks that execute in a sandboxed WebAssembly runtime. Tools are exposed as pre-loaded Python functions (e.g., `http_request(url, method)`) that the agent calls directly in code, and results come back as printed output.
+
+This strategy is powerful for tasks that benefit from real programming — data transformation, file manipulation, multi-step calculations, or anything where composing tool calls in code is more natural than chaining individual tool invocations.
+
+**How it works:**
+
+1. **Think** — The model reasons about the task and writes Python code in a fenced block
+2. **Execute** — The code runs in a sandboxed WASM Python runtime with access to bridged tool functions
+3. **Observe** — Stdout/stderr from execution is fed back as an observation
+4. **Repeat** — The model sees the output and writes more code or responds with a final answer
+
+Tools are classified into three categories:
+- **Bridged** — Available as Python functions (HTTP, MCP tools, etc.)
+- **Native** — Used as structured tool calls alongside code (e.g., `ask_user`, `delegate_task`)
+- **Excluded** — Handled natively by Python (file I/O, regex, math, datetime)
+
+State persists across code blocks within a conversation, so the agent can build up results incrementally.
+
 ## When to Use Which
 
 | Strategy | Best For | Example |
@@ -48,9 +68,10 @@ Create a full plan first, then execute each step methodically. The agent generat
 | **`react`** | Quick tasks, Q&A, tool use | "What does this function do?" |
 | **`sequential`** | Linear, known-steps tasks | "Run these three checks in order" |
 | **`plan_then_execute`** | Multi-step projects | "Refactor this module into three services" |
+| **`code_act`** | Data work, scripting, file manipulation | "Parse this CSV and generate a summary report" |
 
 ::: tip Start with react
-`react` is the default for a reason — it handles 90% of tasks well. Only switch strategies when you have a specific reason to. `plan_then_execute` shines for big, complex projects; `sequential` for well-defined linear workflows.
+`react` is the default for a reason — it handles 90% of tasks well. Only switch strategies when you have a specific reason to. `plan_then_execute` shines for big, complex projects; `sequential` for well-defined linear workflows; `code_act` for tasks where writing code is more natural than calling tools one at a time.
 :::
 
 ## Context Compaction
