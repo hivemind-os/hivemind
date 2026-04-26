@@ -34,12 +34,17 @@ pub fn build_code_act_instructions(
         CODE_ACT_HEADER_ONESHOT.to_string()
     });
 
-    // Tell the LLM its working directory
-    if let Some(ws) = workspace_path {
-        parts.push(format!(
-            "\n## Working Directory\n\nYour code executes in: `{ws}`\n\
-             All relative file paths resolve here. Save files here unless the user specifies otherwise."
-        ));
+    // Tell the LLM its working directory (always /workspace in WASM)
+    if workspace_path.is_some() {
+        parts.push(
+            "\n## Working Directory\n\n\
+             Your code executes in: `/workspace`\n\
+             All relative file paths resolve here. Use Python's built-in file I/O \
+             (`open()`, `pathlib.Path`, `os.listdir()`, `shutil`, etc.) to read and write files \
+             directly — no tool calls needed for file operations.\n\
+             You can only access files within `/workspace`. Paths outside this directory are not accessible."
+            .to_string(),
+        );
     }
 
     // List bridged tool functions
@@ -228,19 +233,11 @@ When you have finished the task:
 const NETWORK_ACCESS: &str = r#"
 ## Network Access
 
-Your Python environment has **full, unrestricted network access**. You **can** fetch data from the internet — do NOT say you cannot. Use:
-- `urllib.request.urlopen(url).read()` to fetch any URL
-- `http.client` for HTTP connections
-- `socket` for raw sockets
+Network access is available **only through bridged tool functions**, not Python's networking libraries. Use:
+- `http_request(url, method, ...)` to fetch data from the internet
+- Other bridged tools for service-specific operations (messaging, calendar, etc.)
 
-Example — fetch a web page:
-```python
-import urllib.request
-data = urllib.request.urlopen("https://wttr.in/Seattle?format=3").read().decode()
-print(data)
-```
-
-When the user asks you to get data from the internet, write and run the code immediately.
+Python's `urllib`, `http.client`, and `socket` modules are **not available** in this environment. When the user asks you to fetch data from the internet, use the `http_request()` function.
 "#;
 
 #[cfg(test)]
@@ -321,8 +318,9 @@ mod tests {
     #[test]
     fn network_access_included_when_enabled() {
         let prompt = build_code_act_instructions(&[], &[], true, true, None);
-        assert!(prompt.contains("full, unrestricted network access"));
-        assert!(prompt.contains("urllib.request"));
+        assert!(prompt.contains("Network Access"));
+        assert!(prompt.contains("http_request"));
+        assert!(prompt.contains("not available"));
     }
 
     #[test]
@@ -335,8 +333,9 @@ mod tests {
     #[test]
     fn workspace_path_included_in_prompt() {
         let prompt = build_code_act_instructions(&[], &[], true, false, Some("/home/user/project"));
-        assert!(prompt.contains("/home/user/project"));
+        assert!(prompt.contains("/workspace"));
         assert!(prompt.contains("Working Directory"));
+        assert!(prompt.contains("only access files within"));
     }
 
     #[test]

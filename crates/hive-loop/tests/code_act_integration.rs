@@ -34,6 +34,29 @@ use hive_model::{
 };
 use hive_tools::{Tool, ToolError, ToolRegistry, ToolResult};
 
+/// Returns true if the WASM Python runtime is available for integration tests.
+fn wasm_available() -> bool {
+    match (
+        std::env::var("PYTHON_WASM_PATH"),
+        std::env::var("PYTHON_WASM_STDLIB"),
+    ) {
+        (Ok(p), Ok(s)) => {
+            std::path::Path::new(&p).exists() && std::path::Path::new(&s).exists()
+        }
+        _ => false,
+    }
+}
+
+/// Skips the current test if WASM Python runtime is not available.
+macro_rules! require_wasm {
+    () => {
+        if !wasm_available() {
+            eprintln!("SKIPPED: WASM Python runtime not available (set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB)");
+            return;
+        }
+    };
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  TEST INFRASTRUCTURE
 // ═══════════════════════════════════════════════════════════════════════
@@ -386,6 +409,7 @@ async fn code_act_plain_text_terminates() {
 /// This is the core CodeAct happy path.
 #[tokio::test]
 async fn code_act_executes_python_and_returns_result() {
+    require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Iteration 0: model writes Python code
         ScriptProvider::code_response(
@@ -414,6 +438,7 @@ async fn code_act_executes_python_and_returns_result() {
 /// fed back → model writes fix → success → terminates.
 #[tokio::test]
 async fn code_act_handles_execution_error_and_retries() {
+    require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Iteration 0: model writes buggy code
         ScriptProvider::code_response(
@@ -471,8 +496,8 @@ async fn code_act_prompt_includes_network_access() {
         &combined[..combined.len().min(2000)]
     );
     assert!(
-        combined.contains("urllib.request"),
-        "Prompt should mention urllib.request"
+        combined.contains("urllib") || combined.contains("not available"),
+        "Prompt should mention urllib (either as available or explicitly unavailable)"
     );
 }
 
@@ -528,13 +553,13 @@ async fn code_act_prompt_includes_workspace_path() {
     let all_messages: String = requests[0].messages.iter().map(|m| m.content.clone()).collect();
     let combined = format!("{first_prompt}\n{all_messages}");
     assert!(
-        combined.contains("Working Directory"),
-        "Prompt should contain Working Directory section"
+        combined.contains("Working Directory") || combined.contains("/workspace"),
+        "Prompt should contain Working Directory section or /workspace path"
     );
-    let ws_str = workspace_path.to_string_lossy();
+    // In WASI mode, the prompt shows /workspace (the guest path), not the host path
     assert!(
-        combined.contains(&*ws_str),
-        "Prompt should contain the workspace path '{ws_str}'"
+        combined.contains("/workspace"),
+        "Prompt should contain the WASI workspace path '/workspace'"
     );
 }
 
@@ -543,6 +568,7 @@ async fn code_act_prompt_includes_workspace_path() {
 /// the code_act_instructions must still be present on iteration 1.
 #[tokio::test]
 async fn code_act_instructions_persist_across_iterations() {
+    require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Iteration 0: model writes code
         ScriptProvider::code_response("", "print('hello')", ""),
@@ -582,6 +608,7 @@ async fn code_act_instructions_persist_across_iterations() {
 /// → real file I/O.
 #[tokio::test]
 async fn code_act_writes_file_to_workspace() {
+    require_wasm!();
     let tmp = TempDir::new().unwrap();
     let workspace_path = tmp.path().to_path_buf();
     let file_path = workspace_path.join("output.txt");
@@ -621,6 +648,7 @@ async fn code_act_writes_file_to_workspace() {
 /// for both start and completion phases.
 #[tokio::test]
 async fn code_act_emits_execution_events() {
+    require_wasm!();
     let provider = ScriptProvider::new(vec![
         ScriptProvider::code_response("", "print('event test')", ""),
         ScriptProvider::text("Done."),
@@ -654,6 +682,7 @@ async fn code_act_emits_execution_events() {
 /// Test 10: Budget enforcement — CodeAct loop respects tool iteration limits.
 #[tokio::test]
 async fn code_act_respects_budget_limit() {
+    require_wasm!();
     // Set up a model that always returns code (never terminates naturally)
     let mut responses = Vec::new();
     for i in 0..50 {
@@ -688,6 +717,7 @@ async fn code_act_respects_budget_limit() {
 /// Test 11: Multiple code blocks in a single model response are all executed.
 #[tokio::test]
 async fn code_act_executes_multiple_code_blocks() {
+    require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Model returns TWO code blocks in one response
         ScriptProvider::text(

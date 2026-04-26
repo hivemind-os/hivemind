@@ -2188,7 +2188,7 @@ impl LoopStrategy for CodeActStrategy {
             use crate::code_extraction::extract_python_blocks;
             use hive_code_executor::{
                 BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions,
-                ExecutorConfig, Language, SubprocessExecutor, WasmExecutor,
+                ExecutorConfig, Language, WasmExecutor,
             };
 
             // ── Route the model ──────────────────────────────────────
@@ -2234,6 +2234,9 @@ impl LoopStrategy for CodeActStrategy {
             for def in &all_tools {
                 let mode = hive_code_executor::tool_bridge::default_tool_mode(&def.id);
                 match mode {
+                    CodeActToolMode::Excluded => {
+                        // Python handles these natively in WASM — skip entirely
+                    }
                     CodeActToolMode::Native => {
                         native_tool_ids.push(def.id.clone());
                         native_tool_defs.push(def.clone());
@@ -2274,69 +2277,13 @@ impl LoopStrategy for CodeActStrategy {
                 "CodeAct: prompt supplement built"
             );
 
-            // ── Initialize the code executor ─────────────────────────
-            // Build executor config from the CodeActConfig on the context.
+            // ── Prepare lazy code executor ─────────────────────────
+            // The executor is initialized on-demand when the first code block
+            // is encountered, not eagerly. This allows the CodeAct loop to
+            // handle plain-text-only responses without requiring WASM.
             let session_id = context.conversation.session_id.clone();
             let using_registry = context.session_registry.is_some();
-
-            let executor: Arc<dyn CodeExecutor> = if let Some(ref registry) = context.session_registry {
-                // Session registry manages lifecycle: reuse or create session
-                let session = registry
-                    .get_or_create(&session_id, workspace_str.as_deref())
-                    .await
-                    .map_err(|e| simple_model_error(format!("failed to get code session: {e}")))?;
-                session.executor_arc()
-            } else {
-                // Fallback: create a one-shot executor (no session reuse)
-                let exec_config = ExecutorConfig {
-                    execution_timeout_secs: ca_cfg.execution_timeout_secs,
-                    max_output_bytes: ca_cfg.max_output_bytes,
-                    memory_limit_mb: 256,
-                    working_directory: workspace_str.clone(),
-                    allow_network: ca_cfg.allow_network,
-                };
-                match (
-                    std::env::var("PYTHON_WASM_PATH"),
-                    std::env::var("PYTHON_WASM_STDLIB"),
-                ) {
-                    (Ok(wasm_path), Ok(stdlib_path)) => {
-                        let wasm_path = std::path::PathBuf::from(&wasm_path);
-                        let stdlib_path = std::path::PathBuf::from(&stdlib_path);
-                        if wasm_path.exists() && stdlib_path.exists() {
-                            match WasmExecutor::new(exec_config.clone(), &wasm_path, &stdlib_path)
-                                .await
-                            {
-                                Ok(exec) => {
-                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
-                                    Arc::new(exec)
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "WASM executor failed, falling back to subprocess"
-                                    );
-                                    Arc::new(SubprocessExecutor::new(exec_config).await.map_err(
-                                        |e| {
-                                            simple_model_error(format!(
-                                                "failed to start code executor: {e}"
-                                            ))
-                                        },
-                                    )?)
-                                }
-                            }
-                        } else {
-                            Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
-                                simple_model_error(format!("failed to start code executor: {e}"))
-                            })?)
-                        }
-                    }
-                    _ => {
-                        Arc::new(SubprocessExecutor::new(exec_config).await.map_err(|e| {
-                            simple_model_error(format!("failed to start code executor: {e}"))
-                        })?)
-                    }
-                }
-            };
+            let mut executor: Option<Arc<dyn CodeExecutor>> = None;
 
             // ── Build tool call handler for Python→host tool bridge ───
             let tool_handler = BridgedToolCallHandler {
@@ -2349,23 +2296,9 @@ impl LoopStrategy for CodeActStrategy {
                 tool_call_handler: Some(&tool_handler),
             };
 
-            // Inject the tool bridge code into the Python session
+            // Bridge code is generated once but injected lazily when executor is first created
             let bridge_code =
                 hive_code_executor::tool_bridge::generate_bridge_code(&bridged_tools);
-            if !bridge_code.trim().is_empty() {
-                let init_result = executor
-                    .execute_with_tools(&bridge_code, Language::Python, &exec_options)
-                    .await
-                    .map_err(|e| {
-                        simple_model_error(format!("failed to initialize tool bridge: {e}"))
-                    })?;
-                if init_result.is_error {
-                    tracing::warn!(
-                        stderr = %init_result.stderr,
-                        "tool bridge initialization had errors"
-                    );
-                }
-            }
 
             // ── Main loop ────────────────────────────────────────────
             let mut prompt = context.conversation.prompt.clone();
@@ -2578,9 +2511,10 @@ impl LoopStrategy for CodeActStrategy {
                 // If no code blocks and no native tool calls → done
                 if code_blocks.is_empty() && native_calls.is_empty() {
                     // Only shutdown if we created a one-shot executor (no registry).
-                    // When using the session registry, it manages session lifecycle.
                     if !using_registry {
-                        let _ = executor.shutdown().await;
+                        if let Some(ref exec) = executor {
+                            let _ = exec.shutdown().await;
+                        }
                     }
                     if let Some(ref tx) = event_tx {
                         let _ = tx.try_send(LoopEvent::Done {
@@ -2615,7 +2549,9 @@ impl LoopStrategy for CodeActStrategy {
                     }
                     crate::tool_budget::BudgetDecision::HardStop { ceiling } => {
                         if !using_registry {
-                            let _ = executor.shutdown().await;
+                            if let Some(ref exec) = executor {
+                                let _ = exec.shutdown().await;
+                            }
                         }
                         return Err(LoopError::HardCeilingReached { ceiling });
                     }
@@ -2623,27 +2559,96 @@ impl LoopStrategy for CodeActStrategy {
 
                 let mut observations = Vec::new();
 
-                // ── Executor liveness check + recovery ───────────────
-                if !executor.is_alive().await {
-                    tracing::warn!("CodeAct executor is dead — attempting recovery");
-                    if let Err(e) = executor.reset().await {
-                        let err_msg = format!("[Code Executor Recovery Failed]\nExecutor died and could not be restarted: {e}");
-                        observations.push(err_msg);
+                // ── Lazy executor init on first code block ───────────
+                if !code_blocks.is_empty() && executor.is_none() {
+                    let exec = if let Some(ref registry) = context.session_registry {
+                        let session = registry
+                            .get_or_create(&session_id, workspace_str.as_deref())
+                            .await
+                            .map_err(|e| simple_model_error(format!("failed to get code session: {e}")))?;
+                        session.executor_arc()
                     } else {
-                        // Re-inject bridge code after recovery
-                        if !bridge_code.trim().is_empty() {
-                            match executor
-                                .execute_with_tools(&bridge_code, Language::Python, &exec_options)
-                                .await
-                            {
-                                Ok(r) if r.is_error => {
-                                    tracing::warn!(stderr = %r.stderr, "bridge re-init had errors after recovery");
+                        let exec_config = ExecutorConfig {
+                            execution_timeout_secs: ca_cfg.execution_timeout_secs,
+                            max_output_bytes: ca_cfg.max_output_bytes,
+                            memory_limit_mb: 256,
+                            working_directory: workspace_str.clone(),
+                            allow_network: ca_cfg.allow_network,
+                        };
+                        match (
+                            std::env::var("PYTHON_WASM_PATH"),
+                            std::env::var("PYTHON_WASM_STDLIB"),
+                        ) {
+                            (Ok(wasm_path), Ok(stdlib_path)) => {
+                                let wasm_path = std::path::PathBuf::from(&wasm_path);
+                                let stdlib_path = std::path::PathBuf::from(&stdlib_path);
+                                if wasm_path.exists() && stdlib_path.exists() {
+                                    let e = WasmExecutor::new(exec_config, &wasm_path, &stdlib_path)
+                                        .await
+                                        .map_err(|e| {
+                                            simple_model_error(format!("failed to start WASM executor: {e}"))
+                                        })?;
+                                    tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
+                                    Arc::new(e) as Arc<dyn CodeExecutor>
+                                } else {
+                                    return Err(simple_model_error(
+                                        "CodeAct requires the WASM Python runtime (python.wasm). \
+                                         PYTHON_WASM_PATH or PYTHON_WASM_STDLIB points to missing files.".into()
+                                    ));
                                 }
-                                Err(e) => {
-                                    tracing::error!(error = %e, "bridge re-init failed after recovery");
-                                }
-                                _ => {
-                                    tracing::info!("CodeAct executor recovered and bridge re-initialized");
+                            }
+                            _ => {
+                                return Err(simple_model_error(
+                                    "CodeAct requires the WASM Python runtime. \
+                                     Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables \
+                                     or configure a session registry.".into()
+                                ));
+                            }
+                        }
+                    };
+
+                    // Inject tool bridge code into the fresh executor
+                    if !bridge_code.trim().is_empty() {
+                        let init_result = exec
+                            .execute_with_tools(&bridge_code, Language::Python, &exec_options)
+                            .await
+                            .map_err(|e| {
+                                simple_model_error(format!("failed to initialize tool bridge: {e}"))
+                            })?;
+                        if init_result.is_error {
+                            tracing::warn!(
+                                stderr = %init_result.stderr,
+                                "tool bridge initialization had errors"
+                            );
+                        }
+                    }
+
+                    executor = Some(exec);
+                }
+
+                // ── Executor liveness check + recovery ───────────────
+                if let Some(ref exec) = executor {
+                    if !exec.is_alive().await {
+                        tracing::warn!("CodeAct executor is dead — attempting recovery");
+                        if let Err(e) = exec.reset().await {
+                            let err_msg = format!("[Code Executor Recovery Failed]\nExecutor died and could not be restarted: {e}");
+                            observations.push(err_msg);
+                        } else {
+                            // Re-inject bridge code after recovery
+                            if !bridge_code.trim().is_empty() {
+                                match exec
+                                    .execute_with_tools(&bridge_code, Language::Python, &exec_options)
+                                    .await
+                                {
+                                    Ok(r) if r.is_error => {
+                                        tracing::warn!(stderr = %r.stderr, "bridge re-init had errors after recovery");
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "bridge re-init failed after recovery");
+                                    }
+                                    _ => {
+                                        tracing::info!("CodeAct executor recovered and bridge re-initialized");
+                                    }
                                 }
                             }
                         }
@@ -2651,67 +2656,69 @@ impl LoopStrategy for CodeActStrategy {
                 }
 
                 // ── Execute code blocks ──────────────────────────────
-                for block in &code_blocks {
-                    if let Some(ref tx) = event_tx {
-                        let _ = tx.try_send(LoopEvent::CodeExecution {
-                            code: block.code.clone(),
-                            stdout: String::new(),
-                            stderr: String::new(),
-                            is_error: false,
-                            duration_ms: None,
-                            phase: CodeExecutionPhase::Started,
-                        });
-                    }
-
-                    let exec_result = executor
-                        .execute_with_tools(&block.code, Language::Python, &exec_options)
-                        .await;
-
-                    match exec_result {
-                        Ok(result) => {
-                            let observation = result.to_observation();
-                            tracing::debug!(
-                                is_error = result.is_error,
-                                duration_ms = result.duration_ms,
-                                "CodeAct: code block executed"
-                            );
-
-                            if let Some(ref tx) = event_tx {
-                                let _ = tx.try_send(LoopEvent::CodeExecution {
-                                    code: block.code.clone(),
-                                    stdout: result.stdout.clone(),
-                                    stderr: result.stderr.clone(),
-                                    is_error: result.is_error,
-                                    duration_ms: Some(result.duration_ms),
-                                    phase: CodeExecutionPhase::Completed,
-                                });
-                            }
-
-                            if result.is_error {
-                                observations.push(format!(
-                                    "[Code Execution Error]\n{}",
-                                    observation
-                                ));
-                            } else {
-                                observations.push(format!(
-                                    "[Code Execution Output]\n{}",
-                                    observation
-                                ));
-                            }
+                if let Some(ref exec) = executor {
+                    for block in &code_blocks {
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.try_send(LoopEvent::CodeExecution {
+                                code: block.code.clone(),
+                                stdout: String::new(),
+                                stderr: String::new(),
+                                is_error: false,
+                                duration_ms: None,
+                                phase: CodeExecutionPhase::Started,
+                            });
                         }
-                        Err(e) => {
-                            let err_msg = format!("[Code Execution Error]\n{e}");
-                            if let Some(ref tx) = event_tx {
-                                let _ = tx.try_send(LoopEvent::CodeExecution {
-                                    code: block.code.clone(),
-                                    stdout: String::new(),
-                                    stderr: err_msg.clone(),
-                                    is_error: true,
-                                    duration_ms: None,
-                                    phase: CodeExecutionPhase::Completed,
-                                });
+
+                        let exec_result = exec
+                            .execute_with_tools(&block.code, Language::Python, &exec_options)
+                            .await;
+
+                        match exec_result {
+                            Ok(result) => {
+                                let observation = result.to_observation();
+                                tracing::debug!(
+                                    is_error = result.is_error,
+                                    duration_ms = result.duration_ms,
+                                    "CodeAct: code block executed"
+                                );
+
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.try_send(LoopEvent::CodeExecution {
+                                        code: block.code.clone(),
+                                        stdout: result.stdout.clone(),
+                                        stderr: result.stderr.clone(),
+                                        is_error: result.is_error,
+                                        duration_ms: Some(result.duration_ms),
+                                        phase: CodeExecutionPhase::Completed,
+                                    });
+                                }
+
+                                if result.is_error {
+                                    observations.push(format!(
+                                        "[Code Execution Error]\n{}",
+                                        observation
+                                    ));
+                                } else {
+                                    observations.push(format!(
+                                        "[Code Execution Output]\n{}",
+                                        observation
+                                    ));
+                                }
                             }
-                            observations.push(err_msg);
+                            Err(e) => {
+                                let err_msg = format!("[Code Execution Error]\n{e}");
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.try_send(LoopEvent::CodeExecution {
+                                        code: block.code.clone(),
+                                        stdout: String::new(),
+                                        stderr: err_msg.clone(),
+                                        is_error: true,
+                                        duration_ms: None,
+                                        phase: CodeExecutionPhase::Completed,
+                                    });
+                                }
+                                observations.push(err_msg);
+                            }
                         }
                     }
                 }

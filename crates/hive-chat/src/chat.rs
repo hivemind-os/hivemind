@@ -1011,8 +1011,8 @@ pub struct ChatService {
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
     code_act_config: hive_contracts::CodeActConfig,
-    /// Shared session registry for CodeAct code execution (session reuse across turns).
-    code_session_registry: Arc<hive_code_executor::SessionRegistry>,
+    /// Shared session registry for CodeAct code execution (None if WASM runtime unavailable).
+    code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
 
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
@@ -1561,6 +1561,8 @@ impl ChatService {
             Arc::new(ArcSwap::from_pointee(hive_contracts::WebSearchConfig::default()));
 
         // Create the CodeAct session registry (once, shared across all conversations).
+        // Requires WASM Python runtime — logs a warning if unavailable but doesn't
+        // prevent startup. CodeAct sessions will fail at runtime with a clear error.
         let code_session_registry = {
             let session_config = hive_code_executor::SessionConfig {
                 executor: hive_code_executor::ExecutorConfig {
@@ -1572,12 +1574,22 @@ impl ChatService {
                 },
                 idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
             };
-            Arc::new(hive_code_executor::SessionRegistry::new_auto(
+            match hive_code_executor::SessionRegistry::new_auto(
                 session_config,
                 code_act_config.max_sessions,
                 None, // uses PYTHON_WASM_PATH env var
                 None, // uses PYTHON_WASM_STDLIB env var
-            ))
+            ) {
+                Ok(registry) => Some(Arc::new(registry)),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "CodeAct WASM runtime unavailable — CodeAct personas will not work. \
+                         Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB or bundle python.wasm."
+                    );
+                    None
+                }
+            }
         };
 
         let bot_service = crate::bot_service::BotService {
@@ -1608,7 +1620,7 @@ impl ChatService {
             web_search_config: Arc::clone(&web_search_config_swap),
             plugin_host: plugin_host.clone(),
             plugin_registry: plugin_registry.clone(),
-            code_session_registry: Arc::clone(&code_session_registry),
+            code_session_registry: code_session_registry.clone(),
         };
 
         let indexing_service = crate::indexing_service::IndexingService {
@@ -2854,7 +2866,7 @@ impl ChatService {
             },
             tool_limits: (*self.tool_limits).clone(),
             code_act_config: self.code_act_config.clone(),
-            session_registry: Some(Arc::clone(&self.code_session_registry)),
+            session_registry: self.code_session_registry.clone(),
             preempt_signal: None,
             cancellation_token: None,
         };        match self.loop_executor.call_tool(&context, tool_id, input).await {
@@ -4038,7 +4050,9 @@ impl ChatService {
                 Some(persona_tool_factory),
                 active_persona_id.clone(),
             );
-            supervisor.set_code_session_registry(Arc::clone(&self.code_session_registry));
+            if let Some(ref registry) = self.code_session_registry {
+                supervisor.set_code_session_registry(Arc::clone(registry));
+            }
             let supervisor = Arc::new(supervisor);
             let stream_tx = session.stream_tx.clone();
             let session_logger = session.logger.clone();
@@ -6510,7 +6524,7 @@ impl ChatService {
                 },
                 tool_limits: (*self.tool_limits).clone(),
                 code_act_config: self.code_act_config.clone(),
-                session_registry: Some(Arc::clone(&self.code_session_registry)),
+                session_registry: self.code_session_registry.clone(),
                 preempt_signal: None, // Set below after reading session state.
                 cancellation_token: None,
             };

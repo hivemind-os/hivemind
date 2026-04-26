@@ -49,7 +49,7 @@ pub struct Session {
 
 impl Session {
     /// Create a new session with a WASM-sandboxed executor.
-    pub async fn new_wasm(
+    pub async fn new(
         id: String,
         config: SessionConfig,
         runtime: &WasmRuntime,
@@ -63,17 +63,6 @@ impl Session {
         // Spawn the initial WASM instance
         executor.ensure_instance().await?;
 
-        Ok(Self {
-            id,
-            executor: Arc::new(executor),
-            last_activity: Mutex::new(Instant::now()),
-            idle_timeout: config.idle_timeout,
-        })
-    }
-
-    /// Create a new session with a subprocess-based executor (fallback).
-    pub async fn new_subprocess(id: String, config: SessionConfig) -> Result<Self, ExecutorError> {
-        let executor = crate::subprocess::SubprocessExecutor::new(config.executor).await?;
         Ok(Self {
             id,
             executor: Arc::new(executor),
@@ -115,13 +104,13 @@ pub struct SessionRegistry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     default_config: SessionConfig,
     max_sessions: usize,
-    /// Shared WASM runtime (None = fallback to subprocess).
-    wasm_runtime: Option<Arc<WasmRuntime>>,
+    /// Shared WASM runtime — required for session creation.
+    wasm_runtime: Arc<WasmRuntime>,
 }
 
 impl SessionRegistry {
-    /// Create a registry that uses WASM-sandboxed executors.
-    pub fn new_wasm(
+    /// Create a registry with a pre-built WASM runtime.
+    pub fn new(
         default_config: SessionConfig,
         max_sessions: usize,
         runtime: Arc<WasmRuntime>,
@@ -130,32 +119,20 @@ impl SessionRegistry {
             sessions: Mutex::new(HashMap::new()),
             default_config,
             max_sessions,
-            wasm_runtime: Some(runtime),
+            wasm_runtime: runtime,
         }
     }
 
-    /// Create a registry that uses subprocess executors (fallback).
-    pub fn new_subprocess(default_config: SessionConfig, max_sessions: usize) -> Self {
-        Self {
-            sessions: Mutex::new(HashMap::new()),
-            default_config,
-            max_sessions,
-            wasm_runtime: None,
-        }
-    }
-
-    /// Create a registry that automatically selects the best backend.
+    /// Create a registry by compiling the WASM runtime from paths.
     ///
-    /// If `python_wasm_path` and `python_wasm_stdlib` point to existing files,
-    /// uses the WASM-sandboxed executor. Otherwise falls back to subprocess.
-    /// When both paths are `None`, checks `PYTHON_WASM_PATH` and
-    /// `PYTHON_WASM_STDLIB` environment variables.
+    /// If paths are `None`, checks `PYTHON_WASM_PATH` and `PYTHON_WASM_STDLIB`
+    /// environment variables. Returns an error if WASM runtime is unavailable.
     pub fn new_auto(
         config: SessionConfig,
         max_sessions: usize,
         python_wasm_path: Option<&std::path::Path>,
         python_wasm_stdlib: Option<&std::path::Path>,
-    ) -> Self {
+    ) -> Result<Self, ExecutorError> {
         let wasm_path = python_wasm_path
             .map(|p| p.to_path_buf())
             .or_else(|| std::env::var("PYTHON_WASM_PATH").ok().map(PathBuf::from));
@@ -163,22 +140,20 @@ impl SessionRegistry {
             .map(|p| p.to_path_buf())
             .or_else(|| std::env::var("PYTHON_WASM_STDLIB").ok().map(PathBuf::from));
 
-        if let (Some(wasm_path), Some(stdlib_path)) = (wasm_path, stdlib_path) {
-            if wasm_path.exists() && stdlib_path.exists() {
-                match Self::try_create_wasm_registry(config.clone(), max_sessions, &wasm_path, &stdlib_path) {
-                    Ok(registry) => {
-                        tracing::info!("CodeAct: SessionRegistry using WASM backend");
-                        return registry;
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to create WASM registry, falling back to subprocess");
-                    }
-                }
+        match (wasm_path, stdlib_path) {
+            (Some(wasm_path), Some(stdlib_path)) if wasm_path.exists() && stdlib_path.exists() => {
+                let registry = Self::try_create_wasm_registry(config, max_sessions, &wasm_path, &stdlib_path)?;
+                tracing::info!("CodeAct: SessionRegistry using WASM backend");
+                Ok(registry)
+            }
+            _ => {
+                Err(ExecutorError::NotReady(
+                    "CodeAct requires the WASM Python runtime (python.wasm). \
+                     Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables \
+                     or bundle python.wasm with the application.".into()
+                ))
             }
         }
-
-        tracing::info!("CodeAct: SessionRegistry using subprocess backend");
-        Self::new_subprocess(config, max_sessions)
     }
 
     fn try_create_wasm_registry(
@@ -208,7 +183,7 @@ impl SessionRegistry {
             stdlib_dir: stdlib_path.to_path_buf(),
         });
 
-        Ok(Self::new_wasm(config, max_sessions, runtime))
+        Ok(Self::new(config, max_sessions, runtime))
     }
 
     /// Get or create a session for the given conversation ID.
@@ -244,20 +219,12 @@ impl SessionRegistry {
             config.executor.working_directory = Some(ws.to_string());
         }
 
-        let session = if let Some(ref runtime) = self.wasm_runtime {
-            Session::new_wasm(
-                session_id.to_string(),
-                config,
-                runtime,
-            )
-            .await?
-        } else {
-            Session::new_subprocess(
-                session_id.to_string(),
-                config,
-            )
-            .await?
-        };
+        let session = Session::new(
+            session_id.to_string(),
+            config,
+            &self.wasm_runtime,
+        )
+        .await?;
         let session = Arc::new(session);
 
         let mut sessions = self.sessions.lock();
@@ -265,8 +232,7 @@ impl SessionRegistry {
         tracing::info!(
             session_id = session_id,
             active_sessions = sessions.len(),
-            backend = if self.wasm_runtime.is_some() { "wasm" } else { "subprocess" },
-            "CodeAct session created"
+            "CodeAct session created (WASM)"
         );
 
         Ok(session)
@@ -374,11 +340,5 @@ mod tests {
         let config = SessionConfig::default();
         assert_eq!(config.idle_timeout, Duration::from_secs(600));
         assert_eq!(config.executor.execution_timeout_secs, 30);
-    }
-
-    #[tokio::test]
-    async fn registry_tracks_count() {
-        let registry = SessionRegistry::new_subprocess(SessionConfig::default(), 10);
-        assert_eq!(registry.active_count(), 0);
     }
 }

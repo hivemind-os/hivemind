@@ -27,7 +27,6 @@
 
 pub mod executor;
 pub mod session;
-pub mod subprocess;
 pub mod tool_bridge;
 pub mod wasm_executor;
 
@@ -35,7 +34,6 @@ pub use executor::{
     CodeExecutor, ExecutionResult, ExecutorConfig, ExecutorError, Language,
 };
 pub use session::{Session, SessionConfig, SessionRegistry, WasmRuntime};
-pub use subprocess::SubprocessExecutor;
 pub use wasm_executor::WasmExecutor;
 pub use tool_bridge::{
     BridgedToolInfo, CodeActToolMode, ExecutionOptions, ToolCallHandler,

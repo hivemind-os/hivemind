@@ -46,10 +46,16 @@ fn generate_python_wrapper(nonce: &str) -> String {
     let end = sentinel_end(nonce);
     format!(
         r#"
-import sys, io, traceback
+import sys, io, traceback, os
 
 _original_stdout = sys.stdout
 _original_stdin = sys.stdin
+
+# Set working directory to the preopened workspace if available
+try:
+    os.chdir("/workspace")
+except Exception:
+    pass
 
 def _hivemind_exec_loop():
     while True:
@@ -212,6 +218,7 @@ impl WasmExecutor {
         let stdlib_dir = self.stdlib_dir.clone();
         let memory_limit = (self.config.memory_limit_mb as usize) * 1024 * 1024;
         let nonce = self.nonce.clone();
+        let workspace_dir = self.config.working_directory.clone();
 
         // Create bidirectional channels for stdin/stdout.
         // Host writes to host_stdin_writer → WASM reads from wasm_stdin_reader
@@ -227,6 +234,7 @@ impl WasmExecutor {
                 &engine_for_task,
                 &module,
                 &stdlib_dir,
+                workspace_dir.as_deref(),
                 memory_limit,
                 wasm_stdin_reader,
                 wasm_stdout_writer,
@@ -458,6 +466,7 @@ async fn run_wasm_instance(
     engine: &Engine,
     module: &Module,
     stdlib_dir: &Path,
+    workspace_dir: Option<&str>,
     memory_limit: usize,
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
@@ -483,6 +492,30 @@ async fn run_wasm_instance(
             ExecutorError::NotReady(format!("failed to preopen stdlib dir: {e}"))
         })?;
 
+    // Preopen workspace directory (read-write) — this is the only writable
+    // directory available to user code. All paths outside are inaccessible.
+    if let Some(ws) = workspace_dir {
+        let ws_path = Path::new(ws);
+        if ws_path.exists() {
+            wasi_builder
+                .preopened_dir(ws_path, "/workspace", DirPerms::all(), FilePerms::all())
+                .map_err(|e| {
+                    ExecutorError::NotReady(format!("failed to preopen workspace dir: {e}"))
+                })?;
+        }
+    }
+
+    // Preopen a scratch/tmp directory for Python's tempfile module
+    let tmp_dir = std::env::temp_dir().join(format!("hivemind-wasm-{}", nonce));
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| {
+        ExecutorError::NotReady(format!("failed to create tmp dir: {e}"))
+    })?;
+    wasi_builder
+        .preopened_dir(&tmp_dir, "/tmp", DirPerms::all(), FilePerms::all())
+        .map_err(|e| {
+            ExecutorError::NotReady(format!("failed to preopen tmp dir: {e}"))
+        })?;
+
     // Pass args to CPython: python.wasm -c <wrapper_script>
     let wrapper = generate_python_wrapper(nonce);
     wasi_builder.args(&["python.wasm", "-c", &wrapper]);
@@ -491,6 +524,10 @@ async fn run_wasm_instance(
     wasi_builder.env("PYTHONDONTWRITEBYTECODE", "1");
     wasi_builder.env("PYTHONNOUSERSITE", "1");
     wasi_builder.env("PYTHONPATH", "/usr/lib/python3");
+    wasi_builder.env("TMPDIR", "/tmp");
+    if workspace_dir.is_some() {
+        wasi_builder.env("HOME", "/workspace");
+    }
 
     let wasi_ctx = wasi_builder.build_p1();
 

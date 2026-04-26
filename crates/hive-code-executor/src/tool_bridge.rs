@@ -88,6 +88,8 @@ pub enum CodeActToolMode {
     Bridged,
     /// Available both ways (LLM chooses).
     Both,
+    /// Not exposed at all — Python handles this natively in WASM.
+    Excluded,
 }
 
 /// Simplified tool info used for Python stub generation.
@@ -393,8 +395,10 @@ pub fn build_name_registry(tools: &[BridgedToolInfo]) -> HashMap<String, String>
 
 /// Determine the default `CodeActToolMode` for a tool based on its ID.
 ///
-/// Tools requiring UI interaction or agent orchestration default to `Native`.
-/// Everything else defaults to `Bridged`.
+/// - **Native:** UI/agent-orchestration tools the LLM calls directly.
+/// - **Excluded:** Tools whose functionality Python handles natively inside
+///   the WASM sandbox (file I/O within workspace, math, regex, etc.).
+/// - **Bridged:** Everything else — callable from Python via host bridge.
 pub fn default_tool_mode(tool_id: &str) -> CodeActToolMode {
     // Tools that need UI interaction gates or agent orchestration
     if tool_id.starts_with("core.ask_user")
@@ -404,7 +408,21 @@ pub fn default_tool_mode(tool_id: &str) -> CodeActToolMode {
     {
         return CodeActToolMode::Native;
     }
-    CodeActToolMode::Bridged
+
+    // Tools that Python handles natively in the WASM sandbox
+    match tool_id {
+        "filesystem.read"
+        | "filesystem.write"
+        | "filesystem.list"
+        | "filesystem.exists"
+        | "filesystem.glob"
+        | "filesystem.write_binary"
+        | "math.calculate"
+        | "json.transform"
+        | "core.regex"
+        | "datetime.now" => CodeActToolMode::Excluded,
+        _ => CodeActToolMode::Bridged,
+    }
 }
 
 // ── Parse tool call from executor output ──────────────────────────────
@@ -502,6 +520,10 @@ mod tests {
         assert_eq!(default_tool_mode("workflow.start"), CodeActToolMode::Native);
         assert_eq!(
             default_tool_mode("filesystem.read"),
+            CodeActToolMode::Excluded
+        );
+        assert_eq!(
+            default_tool_mode("filesystem.search"),
             CodeActToolMode::Bridged
         );
         assert_eq!(
