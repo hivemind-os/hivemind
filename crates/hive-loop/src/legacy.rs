@@ -2136,10 +2136,21 @@ impl hive_code_executor::ToolCallHandler for BridgedToolCallHandler {
             input: request.args.clone(),
         };
 
+        let input_str = serde_json::to_string(&request.args)
+            .unwrap_or_else(|_| "<unserializable>".to_string());
+
+        // Emit ToolCallStart so the frontend can track bridged tool calls.
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.try_send(LoopEvent::ToolCallStart {
+                tool_id: request.tool_id.clone(),
+                input: input_str,
+            });
+        }
+
         let gate_ref = self.interaction_gate.as_deref();
         let tx_ref = self.event_tx.as_ref();
 
-        match execute_tool_call(
+        let response = match execute_tool_call(
             &self.context,
             call,
             &self.middleware,
@@ -2149,25 +2160,58 @@ impl hive_code_executor::ToolCallHandler for BridgedToolCallHandler {
         )
         .await
         {
-            Ok(result) => hive_code_executor::ToolCallResponse {
-                request_id: request.request_id,
-                result: Some(serde_json::json!(result.output)),
-                error: None,
-                truncated: false,
-            },
-            Err(LoopError::ToolDenied { reason, .. }) => hive_code_executor::ToolCallResponse {
-                request_id: request.request_id,
-                result: None,
-                error: Some(format!("Tool denied: {}", reason)),
-                truncated: false,
-            },
-            Err(e) => hive_code_executor::ToolCallResponse {
-                request_id: request.request_id,
-                result: None,
-                error: Some(e.to_string()),
-                truncated: false,
-            },
-        }
+            Ok(result) => {
+                let output_str = serde_json::to_string(&result.output)
+                    .unwrap_or_else(|_| "<unserializable>".to_string());
+                if let Some(ref tx) = self.event_tx {
+                    let _ = tx.try_send(LoopEvent::ToolCallResult {
+                        tool_id: request.tool_id.clone(),
+                        output: output_str,
+                        is_error: false,
+                    });
+                }
+                hive_code_executor::ToolCallResponse {
+                    request_id: request.request_id,
+                    result: Some(serde_json::json!(result.output)),
+                    error: None,
+                    truncated: false,
+                }
+            }
+            Err(LoopError::ToolDenied { reason, .. }) => {
+                let err_msg = format!("Tool denied: {}", reason);
+                if let Some(ref tx) = self.event_tx {
+                    let _ = tx.try_send(LoopEvent::ToolCallResult {
+                        tool_id: request.tool_id.clone(),
+                        output: err_msg.clone(),
+                        is_error: true,
+                    });
+                }
+                hive_code_executor::ToolCallResponse {
+                    request_id: request.request_id,
+                    result: None,
+                    error: Some(err_msg),
+                    truncated: false,
+                }
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                if let Some(ref tx) = self.event_tx {
+                    let _ = tx.try_send(LoopEvent::ToolCallResult {
+                        tool_id: request.tool_id.clone(),
+                        output: err_msg.clone(),
+                        is_error: true,
+                    });
+                }
+                hive_code_executor::ToolCallResponse {
+                    request_id: request.request_id,
+                    result: None,
+                    error: Some(err_msg),
+                    truncated: false,
+                }
+            }
+        };
+
+        response
     }
 }
 
