@@ -17,6 +17,7 @@ hive-api = { path = "../hive-api" }
 hive-classification = { path = "../hive-classification" }
 hive-core = { path = "../hive-core" }
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

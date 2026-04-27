@@ -54,6 +54,19 @@ jobs:
         run: npm ci
         working-directory: apps/hivemind-desktop
 
+      - name: Stage Python WASM runtime
+        shell: bash
+        run: |
+          WASM_URL="https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0-wasi-sdk-20.0.tar.gz"
+          STAGING="$RUNNER_TEMP/python-wasm"
+          EXTRACT="$RUNNER_TEMP/python-wasm-extract"
+          mkdir -p "$STAGING/bin" "$STAGING/lib" "$EXTRACT"
+          curl -fsSL "$WASM_URL" | tar xz -C "$EXTRACT"
+          cp "$EXTRACT/bin/"python*.wasm "$STAGING/bin/python.wasm"
+          cp -r "$EXTRACT/usr/local/lib/python3.12" "$STAGING/lib/python3.12"
+          echo "PYTHON_WASM_PATH=$STAGING/bin/python.wasm" >> "$GITHUB_ENV"
+          echo "PYTHON_WASM_STDLIB=$STAGING/lib/python3.12" >> "$GITHUB_ENV"
+
       - name: Check version consistency
         run: cargo xtask check-version
 

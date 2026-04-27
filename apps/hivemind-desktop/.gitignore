@@ -4,5 +4,6 @@ node_modules
 test-results
 playwright-report
 src-tauri/bin/
+src-tauri/python-wasm/
 integration-test-results/
 cdp-test-results/

@@ -4,16 +4,17 @@ This guide covers how to choose and configure agentic loop strategies in HiveMin
 
 ## Loop Strategies
 
-HiveMind OS ships with three loop strategies. Pick the one that fits your task:
+HiveMind OS ships with four loop strategies. Pick the one that fits your task:
 
 | Strategy | Best For | How It Works |
 |---|---|---|
 | **React** (default) | Most interactive tasks | Reason → Act → Observe cycle. The agent thinks, calls a tool, reads the result, and repeats. |
 | **Sequential** | Simple linear tasks | Executes steps one after another without iterative reasoning. Lightweight and fast for straightforward work. |
 | **Plan-then-Execute** | Complex multi-step work | Generates a full plan up front, then executes each step in order. Good for DevOps runbooks and research. |
+| **CodeAct** | Scripting and data tasks | The agent writes Python code to take actions. Tools are exposed as Python functions in a sandboxed WASM runtime. |
 
 ::: tip
-Start with **React**. Only switch strategies when you notice the agent struggling — for simple linear tasks use **Sequential**, and for complex multi-step work use **Plan-then-Execute**.
+Start with **React**. Only switch strategies when you notice the agent struggling — for simple linear tasks use **Sequential**, for complex multi-step work use **Plan-then-Execute**, and for data work or scripting use **CodeAct**.
 :::
 
 ## Configuring Loop Strategy per Persona
@@ -34,7 +35,7 @@ allowed_tools:
 
 You can also override the strategy per conversation from the **persona picker → Advanced → Loop Strategy** dropdown.
 
-Valid values for `loop_strategy` are: `react`, `sequential`, `plan_then_execute`.
+Valid values for `loop_strategy` are: `react`, `sequential`, `plan_then_execute`, `code_act`.
 
 ## Choosing a Strategy
 
@@ -60,6 +61,34 @@ This strategy separates planning from execution:
 2. **Execute phase** — each step is executed in order
 
 This works well for complex tasks with clear sub-goals, like multi-file refactors, deployment runbooks, or research reports.
+
+### CodeAct
+
+The CodeAct strategy replaces structured tool calls with **Python code execution**. Instead of calling tools one at a time through the model's tool-call mechanism, the agent writes Python code in fenced blocks that runs in a sandboxed WebAssembly runtime.
+
+Tools are exposed as pre-loaded Python functions. For example, an HTTP tool becomes `http_request(url, method)` that the agent calls directly in code. The agent can compose multiple tool calls, process results with Python logic, and build up complex workflows — all in a single code block.
+
+```yaml
+# persona.yaml — a CodeAct data analyst
+id: user/data-analyst
+name: Data Analyst
+loop_strategy: code_act
+preferred_models:
+  - claude-sonnet
+code_act:
+  allow_network: false
+  workspace_path: /workspace
+```
+
+**Tool classification:** CodeAct automatically classifies each tool:
+
+- **Bridged** — Exposed as Python functions (HTTP, MCP tools, messaging, etc.)
+- **Native** — Used as structured tool calls alongside code (`ask_user`, `delegate_task`)
+- **Excluded** — Handled by Python directly (file I/O, regex, math, datetime)
+
+**Persistent state:** Variables, imports, and state persist across code blocks within a conversation, so the agent can build on previous results.
+
+**Sandboxed execution:** Code runs in a WebAssembly Python runtime with access only to the `/workspace` directory. Standard Python libraries are available (json, os, pathlib, re, math, csv, etc.).
 
 ## Middleware Pipeline
 

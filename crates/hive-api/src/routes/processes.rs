@@ -85,29 +85,35 @@ pub(crate) async fn api_process_event_stream(
             yield Ok(Event::default().event("snapshot").data(json));
         }
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let matches = match &event {
-                        hive_process::ProcessEvent::Spawned { session_id: sid, .. } => {
-                            sid.as_deref() == Some(session_id.as_str())
+            tokio::select! {
+                biased;
+                _ = state.shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            let matches = match &event {
+                                hive_process::ProcessEvent::Spawned { session_id: sid, .. } => {
+                                    sid.as_deref() == Some(session_id.as_str())
+                                }
+                                hive_process::ProcessEvent::Exited { session_id: sid, .. } => {
+                                    sid.as_deref() == Some(session_id.as_str())
+                                }
+                                hive_process::ProcessEvent::Killed { session_id: sid, .. } => {
+                                    sid.as_deref() == Some(session_id.as_str())
+                                }
+                            };
+                            if matches {
+                                if let Ok(json) = serde_json::to_string(&event) {
+                                    yield Ok(Event::default().event("process").data(json));
+                                }
+                            }
                         }
-                        hive_process::ProcessEvent::Exited { session_id: sid, .. } => {
-                            sid.as_deref() == Some(session_id.as_str())
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("process SSE for session {session_id} lagged {n} events");
                         }
-                        hive_process::ProcessEvent::Killed { session_id: sid, .. } => {
-                            sid.as_deref() == Some(session_id.as_str())
-                        }
-                    };
-                    if matches {
-                        if let Ok(json) = serde_json::to_string(&event) {
-                            yield Ok(Event::default().event("process").data(json));
-                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("process SSE for session {session_id} lagged {n} events");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     };

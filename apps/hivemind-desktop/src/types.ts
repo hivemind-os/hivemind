@@ -54,7 +54,7 @@ export interface Persona {
   name: string;
   description: string;
   system_prompt: string;
-  loop_strategy: 'react' | 'sequential' | 'plan_then_execute';
+  loop_strategy: 'react' | 'sequential' | 'plan_then_execute' | 'code_act';
   preferred_models?: string[] | null;
   secondary_models?: string[] | null;
   allowed_tools: string[];
@@ -754,6 +754,7 @@ export type HiveMindConfigData = {
     auto_approve_on_timeout_secs?: number | null;
   };
   web_search?: WebSearchConfig;
+  code_act?: { enabled: boolean; execution_timeout_secs: number; max_output_bytes: number; idle_timeout_secs: number; max_sessions: number; allow_network: boolean };
 };
 
 export type WebSearchConfig = {

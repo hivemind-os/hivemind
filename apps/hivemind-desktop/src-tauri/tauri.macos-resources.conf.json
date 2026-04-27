@@ -3,7 +3,10 @@
     "resources": {
       "bin/hive-daemon": "hive-daemon",
       "bin/hive-cli": "hive-cli",
-      "bin/hive-runtime-worker": "hive-runtime-worker"
+      "bin/hive-runtime-worker": "hive-runtime-worker",
+      "python-wasm/bin/python.wasm": "python-wasm/bin/python.wasm",
+      "python-wasm/lib/python3.12": "python-wasm/lib/python3.12",
+      "python-wasm/lib/python312.zip": "python-wasm/lib/python312.zip"
     }
   }
 }

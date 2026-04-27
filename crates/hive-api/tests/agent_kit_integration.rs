@@ -10,11 +10,11 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 // ── Test server bootstrap ───────────────────────────────────────────────
 
-async fn boot_server() -> (String, Arc<Notify>, TempDir) {
+async fn boot_server() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -24,7 +24,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -58,6 +58,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        hive_contracts::CodeActConfig::default(),
         None, // plugin_host
         None, // plugin_registry
     ));
@@ -71,7 +72,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -244,7 +245,7 @@ async fn test_full_round_trip() {
     let personas: Vec<Value> = resp.json().await.unwrap();
     assert!(personas.iter().any(|p| p["id"] == "imported/bot"));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -282,7 +283,7 @@ async fn test_renamespacing_cross_refs() {
         yaml
     );
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -315,7 +316,7 @@ async fn test_overwrite_scenario() {
         assert!(p["overwritten"].as_bool().unwrap());
     }
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -346,7 +347,7 @@ async fn test_system_namespace_rejected() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -368,7 +369,7 @@ async fn test_selective_import() {
     assert!(result["imported_workflows"].as_array().unwrap().is_empty());
     assert_eq!(result["skipped"].as_array().unwrap().len(), 2);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -387,7 +388,7 @@ async fn test_external_ref_warnings() {
     assert!(!warnings.is_empty(), "Expected external ref warning, got none");
     assert!(warnings[0].as_str().unwrap().contains("external/missing-agent"));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -409,7 +410,7 @@ async fn test_invalid_archive_not_zip() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -440,5 +441,5 @@ async fn test_invalid_archive_no_manifest() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }

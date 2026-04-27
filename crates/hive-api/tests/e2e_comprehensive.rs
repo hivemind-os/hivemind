@@ -21,14 +21,14 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 // ==========================================================================
 // Test harness
 // ==========================================================================
 
 /// Boot a full-featured test server. Returns (base_url, shutdown_notify, _tempdir).
-async fn boot_server() -> (String, Arc<Notify>, TempDir) {
+async fn boot_server() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -38,7 +38,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -75,6 +75,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        hive_contracts::CodeActConfig::default(),
         None, // plugin_host
         None, // plugin_registry
     ));
@@ -86,7 +87,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
     let server_shutdown = shutdown.clone();
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -95,7 +96,7 @@ async fn boot_server() -> (String, Arc<Notify>, TempDir) {
 }
 
 /// Boot a server with local model service enabled.
-async fn boot_server_with_local_models() -> (String, Arc<Notify>, TempDir) {
+async fn boot_server_with_local_models() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -105,7 +106,7 @@ async fn boot_server_with_local_models() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -142,6 +143,7 @@ async fn boot_server_with_local_models() -> (String, Arc<Notify>, TempDir) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        hive_contracts::CodeActConfig::default(),
         None, // plugin_host
         None, // plugin_registry
     ));
@@ -164,7 +166,7 @@ async fn boot_server_with_local_models() -> (String, Arc<Notify>, TempDir) {
     let server_shutdown = shutdown.clone();
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -197,7 +199,7 @@ async fn e2e_healthz_returns_ok_true() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/healthz")).await;
     assert_eq!(resp["ok"], true);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -205,7 +207,7 @@ async fn e2e_healthz_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/healthz")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -214,7 +216,7 @@ async fn e2e_status_returns_version() {
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/daemon/status")).await;
     assert!(resp["version"].is_string());
     assert!(!resp["version"].as_str().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -222,7 +224,7 @@ async fn e2e_status_returns_uptime() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/daemon/status")).await;
     assert!(resp["uptime_secs"].as_f64().unwrap() >= 0.0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -230,7 +232,7 @@ async fn e2e_status_returns_pid() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/daemon/status")).await;
     assert!(resp["pid"].as_u64().unwrap() > 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -239,7 +241,7 @@ async fn e2e_status_returns_platform() {
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/daemon/status")).await;
     let platform = resp["platform"].as_str().unwrap();
     assert!(!platform.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -247,7 +249,7 @@ async fn e2e_status_returns_bind_address() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/daemon/status")).await;
     assert!(resp["bind"].as_str().unwrap().contains("127.0.0.1"));
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -265,7 +267,7 @@ async fn e2e_unknown_route_returns_404() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/nonexistent")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -273,7 +275,7 @@ async fn e2e_wrong_method_returns_405() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().delete(format!("{base}/healthz")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -285,7 +287,7 @@ async fn e2e_get_config_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/config/get")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -293,7 +295,7 @@ async fn e2e_get_config_contains_api_section() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/config/get")).await;
     assert!(resp["api"].is_object(), "config should have 'api' section");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -301,7 +303,7 @@ async fn e2e_get_config_contains_security_section() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/config/get")).await;
     assert!(resp["security"].is_object(), "config should have 'security' section");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -309,7 +311,7 @@ async fn e2e_validate_config_returns_valid_true() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/config/validate")).await;
     assert_eq!(resp["valid"], true);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -321,7 +323,7 @@ async fn e2e_model_router_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/model/router")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -329,7 +331,7 @@ async fn e2e_model_router_returns_providers_array() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/model/router")).await;
     assert!(resp["providers"].is_array());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -338,7 +340,7 @@ async fn e2e_model_router_returns_bindings() {
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/model/router")).await;
     // ModelRouterSnapshot only contains `providers`; roleBindings was removed.
     assert!(resp["providers"].is_array());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -357,7 +359,7 @@ async fn e2e_list_sessions_initially_empty() {
         .await
         .unwrap();
     assert!(resp.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -369,7 +371,7 @@ async fn e2e_create_session_returns_snapshot() {
     let session: Value = resp.json().await.unwrap();
     assert!(session["id"].is_string());
     assert!(!session["id"].as_str().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -379,7 +381,7 @@ async fn e2e_create_session_state_is_idle() {
     let resp = c.post(format!("{base}/api/v1/chat/sessions")).send().await.unwrap();
     let session: Value = resp.json().await.unwrap();
     assert_eq!(session["state"], "idle");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -390,7 +392,7 @@ async fn e2e_create_session_has_timestamps() {
     let session: Value = resp.json().await.unwrap();
     assert!(session["created_at_ms"].as_u64().unwrap() > 0);
     assert!(session["updated_at_ms"].as_u64().unwrap() > 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -400,7 +402,7 @@ async fn e2e_create_session_messages_empty() {
     let resp = c.post(format!("{base}/api/v1/chat/sessions")).send().await.unwrap();
     let session: Value = resp.json().await.unwrap();
     assert!(session["messages"].as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -413,7 +415,7 @@ async fn e2e_get_session_by_id() {
 
     let resp: Value = get_json(&c, &format!("{base}/api/v1/chat/sessions/{id}")).await;
     assert_eq!(resp["id"], id);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -422,7 +424,7 @@ async fn e2e_get_session_not_found() {
     let resp =
         client().get(format!("{base}/api/v1/chat/sessions/nonexistent-id")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -435,7 +437,7 @@ async fn e2e_list_sessions_after_create() {
     let sessions: Vec<Value> =
         c.get(format!("{base}/api/v1/chat/sessions")).send().await.unwrap().json().await.unwrap();
     assert_eq!(sessions.len(), 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -453,7 +455,7 @@ async fn e2e_send_message_to_session() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -473,7 +475,7 @@ async fn e2e_send_message_queued_response() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["kind"], "queued");
     assert!(body["session"].is_object());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -487,7 +489,7 @@ async fn e2e_send_message_to_nonexistent_session() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -509,7 +511,7 @@ async fn e2e_send_message_contains_user_message() {
     assert!(!messages.is_empty());
     assert_eq!(messages[0]["role"], "user");
     assert_eq!(messages[0]["content"], "User says hello");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -530,7 +532,7 @@ async fn e2e_send_multiple_messages() {
     let session: Value = get_json(&c, &format!("{base}/api/v1/chat/sessions/{id}")).await;
     let messages = session["messages"].as_array().unwrap();
     assert!(messages.len() >= 2, "expected at least 2 messages, got {}", messages.len());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -545,7 +547,7 @@ async fn e2e_interrupt_session_soft() {
         post(&c, &format!("{base}/api/v1/chat/sessions/{id}/interrupt"), json!({"mode": "soft"}))
             .await;
     assert!(resp.status().is_success());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -560,7 +562,7 @@ async fn e2e_interrupt_session_hard() {
         post(&c, &format!("{base}/api/v1/chat/sessions/{id}/interrupt"), json!({"mode": "hard"}))
             .await;
     assert!(resp.status().is_success());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -574,7 +576,7 @@ async fn e2e_interrupt_nonexistent_session() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -587,7 +589,7 @@ async fn e2e_resume_session() {
 
     let resp = c.post(format!("{base}/api/v1/chat/sessions/{id}/resume")).send().await.unwrap();
     assert!(resp.status().is_success());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -596,7 +598,7 @@ async fn e2e_resume_nonexistent_session() {
     let resp =
         client().post(format!("{base}/api/v1/chat/sessions/fake-id/resume")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -616,7 +618,7 @@ async fn e2e_get_session_memory_initially_empty() {
         .await
         .unwrap();
     assert!(memories.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -625,7 +627,7 @@ async fn e2e_get_session_memory_nonexistent() {
     let resp =
         client().get(format!("{base}/api/v1/chat/sessions/fake-id/memory")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -639,7 +641,7 @@ async fn e2e_get_session_memory_with_limit() {
     let resp =
         c.get(format!("{base}/api/v1/chat/sessions/{id}/memory?limit=5")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -675,7 +677,7 @@ async fn e2e_workspace_file_routes_round_trip() {
     let entries: Vec<Value> = list_resp.json().await.unwrap();
     assert!(entries.iter().any(|entry| entry["path"] == "docs"));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -695,7 +697,7 @@ async fn e2e_list_risk_scans_initially_empty() {
         .await
         .unwrap();
     assert!(scans.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -707,7 +709,7 @@ async fn e2e_list_risk_scans_nonexistent_session() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -721,7 +723,7 @@ async fn e2e_list_risk_scans_with_limit() {
     let resp =
         c.get(format!("{base}/api/v1/chat/sessions/{id}/risk-scans?limit=3")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -733,7 +735,7 @@ async fn e2e_search_memory_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/memory/search")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -744,7 +746,7 @@ async fn e2e_search_memory_with_query() {
     assert_eq!(resp.status(), StatusCode::OK);
     let results: Vec<Value> = resp.json().await.unwrap();
     assert!(results.is_empty()); // No memories stored yet
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -756,7 +758,7 @@ async fn e2e_search_memory_with_limit() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -768,7 +770,7 @@ async fn e2e_list_mcp_servers_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/mcp/servers")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -783,7 +785,7 @@ async fn e2e_list_mcp_servers_returns_array() {
         .await
         .unwrap();
     assert!(resp.is_empty()); // No MCP servers configured by default
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -795,7 +797,7 @@ async fn e2e_connect_nonexistent_mcp_server() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -807,7 +809,7 @@ async fn e2e_disconnect_nonexistent_mcp_server() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -819,7 +821,7 @@ async fn e2e_list_mcp_tools_nonexistent_server() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -831,7 +833,7 @@ async fn e2e_list_mcp_resources_nonexistent_server() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -843,7 +845,7 @@ async fn e2e_list_mcp_prompts_nonexistent_server() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -851,7 +853,7 @@ async fn e2e_list_mcp_notifications_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/mcp/notifications")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -866,7 +868,7 @@ async fn e2e_list_mcp_notifications_returns_array() {
         .await
         .unwrap();
     assert!(resp.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -875,7 +877,7 @@ async fn e2e_list_mcp_notifications_with_limit() {
     let resp =
         client().get(format!("{base}/api/v1/mcp/notifications?limit=10")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -887,7 +889,7 @@ async fn e2e_list_tools_returns_200() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/tools")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -896,7 +898,7 @@ async fn e2e_list_tools_returns_nonempty() {
     let tools: Vec<Value> =
         client().get(format!("{base}/api/v1/tools")).send().await.unwrap().json().await.unwrap();
     assert!(!tools.is_empty(), "should have at least one tool registered");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -908,7 +910,7 @@ async fn e2e_list_tools_each_has_id_and_name() {
         assert!(tool["id"].is_string(), "tool should have 'id': {tool:?}");
         assert!(tool["name"].is_string(), "tool should have 'name': {tool:?}");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -919,7 +921,7 @@ async fn e2e_list_tools_each_has_description() {
     for tool in &tools {
         assert!(tool["description"].is_string(), "tool should have 'description': {tool:?}");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -932,7 +934,7 @@ async fn e2e_invoke_nonexistent_tool() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -953,7 +955,7 @@ async fn e2e_invoke_calculator_tool() {
         .await;
         assert!(resp.status().is_success() || resp.status() == StatusCode::BAD_GATEWAY);
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -976,7 +978,7 @@ async fn e2e_invoke_echo_tool() {
         // but it should not 404 (the tool exists)
         assert_ne!(resp.status(), StatusCode::NOT_FOUND, "echo tool should exist");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -997,7 +999,7 @@ async fn e2e_invoke_datetime_tool() {
         // The tool may fail at runtime (e.g. BAD_GATEWAY) but it should exist
         assert_ne!(resp.status(), StatusCode::NOT_FOUND, "datetime tool should exist");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1012,7 +1014,7 @@ async fn e2e_invoke_tool_bad_json_body() {
         .unwrap();
     // Should be 400 or 422
     assert!(resp.status().is_client_error());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1088,7 +1090,7 @@ async fn e2e_scheduler_list_initially_empty() {
         .await
         .unwrap();
     assert!(tasks.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1101,7 +1103,7 @@ async fn e2e_scheduler_create_once_task() {
     assert_eq!(task["name"], "task1");
     assert_eq!(task["status"], "pending");
     assert_eq!(task["schedule"]["type"], "once");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1115,7 +1117,7 @@ async fn e2e_scheduler_create_cron_task() {
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["schedule"]["type"], "cron");
     assert_eq!(task["schedule"]["expression"], "0 */2 * * * * *");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1130,7 +1132,7 @@ async fn e2e_scheduler_create_scheduled_task() {
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["schedule"]["type"], "scheduled");
     assert!(task["schedule"]["run_at_ms"].as_u64().is_some());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1142,7 +1144,7 @@ async fn e2e_scheduler_create_webhook_task() {
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["action"]["type"], "http_webhook");
     assert_eq!(task["action"]["url"], "http://localhost:1234/hook");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1153,7 +1155,7 @@ async fn e2e_scheduler_create_send_message_task() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["action"]["type"], "send_message");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1165,7 +1167,7 @@ async fn e2e_scheduler_get_task_by_id() {
     let task: Value = get_json(&c, &format!("{base}/api/v1/scheduler/tasks/{id}")).await;
     assert_eq!(task["id"], id);
     assert_eq!(task["name"], "findme");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1174,7 +1176,7 @@ async fn e2e_scheduler_get_nonexistent_task() {
     let resp =
         client().get(format!("{base}/api/v1/scheduler/tasks/does-not-exist")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1188,7 +1190,7 @@ async fn e2e_scheduler_delete_task() {
 
     let resp = c.get(format!("{base}/api/v1/scheduler/tasks/{id}")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1196,7 +1198,7 @@ async fn e2e_scheduler_delete_nonexistent_task() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().delete(format!("{base}/api/v1/scheduler/tasks/nope")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1209,7 +1211,7 @@ async fn e2e_scheduler_cancel_task() {
     assert_eq!(resp.status(), StatusCode::OK);
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["status"], "cancelled");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1223,7 +1225,7 @@ async fn e2e_scheduler_cancel_preserves_data() {
     let task: Value = get_json(&c, &format!("{base}/api/v1/scheduler/tasks/{id}")).await;
     assert_eq!(task["name"], "keep_data");
     assert_eq!(task["status"], "cancelled");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1232,7 +1234,7 @@ async fn e2e_scheduler_cancel_nonexistent_task() {
     let resp =
         client().post(format!("{base}/api/v1/scheduler/tasks/nope/cancel")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1246,7 +1248,7 @@ async fn e2e_scheduler_list_after_creating_multiple() {
     let tasks: Vec<Value> =
         c.get(format!("{base}/api/v1/scheduler/tasks")).send().await.unwrap().json().await.unwrap();
     assert!(tasks.len() >= 3);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1256,7 +1258,7 @@ async fn e2e_scheduler_task_has_timestamps() {
     let id = create_task_id(&c, &base, once_task("ts_test")).await;
     let task: Value = get_json(&c, &format!("{base}/api/v1/scheduler/tasks/{id}")).await;
     assert!(task["created_at_ms"].as_u64().unwrap() > 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1266,7 +1268,7 @@ async fn e2e_scheduler_task_has_run_count_zero() {
     let id = create_task_id(&c, &base, once_task("rc_test")).await;
     let task: Value = get_json(&c, &format!("{base}/api/v1/scheduler/tasks/{id}")).await;
     assert_eq!(task["run_count"], 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1278,7 +1280,7 @@ async fn e2e_scheduler_delete_after_cancel() {
 
     let resp = c.delete(format!("{base}/api/v1/scheduler/tasks/{id}")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1308,7 +1310,7 @@ async fn e2e_kg_create_node() {
     let c = client();
     let id = create_node(&c, &base, "function", "my_func", Some("body")).await;
     assert!(id > 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1321,7 +1323,7 @@ async fn e2e_kg_get_node() {
     assert_eq!(node["node_type"], "class");
     assert_eq!(node["name"], "MyClass");
     assert_eq!(node["content"], "a class");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1329,7 +1331,7 @@ async fn e2e_kg_get_node_not_found() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/knowledge/nodes/99999")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1339,7 +1341,7 @@ async fn e2e_kg_create_node_without_content() {
     let id = create_node(&c, &base, "module", "bare_module", None).await;
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert!(node["content"].is_null());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1357,7 +1359,7 @@ async fn e2e_kg_create_node_with_data_class() {
 
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert_eq!(node["data_class"], "restricted");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1371,7 +1373,7 @@ async fn e2e_kg_delete_node() {
 
     let resp = c.get(format!("{base}/api/v1/knowledge/nodes/{id}")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1383,7 +1385,7 @@ async fn e2e_kg_delete_node_twice() {
     c.delete(format!("{base}/api/v1/knowledge/nodes/{id}")).send().await.unwrap();
     let resp = c.delete(format!("{base}/api/v1/knowledge/nodes/{id}")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1392,7 +1394,7 @@ async fn e2e_kg_delete_nonexistent_node() {
     let resp =
         client().delete(format!("{base}/api/v1/knowledge/nodes/99999")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1407,7 +1409,7 @@ async fn e2e_kg_list_nodes_empty() {
         .await
         .unwrap();
     assert!(nodes.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1421,7 +1423,7 @@ async fn e2e_kg_list_nodes() {
     let nodes: Vec<Value> =
         c.get(format!("{base}/api/v1/knowledge/nodes")).send().await.unwrap().json().await.unwrap();
     assert!(nodes.len() >= 3);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1444,7 +1446,7 @@ async fn e2e_kg_list_nodes_filter_by_type() {
     for n in &nodes {
         assert_eq!(n["node_type"], "function");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1464,7 +1466,7 @@ async fn e2e_kg_list_nodes_with_limit() {
         .await
         .unwrap();
     assert_eq!(nodes.len(), 3);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1474,7 +1476,7 @@ async fn e2e_kg_node_has_default_data_class() {
     let id = create_node(&c, &base, "entity", "default_dc", None).await;
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert_eq!(node["data_class"], "internal");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1501,7 +1503,7 @@ async fn e2e_kg_create_edge() {
     let n2 = create_node(&c, &base, "b", "tgt", None).await;
     let eid = create_edge(&c, &base, n1, n2, "calls").await;
     assert!(eid > 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1518,7 +1520,7 @@ async fn e2e_kg_create_edge_with_weight() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1540,7 +1542,7 @@ async fn e2e_kg_get_edges_for_node() {
         .await
         .unwrap();
     assert_eq!(edges.len(), 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1558,7 +1560,7 @@ async fn e2e_kg_get_edges_for_node_with_no_edges() {
         .await
         .unwrap();
     assert!(edges.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1581,7 +1583,7 @@ async fn e2e_kg_delete_edge() {
         .await
         .unwrap();
     assert!(edges.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1595,7 +1597,7 @@ async fn e2e_kg_delete_edge_twice() {
     c.delete(format!("{base}/api/v1/knowledge/edges/{eid}")).send().await.unwrap();
     let resp = c.delete(format!("{base}/api/v1/knowledge/edges/{eid}")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1604,7 +1606,7 @@ async fn e2e_kg_delete_nonexistent_edge() {
     let resp =
         client().delete(format!("{base}/api/v1/knowledge/edges/99999")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1625,7 +1627,7 @@ async fn e2e_kg_edge_appears_on_target_node_too() {
         .unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0]["target_id"], n2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1639,7 +1641,7 @@ async fn e2e_kg_get_node_includes_edges() {
     let node_with_edges: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{n1}")).await;
     assert_eq!(node_with_edges["id"], n1);
     assert!(!node_with_edges["edges"].as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1660,7 +1662,7 @@ async fn e2e_kg_multiple_edges_between_same_nodes() {
         .await
         .unwrap();
     assert_eq!(edges.len(), 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1675,7 +1677,7 @@ async fn e2e_kg_search_empty_db() {
     assert_eq!(resp.status(), StatusCode::OK);
     let results: Vec<Value> = resp.json().await.unwrap();
     assert!(results.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1696,7 +1698,7 @@ async fn e2e_kg_search_finds_by_content() {
     assert!(!results.is_empty());
     let names: Vec<&str> = results.iter().filter_map(|r| r["name"].as_str()).collect();
     assert!(names.contains(&"parse_json"));
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1715,7 +1717,7 @@ async fn e2e_kg_search_finds_by_name() {
         .await
         .unwrap();
     assert!(!results.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1735,7 +1737,7 @@ async fn e2e_kg_search_with_limit() {
         .await
         .unwrap();
     assert!(results.len() <= 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1753,7 +1755,7 @@ async fn e2e_kg_search_no_matches() {
         .await
         .unwrap();
     assert!(results.is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1766,7 +1768,7 @@ async fn e2e_kg_stats_empty() {
     let stats: Value = get_json(&client(), &format!("{base}/api/v1/knowledge/stats")).await;
     assert_eq!(stats["node_count"], 0);
     assert_eq!(stats["edge_count"], 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1780,7 +1782,7 @@ async fn e2e_kg_stats_after_inserts() {
     let stats: Value = get_json(&c, &format!("{base}/api/v1/knowledge/stats")).await;
     assert!(stats["node_count"].as_i64().unwrap() >= 2);
     assert!(stats["edge_count"].as_i64().unwrap() >= 1);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1794,7 +1796,7 @@ async fn e2e_kg_stats_nodes_by_type() {
     let stats: Value = get_json(&c, &format!("{base}/api/v1/knowledge/stats")).await;
     let by_type = stats["nodes_by_type"].as_array().unwrap();
     assert!(by_type.len() >= 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1810,7 +1812,7 @@ async fn e2e_kg_stats_edges_by_type() {
     let stats: Value = get_json(&c, &format!("{base}/api/v1/knowledge/stats")).await;
     let by_type = stats["edges_by_type"].as_array().unwrap();
     assert!(by_type.len() >= 2);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1828,7 +1830,7 @@ async fn e2e_kg_stats_after_delete() {
     let stats_after: Value = get_json(&c, &format!("{base}/api/v1/knowledge/stats")).await;
     let count_after = stats_after["node_count"].as_i64().unwrap();
     assert_eq!(count_after, count_before - 1);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1840,7 +1842,7 @@ async fn e2e_local_models_list_503() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/local-models")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1848,7 +1850,7 @@ async fn e2e_local_models_get_503() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/local-models/some-id")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1856,7 +1858,7 @@ async fn e2e_local_models_delete_503() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().delete(format!("{base}/api/v1/local-models/some-id")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1864,7 +1866,7 @@ async fn e2e_local_models_hardware_503() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/local-models/hardware")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1876,7 +1878,7 @@ async fn e2e_local_models_search_503() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1889,7 +1891,7 @@ async fn e2e_local_models_install_503() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1904,7 +1906,7 @@ async fn e2e_local_models_list_empty() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["installed_count"], 0);
     assert!(body["models"].as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1913,7 +1915,7 @@ async fn e2e_local_models_get_not_found() {
     let resp =
         client().get(format!("{base}/api/v1/local-models/nonexistent")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1922,7 +1924,7 @@ async fn e2e_local_models_remove_not_found() {
     let resp =
         client().delete(format!("{base}/api/v1/local-models/nonexistent")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1932,7 +1934,7 @@ async fn e2e_local_models_hardware_returns_valid() {
     assert!(!resp["hardware"]["cpu"]["name"].as_str().unwrap().is_empty());
     assert!(resp["hardware"]["cpu"]["cores_logical"].as_u64().unwrap() >= 1);
     assert_eq!(resp["usage"]["models_loaded"], 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1942,7 +1944,7 @@ async fn e2e_local_models_hardware_has_memory_info() {
     // Memory detection may return 0 on some CI/test systems, so just check the field exists
     assert!(resp["hardware"]["memory"]["total_bytes"].is_number());
     assert!(resp["hardware"]["memory"]["available_bytes"].is_number());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1950,7 +1952,7 @@ async fn e2e_local_models_healthz_works() {
     let (base, shutdown, _d) = boot_server_with_local_models().await;
     let resp = client().get(format!("{base}/healthz")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ==========================================================================
@@ -1969,7 +1971,7 @@ async fn e2e_cors_headers_present() {
     // CorsLayer::permissive() should return access-control-allow-origin
     let headers = resp.headers();
     assert!(headers.contains_key("access-control-allow-origin"), "CORS headers should be present");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1978,7 +1980,7 @@ async fn e2e_content_type_is_json() {
     let resp = client().get(format!("{base}/healthz")).send().await.unwrap();
     let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(ct.contains("application/json"));
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1998,7 +2000,7 @@ async fn e2e_concurrent_requests() {
     for h in handles {
         h.await.unwrap();
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2010,7 +2012,7 @@ async fn e2e_large_node_content() {
 
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert_eq!(node["content"].as_str().unwrap().len(), 10_000);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2023,7 +2025,7 @@ async fn e2e_unicode_node_content() {
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert!(node["content"].as_str().unwrap().contains("🦀"));
     assert!(node["content"].as_str().unwrap().contains("日本語"));
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2041,7 +2043,7 @@ async fn e2e_unicode_chat_message() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2057,7 +2059,7 @@ async fn e2e_empty_message_content() {
             .await;
     // Should still accept (or reject gracefully)
     assert!(resp.status().is_success() || resp.status().is_client_error());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2075,7 +2077,7 @@ async fn e2e_scheduler_task_description_optional() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2092,7 +2094,7 @@ async fn e2e_session_summaries_have_required_fields() {
         assert!(s["state"].is_string());
         assert!(s["updated_at_ms"].is_number());
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2102,7 +2104,7 @@ async fn e2e_kg_node_special_characters_in_name() {
     let id = create_node(&c, &base, "func", "my::nested::func<T>", None).await;
     let node: Value = get_json(&c, &format!("{base}/api/v1/knowledge/nodes/{id}")).await;
     assert_eq!(node["name"], "my::nested::func<T>");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2126,7 +2128,7 @@ async fn e2e_multiple_sessions_isolated() {
     // Session 2 should have no messages
     let snap: Value = get_json(&c, &format!("{base}/api/v1/chat/sessions/{id2}")).await;
     assert!(snap["messages"].as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2165,7 +2167,7 @@ async fn e2e_kg_complex_graph_traversal() {
         .unwrap();
     assert_eq!(b_edges.len(), 2); // one incoming from A, one outgoing to C
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2186,7 +2188,7 @@ async fn e2e_scheduler_cron_schedule() {
     let task: Value = resp.json().await.unwrap();
     assert_eq!(task["schedule"]["type"], "cron");
     assert_eq!(task["schedule"]["expression"], "0 */5 * * * *");
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2194,7 +2196,7 @@ async fn e2e_config_has_local_models_section() {
     let (base, shutdown, _d) = boot_server().await;
     let resp: Value = get_json(&client(), &format!("{base}/api/v1/config/get")).await;
     assert!(resp["local_models"].is_object());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2204,7 +2206,7 @@ async fn e2e_chat_session_queued_count_zero_initially() {
     let resp: Value =
         c.post(format!("{base}/api/v1/chat/sessions")).send().await.unwrap().json().await.unwrap();
     assert_eq!(resp["queued_count"], 0);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2226,7 +2228,7 @@ async fn e2e_kg_search_data_class_filter() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2259,7 +2261,7 @@ async fn e2e_kg_list_nodes_data_class_filter() {
     for n in &nodes {
         assert_eq!(n["data_class"], "restricted");
     }
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2277,7 +2279,7 @@ async fn e2e_send_message_with_scan_decision() {
     )
     .await;
     assert!(resp.status().is_success());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2287,7 +2289,7 @@ async fn e2e_session_recalled_memories_empty() {
     let resp: Value =
         c.post(format!("{base}/api/v1/chat/sessions")).send().await.unwrap().json().await.unwrap();
     assert!(resp["recalled_memories"].as_array().unwrap().is_empty());
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2295,7 +2297,7 @@ async fn e2e_post_to_get_only_endpoint() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().post(format!("{base}/api/v1/config/get")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2303,7 +2305,7 @@ async fn e2e_get_to_post_only_endpoint() {
     let (base, shutdown, _d) = boot_server().await;
     let resp = client().get(format!("{base}/api/v1/daemon/shutdown")).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2324,7 +2326,7 @@ async fn e2e_concurrent_session_creation() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), 5);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2340,7 +2342,7 @@ async fn e2e_concurrent_kg_writes() {
 
     let stats: Value = get_json(&c, &format!("{base}/api/v1/knowledge/stats")).await;
     assert!(stats["node_count"].as_i64().unwrap() >= 10);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -2365,5 +2367,5 @@ async fn e2e_concurrent_scheduler_tasks() {
     let tasks: Vec<Value> =
         c.get(format!("{base}/api/v1/scheduler/tasks")).send().await.unwrap().json().await.unwrap();
     assert!(tasks.len() >= 5);
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }

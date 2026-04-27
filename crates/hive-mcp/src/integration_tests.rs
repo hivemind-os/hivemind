@@ -192,6 +192,8 @@ impl ServerHandler for MockServer {
             return Ok(CallToolResult {
                 content: vec![Content::text(msg.clone())],
                 is_error: Some(true),
+                structured_content: None,
+                meta: None,
             });
         }
         // Echo back the tool name and arguments for verification

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 arc-swap = { workspace = true }
 hive-classification = { path = "../hive-classification" }
+hive-code-executor = { path = "../hive-code-executor" }
 hive-contracts = { path = "../hive-contracts" }
 hive-loop = { path = "../hive-loop" }
 hive-model = { path = "../hive-model" }

@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '~/ui/button';
 import { renderMarkdown } from '~/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '~/ui/popover';
-import { Rocket, ClipboardList, MessageSquare, Wrench, XCircle, CheckCircle2, BarChart3, ArrowLeftRight, RefreshCw, Play, Pause, Settings, Trash2, Send, Upload, Brain, Lock, HelpCircle, CheckCircle, ShieldAlert, BookOpen, X, Maximize2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-solid';
+import { Rocket, ClipboardList, MessageSquare, Wrench, XCircle, CheckCircle2, BarChart3, ArrowLeftRight, RefreshCw, Play, Pause, Settings, Trash2, Send, Upload, Brain, Lock, HelpCircle, CheckCircle, ShieldAlert, BookOpen, X, Maximize2, RotateCcw, ZoomIn, ZoomOut, Cpu } from 'lucide-solid';
 
 interface AgentStageProps {
   session_id: string;
@@ -66,6 +66,11 @@ interface ReasoningEvent {
   choices?: string[];
   allow_freeform?: boolean;
   tool_result_counts?: Record<string, number>;
+  // CodeExecution fields
+  code?: string;
+  stdout?: string;
+  stderr?: string;
+  duration_ms?: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -154,6 +159,14 @@ const renderEvent = (ev: SupervisorEvent) => {
           return <span class="ev-error"><XCircle size={14} /> {re.error}</span>;
         case 'step_started':
           return <span class="ev-step"><ClipboardList size={14} /> {re.description}</span>;
+        case 'code_execution':
+          if (re.code) {
+            return <span class="ev-tool"><Cpu size={14} /> Code: {truncate(re.code.split('\n')[0] || '', 80)}</span>;
+          }
+          if (re.is_error) {
+            return <span class="ev-error"><XCircle size={14} /> Code error{re.duration_ms ? ` (${(re.duration_ms / 1000).toFixed(1)}s)` : ''}</span>;
+          }
+          return <span class="ev-tool-done"><CheckCircle2 size={14} /> Code executed{re.duration_ms ? ` (${(re.duration_ms / 1000).toFixed(1)}s)` : ''}{re.stdout ? `: ${truncate(re.stdout, 100)}` : ''}</span>;
         default:
           return <span><Upload size={14} /> {re.type}</span>;
       }

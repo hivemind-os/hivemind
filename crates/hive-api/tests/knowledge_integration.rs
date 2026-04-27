@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 /// Boot a test server with a real knowledge-graph DB in a temp directory.
-async fn boot_kg_server() -> (String, Arc<Notify>, TempDir) {
+async fn boot_kg_server() -> (String, CancellationToken, TempDir) {
     let tempdir = tempfile::tempdir().expect("temp dir");
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -18,7 +18,7 @@ async fn boot_kg_server() -> (String, Arc<Notify>, TempDir) {
 
     let audit = AuditLogger::new(tempdir.path().join("audit.log")).expect("audit");
     let event_bus = EventBus::new(32);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
     let model_router = chat::build_model_router_from_config(&config, None, None)
         .expect("model router from config");
@@ -52,6 +52,7 @@ async fn boot_kg_server() -> (String, Arc<Notify>, TempDir) {
         Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         Arc::new(hive_contracts::DetectedShells::default()),
         hive_contracts::ToolLimitsConfig::default(),
+        hive_contracts::CodeActConfig::default(),
         None, // plugin_host
         None, // plugin_registry
     ));
@@ -65,7 +66,7 @@ async fn boot_kg_server() -> (String, Arc<Notify>, TempDir) {
 
     tokio::spawn(async move {
         axum::serve(listener, router)
-            .with_graceful_shutdown(async move { server_shutdown.notified().await })
+            .with_graceful_shutdown(async move { server_shutdown.cancelled().await })
             .await
             .expect("serve");
     });
@@ -164,7 +165,7 @@ async fn test_create_and_get_node() {
     assert_eq!(body["name"], "my_func");
     assert_eq!(body["content"], "does stuff");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -192,7 +193,7 @@ async fn test_list_nodes() {
     let modules: Vec<Value> = resp.json().await.expect("json");
     assert_eq!(modules.len(), 2, "expected 2 modules, got {}", modules.len());
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -223,7 +224,7 @@ async fn test_delete_node() {
         .expect("DELETE again");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -264,7 +265,7 @@ async fn test_create_and_get_edge() {
     assert_eq!(edges[0]["target_id"], tgt);
     assert_eq!(edges[0]["edge_type"], "contains");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -310,7 +311,7 @@ async fn test_delete_edge() {
         .expect("DELETE again");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -348,7 +349,7 @@ async fn test_search_nodes() {
         "search results should contain parse_json, got: {names:?}"
     );
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -379,7 +380,7 @@ async fn test_get_stats() {
         "expected at least 1 edge type"
     );
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +423,7 @@ async fn test_get_neighbors_returns_connected_nodes() {
     assert!(neighbor_ids.contains(&n2));
     assert!(neighbor_ids.contains(&n3));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -447,7 +448,7 @@ async fn test_get_neighbors_with_limit() {
     let neighbors = body["neighbors"].as_array().expect("neighbors");
     assert!(neighbors.len() <= 2, "should respect limit, got {}", neighbors.len());
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -469,7 +470,7 @@ async fn test_get_neighbors_isolated_node() {
     assert!(body["edges"].as_array().unwrap().is_empty());
     assert!(body["neighbors"].as_array().unwrap().is_empty());
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -484,7 +485,7 @@ async fn test_get_neighbors_nonexistent_node() {
         .expect("GET neighbors missing");
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -512,7 +513,7 @@ async fn test_get_neighbors_bidirectional_edges() {
     let edges = body["edges"].as_array().unwrap();
     assert_eq!(edges.len(), 2, "should have both edges");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -539,7 +540,7 @@ async fn test_update_node_name() {
     assert_eq!(body["name"], "new_name");
     assert_eq!(body["content"], "original content");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -566,7 +567,7 @@ async fn test_update_node_content() {
     assert_eq!(body["name"], "stable_name");
     assert_eq!(body["content"], "v2 content with more detail");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -593,7 +594,7 @@ async fn test_update_node_data_class() {
     let body: Value = resp.json().await.expect("json");
     assert_eq!(body["data_class"], "public");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -625,7 +626,7 @@ async fn test_update_node_multiple_fields() {
     assert_eq!(body["content"], "updated documentation");
     assert_eq!(body["data_class"], "public");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -652,7 +653,7 @@ async fn test_update_node_empty_body_is_noop() {
     assert_eq!(body["name"], "no_change");
     assert_eq!(body["content"], "same");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -668,7 +669,7 @@ async fn test_update_nonexistent_node_returns_404() {
         .expect("PUT missing");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -687,7 +688,7 @@ async fn test_vector_search_without_runtime_returns_503() {
         "vector search should 503 without runtime_manager"
     );
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -703,7 +704,7 @@ async fn test_create_node_without_content() {
     assert_eq!(body["name"], "counter");
     assert!(body["content"].is_null(), "content should be null when not provided");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -726,7 +727,7 @@ async fn test_create_node_with_data_class() {
     let body: Value = resp.json().await.expect("json");
     assert_eq!(body["data_class"], "public");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -747,7 +748,7 @@ async fn test_list_nodes_with_limit() {
     let nodes: Vec<Value> = resp.json().await.expect("json");
     assert_eq!(nodes.len(), 3, "should respect limit");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -771,7 +772,7 @@ async fn test_get_node_includes_edges() {
     assert_eq!(edges[0]["edge_type"], "contains");
     assert_eq!(edges[0]["weight"], 2.0);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -795,7 +796,7 @@ async fn test_delete_node_cascades_edges() {
     let edges: Vec<Value> = resp.json().await.expect("json");
     assert!(edges.is_empty(), "edges referencing deleted node should be gone");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -822,7 +823,7 @@ async fn test_edge_default_weight() {
     let edges: Vec<Value> = resp.json().await.expect("json");
     assert_eq!(edges[0]["weight"], 1.0, "default weight should be 1.0");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -841,7 +842,7 @@ async fn test_search_no_results() {
     let results: Vec<Value> = resp.json().await.expect("json");
     assert!(results.is_empty(), "no results expected for nonsense query");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -869,7 +870,7 @@ async fn test_search_with_limit() {
     let results: Vec<Value> = resp.json().await.expect("json");
     assert!(results.len() <= 3, "should respect limit, got {}", results.len());
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -885,7 +886,7 @@ async fn test_stats_empty_graph() {
     assert!(stats["nodes_by_type"].as_array().unwrap().is_empty());
     assert!(stats["edges_by_type"].as_array().unwrap().is_empty());
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -931,7 +932,7 @@ async fn test_complex_graph_traversal() {
     assert!(neighbor_ids.contains(&mod_a));
     assert!(neighbor_ids.contains(&class_x));
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -960,7 +961,7 @@ async fn test_stats_reflect_types() {
     let edge_types = stats["edges_by_type"].as_array().unwrap();
     assert_eq!(edge_types.len(), 2, "should have 2 edge types");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -993,7 +994,7 @@ async fn test_update_then_search_reflects_changes() {
     let found = results.iter().any(|r| r["id"] == id);
     assert!(found, "updated node should appear in search results");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1036,7 +1037,7 @@ async fn test_neighbors_after_edge_deletion() {
     assert_eq!(neighbors.len(), 1);
     assert_eq!(neighbors[0]["id"], child2);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1061,7 +1062,7 @@ async fn test_list_nodes_filter_by_data_class() {
     );
     assert!(nodes.iter().any(|n| n["name"] == "pub_fn"), "pub_fn should be present");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1078,7 +1079,7 @@ async fn test_node_timestamps_are_present() {
     assert!(body["created_at"].is_string(), "created_at should be present");
     assert!(body["updated_at"].is_string(), "updated_at should be present");
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -1130,5 +1131,5 @@ async fn test_crud_lifecycle() {
     let stats: Value = resp.json().await.expect("json");
     assert_eq!(stats["node_count"], 0);
 
-    shutdown.notify_waiters();
+    shutdown.cancel();
 }

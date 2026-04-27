@@ -41,6 +41,8 @@ pub struct HiveMindConfig {
     pub tool_limits: ToolLimitsConfig,
     #[serde(default)]
     pub web_search: WebSearchConfig,
+    #[serde(default)]
+    pub code_act: CodeActConfig,
 }
 
 impl HiveMindConfig {
@@ -870,6 +872,7 @@ pub enum LoopStrategy {
     React,
     Sequential,
     PlanThenExecute,
+    CodeAct,
 }
 
 /// How batched tool calls from a single LLM response are executed.
@@ -1446,6 +1449,44 @@ impl WebSearchConfig {
                 Some(key.clone())
             }
         })
+    }
+}
+
+// ── CodeAct Sandbox Config ─────────────────────────────────────────
+
+/// Configuration for the CodeAct sandbox (Python code execution).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeActConfig {
+    /// Whether CodeAct code execution is enabled.
+    pub enabled: bool,
+
+    /// Execution timeout per code block in seconds.
+    pub execution_timeout_secs: u64,
+
+    /// Maximum output size in bytes before truncation.
+    pub max_output_bytes: usize,
+
+    /// Session idle timeout in seconds before the REPL is reaped.
+    pub idle_timeout_secs: u64,
+
+    /// Maximum number of concurrent executor sessions.
+    pub max_sessions: usize,
+
+    /// Whether to allow network access from executed code.
+    pub allow_network: bool,
+}
+
+impl Default for CodeActConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            execution_timeout_secs: 30,
+            max_output_bytes: 1_048_576, // 1 MB
+            idle_timeout_secs: 600,      // 10 min
+            max_sessions: 3,
+            allow_network: true,
+        }
     }
 }
 

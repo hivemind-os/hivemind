@@ -7,7 +7,7 @@ use hive_classification::DataClass;
 use hive_core::{discover_paths, ensure_paths, load_config, AuditLogger, EventBus, NewAuditEntry};
 use std::fs::{self, OpenOptions};
 use std::sync::Arc;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -239,7 +239,7 @@ fn main() -> Result<()> {
     // Build AppState (and its reqwest::blocking clients) BEFORE entering the
     // tokio runtime so the blocking clients' internal runtimes are not nested.
     let event_bus = EventBus::new(config.daemon.event_bus_capacity);
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
     let mut state = AppState::new(
         config.clone(),
         audit.clone(),
@@ -263,7 +263,7 @@ fn main() -> Result<()> {
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 warn!("ctrl-c received, shutting daemon down");
-                ctrl_c_shutdown.notify_waiters();
+                ctrl_c_shutdown.cancel();
             }
         });
         #[cfg(unix)]
@@ -275,7 +275,7 @@ fn main() -> Result<()> {
                     Ok(mut stream) => {
                         stream.recv().await;
                         warn!("sigterm received, shutting daemon down");
-                        term_shutdown.notify_waiters();
+                        term_shutdown.cancel();
                     }
                     Err(e) => warn!("failed to install SIGTERM handler: {e}"),
                 }
@@ -290,7 +290,7 @@ fn main() -> Result<()> {
 
         axum::serve(listener, router)
             .with_graceful_shutdown(async move {
-                shutdown.notified().await;
+                shutdown.cancelled().await;
             })
             .await
             .context("daemon server exited with an error")?;

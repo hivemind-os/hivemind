@@ -7,6 +7,7 @@ members = [
     "crates/hive-canvas",
     "crates/hive-chat",
     "crates/hive-classification",
+    "crates/hive-code-executor",
     "crates/hive-connectors",
     "crates/hive-cli",
     "crates/hive-context-map",

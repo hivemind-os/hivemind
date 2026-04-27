@@ -27,6 +27,11 @@ interface ReasoningEvent {
   allow_freeform?: boolean;
   tool_result_counts?: Record<string, number>;
   estimated_tokens?: number;
+  // CodeExecution fields
+  code?: string;
+  stdout?: string;
+  stderr?: string;
+  duration_ms?: number;
 }
 
 export interface SupervisorEvent {
@@ -54,11 +59,13 @@ interface LoopEventDone { Done: { content: string; provider_id: string; model: s
 interface LoopEventError { Error: { message: string } }
 interface LoopEventAgentMessage { AgentSessionMessage: { from_agent_id: string; content: string } }
 interface LoopEventModelFallback { ModelFallback: { from_provider: string; from_model: string; to_provider: string; to_model: string } }
+interface LoopEventCodeExecution { CodeExecution: { phase: string; code?: string; stdout?: string; stderr?: string; is_error?: boolean; duration_ms?: number } }
 
 type LoopEvent =
   | LoopEventModelLoading | LoopEventToken | LoopEventModelDone
   | LoopEventToolCallStart | LoopEventToolCallResult | LoopEventUserInteraction
-  | LoopEventDone | LoopEventError | LoopEventAgentMessage | LoopEventModelFallback;
+  | LoopEventDone | LoopEventError | LoopEventAgentMessage | LoopEventModelFallback
+  | LoopEventCodeExecution;
 
 // A SessionEvent is either a SupervisorEvent (has "type" field) or a LoopEvent (variant name key)
 export type SessionEvent = SupervisorEvent | LoopEvent;
@@ -101,6 +108,7 @@ function isSupervisorEvent(ev: SessionEvent): ev is SupervisorEvent {
 const LOOP_VARIANTS = new Set([
   'ModelLoading', 'Token', 'ModelDone', 'ToolCallStart', 'ToolCallResult',
   'UserInteractionRequired', 'Done', 'Error', 'AgentSessionMessage', 'ModelFallback',
+  'CodeExecution',
 ]);
 
 function loopVariant(ev: SessionEvent): string | null {
@@ -124,6 +132,8 @@ const eventColorClass: Record<string, string> = {
   'evl-step': 'text-blue-400',
   'evl-fallback': 'text-amber-500 dark:text-amber-300',
   'evl-agent-msg': 'text-indigo-500 dark:text-indigo-300',
+  'evl-code': 'text-emerald-500 dark:text-emerald-300',
+  'evl-code-error': 'text-red-500 dark:text-red-400',
 };
 
 // ── Summary rendering (compact, no detail blobs) ─────────────────────
@@ -160,6 +170,17 @@ function loopEventSummary(ev: SessionEvent): { icon: JSX.Element; label: string;
       return { icon: <Users size={14} />, label: `Agent message from ${data.from_agent_id || ''}`, cls: 'evl-agent-msg' };
     case 'ModelFallback':
       return { icon: <ArrowRightLeft size={14} />, label: `Fallback: ${data.from_model} → ${data.to_model}`, cls: 'evl-fallback' };
+    case 'CodeExecution': {
+      const phase = data.phase || '';
+      if (phase === 'Started' || phase === 'started') {
+        const preview = data.code ? truncate(data.code.split('\n')[0] || '', 60) : '';
+        return { icon: <Cpu size={14} />, label: `Code: ${preview}`, cls: 'evl-code' };
+      }
+      if (data.is_error) {
+        return { icon: <XCircle size={14} />, label: `Code error${data.duration_ms ? ` (${(data.duration_ms / 1000).toFixed(1)}s)` : ''}`, cls: 'evl-code-error' };
+      }
+      return { icon: <CheckCircle size={14} />, label: `Code executed${data.duration_ms ? ` (${(data.duration_ms / 1000).toFixed(1)}s)` : ''}`, cls: 'evl-code' };
+    }
     case 'Done':
       return { icon: <CheckCircle size={14} />, label: 'Done', cls: 'evl-done' };
     case 'Token':
@@ -221,6 +242,13 @@ function eventSummary(ev: SessionEvent): { icon: JSX.Element; label: string; cls
           return { icon: <XCircle size={14} />, label: `Error`, cls: 'evl-error' };
         case 'step_started':
           return { icon: <ClipboardList size={14} />, label: re.description || 'Step', cls: 'evl-step' };
+        case 'code_execution': {
+          if (re.is_error) {
+            return { icon: <XCircle size={14} />, label: `Code error`, cls: 'evl-code-error' };
+          }
+          const preview = re.content ? truncate(re.content.split('\n')[0] || '', 60) : 'Code executed';
+          return { icon: <Cpu size={14} />, label: preview, cls: 'evl-code' };
+        }
         default:
           return { icon: <Upload size={14} />, label: re.type, cls: 'evl-status' };
       }
@@ -291,6 +319,15 @@ function loopEventDetail(ev: SessionEvent): { title: JSX.Element; sections: { la
       sections.push({ label: 'From', content: `${data.from_provider}/${data.from_model}` });
       sections.push({ label: 'To', content: `${data.to_provider}/${data.to_model}` });
       return { title: <><ArrowRightLeft size={14} /> Model Fallback</>, sections };
+
+    case 'CodeExecution': {
+      if (data.code) sections.push({ label: 'Code', content: data.code, isCode: true });
+      if (data.stdout) sections.push({ label: 'Output', content: data.stdout });
+      if (data.stderr) sections.push({ label: 'Stderr', content: data.stderr });
+      if (data.duration_ms != null) sections.push({ label: 'Duration', content: `${(data.duration_ms / 1000).toFixed(2)}s` });
+      const icon = data.is_error ? <XCircle size={14} /> : <Cpu size={14} />;
+      return { title: <>{icon} Code Execution</>, sections };
+    }
 
     case 'Done':
       sections.push({ label: 'Provider', content: data.provider_id ?? '' });

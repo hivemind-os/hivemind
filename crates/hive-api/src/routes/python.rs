@@ -20,20 +20,27 @@ pub(crate) async fn python_status_stream(
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
     let mut rx = state.python_env.subscribe();
     let current = state.python_env.status().await;
+    let shutdown = state.shutdown.clone();
     let stream = async_stream::stream! {
         // Send current status as initial event.
         yield Ok(Event::default().data(
             serde_json::to_string(&current).unwrap_or_default()
         ));
         loop {
-            match rx.recv().await {
-                Ok(status) => {
-                    yield Ok(Event::default().data(
-                        serde_json::to_string(&status).unwrap_or_default()
-                    ));
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(status) => {
+                            yield Ok(Event::default().data(
+                                serde_json::to_string(&status).unwrap_or_default()
+                            ));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             }
         }
     };

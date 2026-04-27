@@ -12,3 +12,5 @@ config.yaml
 .playwright-mcp/
 # VC++ Redistributable downloaded during Windows CI builds
 apps/hivemind-desktop/src-tauri/vc_redist.exe
+# CPython WASI binary for local CodeAct development/testing
+.python-wasm/

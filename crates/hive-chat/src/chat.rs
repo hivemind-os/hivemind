@@ -1010,6 +1010,10 @@ pub struct ChatService {
     default_permissions: Arc<Mutex<Vec<PermissionRule>>>,
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
+    code_act_config: hive_contracts::CodeActConfig,
+    /// Shared session registry for CodeAct code execution (None if WASM runtime unavailable).
+    code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
+
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
     mcp: Option<Arc<McpService>>,
@@ -1102,6 +1106,7 @@ impl ChatService {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            hive_contracts::CodeActConfig::default(),
             None, // plugin_host
             None, // plugin_registry
         )
@@ -1132,6 +1137,7 @@ impl ChatService {
         sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>>,
         detected_shells: Arc<hive_contracts::DetectedShells>,
         tool_limits: hive_contracts::ToolLimitsConfig,
+        code_act_config: hive_contracts::CodeActConfig,
         plugin_host: Option<Arc<hive_plugins::PluginHost>>,
         plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
     ) -> Self {
@@ -1554,6 +1560,39 @@ impl ChatService {
         let web_search_config_swap =
             Arc::new(ArcSwap::from_pointee(hive_contracts::WebSearchConfig::default()));
 
+        // Create the CodeAct session registry (once, shared across all conversations).
+        // Resolves python.wasm from env vars, hivemind_home, or sibling of exe.
+        let code_session_registry = {
+            let session_config = hive_code_executor::SessionConfig {
+                executor: hive_code_executor::ExecutorConfig {
+                    execution_timeout_secs: code_act_config.execution_timeout_secs,
+                    max_output_bytes: code_act_config.max_output_bytes,
+                    memory_limit_mb: 256,
+                    working_directory: None,
+                    allow_network: code_act_config.allow_network,
+                },
+                idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
+            };
+            let wasm_paths = hive_code_executor::resolve_python_wasm(Some(&hivemind_home));
+            match hive_code_executor::SessionRegistry::new_auto(
+                session_config,
+                code_act_config.max_sessions,
+                wasm_paths.as_ref().map(|p| p.wasm_binary.as_path()),
+                wasm_paths.as_ref().map(|p| p.stdlib_dir.as_path()),
+            ) {
+                Ok(registry) => Some(Arc::new(registry)),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "CodeAct WASM runtime unavailable — CodeAct personas will not work. \
+                         Install python.wasm to {}/runtimes/python-wasm/ or set PYTHON_WASM_PATH.",
+                        hivemind_home.display()
+                    );
+                    None
+                }
+            }
+        };
+
         let bot_service = crate::bot_service::BotService {
             bot_supervisor: Arc::clone(&bot_supervisor),
             bot_configs: Arc::clone(&bot_configs),
@@ -1582,6 +1621,7 @@ impl ChatService {
             web_search_config: Arc::clone(&web_search_config_swap),
             plugin_host: plugin_host.clone(),
             plugin_registry: plugin_registry.clone(),
+            code_session_registry: code_session_registry.clone(),
         };
 
         let indexing_service = crate::indexing_service::IndexingService {
@@ -1614,6 +1654,8 @@ impl ChatService {
             default_permissions: Arc::new(Mutex::new(Vec::new())),
             compaction_config: compaction_config_swap,
             tool_limits: Arc::new(tool_limits),
+            code_act_config,
+            code_session_registry,
             skills_service: bot_service.skills_service.clone(),
             mcp,
             mcp_catalog,
@@ -2824,11 +2866,11 @@ impl ChatService {
                 session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             tool_limits: (*self.tool_limits).clone(),
+            code_act_config: self.code_act_config.clone(),
+            session_registry: self.code_session_registry.clone(),
             preempt_signal: None,
             cancellation_token: None,
-        };
-
-        match self.loop_executor.call_tool(&context, tool_id, input).await {
+        };        match self.loop_executor.call_tool(&context, tool_id, input).await {
             Ok(result) => {
                 if let Err(e) = self.audit.append(NewAuditEntry::new(
                     "tools",
@@ -3991,7 +4033,7 @@ impl ChatService {
                     self.plugin_registry.clone(),
                 ));
 
-            let supervisor = Arc::new(AgentSupervisor::with_executor_and_persona_factory(
+            let mut supervisor = AgentSupervisor::with_executor_and_persona_factory(
                 256,
                 None,
                 Arc::clone(&self.loop_executor),
@@ -4008,7 +4050,11 @@ impl ChatService {
                 })),
                 Some(persona_tool_factory),
                 active_persona_id.clone(),
-            ));
+            );
+            if let Some(ref registry) = self.code_session_registry {
+                supervisor.set_code_session_registry(Arc::clone(registry));
+            }
+            let supervisor = Arc::new(supervisor);
             let stream_tx = session.stream_tx.clone();
             let session_logger = session.logger.clone();
             session.supervisor = Some(Arc::clone(&supervisor));
@@ -6473,11 +6519,13 @@ impl ChatService {
                     personas,
                     current_agent_id: None,
                     parent_agent_id: None,
-                    workspace_path: None,
+                    workspace_path: if workspace_path.is_empty() { None } else { Some(PathBuf::from(&workspace_path)) },
                     keep_alive: false,
                     session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
                 tool_limits: (*self.tool_limits).clone(),
+                code_act_config: self.code_act_config.clone(),
+                session_registry: self.code_session_registry.clone(),
                 preempt_signal: None, // Set below after reading session state.
                 cancellation_token: None,
             };
@@ -9320,6 +9368,15 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 input: serde_json::from_str(input).unwrap_or_else(|_| json!(input)),
             }
         }
+        LoopEvent::CodeExecution { code, stdout, stderr, is_error, duration_ms, .. } => {
+            ReasoningEvent::CodeExecution {
+                code: code.clone(),
+                stdout: stdout.clone(),
+                stderr: stderr.clone(),
+                is_error: *is_error,
+                duration_ms: *duration_ms,
+            }
+        }
     }
 }
 
@@ -11141,25 +11198,32 @@ mod tests {
             .await
             .expect("create session");
 
-        // First message starts processing (should_spawn = true, processing set to true).
+        // Manually set processing = true so enqueue_message won't spawn a
+        // real background worker (which would race with us in the test).
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
+        }
+
+        // First message while processing → queued but no spawn.
         let resp1 = service
             .enqueue_message(&session.id, make_request("first message"))
             .await
             .expect("enqueue first");
         assert!(
             matches!(resp1, SendMessageResponse::Queued { .. }),
-            "first message should be queued and spawn worker"
+            "first message should be queued"
         );
 
-        // Verify session is now processing and signal is false.
+        // Verify session is processing and preempt signal is set from first enqueue.
+        // (because processing was already true, first enqueue sets the signal)
         {
-            let sessions = service.sessions.read().await;
-            let record = sessions.get(&session.id).expect("session record");
-            assert!(record.processing, "session should be processing after first enqueue");
-            assert!(
-                !record.preempt_signal.load(std::sync::atomic::Ordering::Acquire),
-                "signal should be false before second enqueue"
-            );
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            assert!(record.processing, "session should still be processing");
+            // Reset signal for the actual test of second enqueue.
+            record.preempt_signal.store(false, std::sync::atomic::Ordering::Release);
         }
 
         // Second message arrives while processing → should set signal.
@@ -11226,18 +11290,14 @@ mod tests {
             .await
             .expect("create session");
 
-        // First message starts processing.
-        service
-            .enqueue_message(&session.id, make_request("first message"))
-            .await
-            .expect("enqueue first");
-
-        // Simulate the agent asking a question by creating a pending
-        // interaction on the gate and inserting a question message.
+        // Simulate: the agent is currently processing a turn and has asked
+        // a question. We set up state directly to avoid spawning a real
+        // background worker (which would race with our assertions).
         let request_id = "question-test-123".to_string();
         {
             let mut sessions = service.sessions.write().await;
             let record = sessions.get_mut(&session.id).expect("session record");
+            record.processing = true;
             let _rx = record.interaction_gate.create_request(
                 request_id.clone(),
                 InteractionKind::Question {
@@ -11407,6 +11467,7 @@ mod tests {
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
             Arc::new(hive_contracts::DetectedShells::default()),
             hive_contracts::ToolLimitsConfig::default(),
+            hive_contracts::CodeActConfig::default(),
             None, // plugin_host
             None, // plugin_registry
         ));

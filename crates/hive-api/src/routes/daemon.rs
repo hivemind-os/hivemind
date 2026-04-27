@@ -52,7 +52,7 @@ pub(crate) async fn shutdown(State(state): State<AppState>) -> Json<ShutdownResp
         tracing::warn!(error = %e, "failed to publish shutdown event");
     }
 
-    state.shutdown.notify_waiters();
+    state.shutdown.cancel();
     Json(ShutdownResponse { message: "Daemon shutting down".to_string() })
 }
 
@@ -199,16 +199,22 @@ pub(crate) async fn api_services_events(
             yield Ok(Event::default().event("snapshot").data(json));
         }
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    if let Ok(json) = serde_json::to_string(&event) {
-                        yield Ok(Event::default().event("status").data(json));
+            tokio::select! {
+                biased;
+                _ = state.shutdown.cancelled() => break,
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Ok(json) = serde_json::to_string(&event) {
+                                yield Ok(Event::default().event("status").data(json));
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("services SSE lagged {n} events");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("services SSE lagged {n} events");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     };

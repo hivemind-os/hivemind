@@ -296,6 +296,8 @@ mod tests {
                 session_messaged: Arc::new(AtomicBool::new(false)),
             },
             tool_limits: hive_contracts::ToolLimitsConfig::default(),
+            code_act_config: hive_contracts::CodeActConfig::default(),
+            session_registry: None,
             preempt_signal: None,
             cancellation_token: None,
         }

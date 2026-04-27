@@ -35,6 +35,7 @@ use hive_contracts::Persona;
 /// (persona_id, yaml_content) pairs for all bundled personas.
 static BUNDLED_PERSONA_YAMLS: &[(&str, &str)] = &[
     ("system/general", include_str!("../bundled-personas/general.yaml")),
+    ("system/execution", include_str!("../bundled-personas/execution-agent.yaml")),
     ("system/software/planner", include_str!("../bundled-personas/feature-planner.yaml")),
     ("system/software/implementor", include_str!("../bundled-personas/feature-implementor.yaml")),
     ("system/software/tester", include_str!("../bundled-personas/feature-tester.yaml")),

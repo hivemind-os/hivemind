@@ -88,6 +88,11 @@ interface ReasoningEvent {
   text?: string;
   choices?: string[];
   allow_freeform?: boolean;
+  // CodeExecution fields
+  code?: string;
+  stdout?: string;
+  stderr?: string;
+  duration_ms?: number;
 }
 
 // ---------------------------------------------------------------------------

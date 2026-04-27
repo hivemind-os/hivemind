@@ -23,6 +23,7 @@ hive-agents = { path = "../hive-agents" }
 hive-canvas = { path = "../hive-canvas" }
 hive-classification = { path = "../hive-classification" }
 hive-context-map = { path = "../hive-context-map" }
+hive-code-executor = { path = "../hive-code-executor" }
 hive-connectors = { path = "../hive-connectors" }
 hive-contracts = { path = "../hive-contracts" }
 hive-core = { path = "../hive-core" }

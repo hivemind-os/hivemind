@@ -1,0 +1,29 @@
+[package]
+name = "hive-code-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "WASM-sandboxed Python code execution for CodeAct agent loops"
+
+[dependencies]
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "process", "io-util", "rt"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+parking_lot.workspace = true
+wasmtime = "29"
+wasmtime-wasi = { version = "29", features = ["preview1"] }
+bytes = "1"
+sha2 = "0.10"
+hex = "0.4"
+dirs = "6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[features]
+default = []

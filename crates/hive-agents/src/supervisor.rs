@@ -205,6 +205,7 @@ impl AgentSupervisor {
                 knowledge_query_handler,
                 persona_tool_factory,
                 session_persona_id,
+                code_session_registry: None,
             }),
             persona_registries: Arc::new(DashMap::new()),
             telemetry,
@@ -364,6 +365,17 @@ impl AgentSupervisor {
         }
     }
 
+    /// Set the shared CodeAct session registry so child agents can reuse
+    /// executor sessions.
+    pub fn set_code_session_registry(
+        &mut self,
+        registry: Arc<hive_code_executor::SessionRegistry>,
+    ) {
+        if let Some(ref mut exec) = self.execution {
+            exec.code_session_registry = Some(registry);
+        }
+    }
+
     /// Spawn an agent from a spec. Returns the agent's ID.
     ///
     /// `parent_id` is the ID of the agent that spawned this one, or `None` if
@@ -493,6 +505,7 @@ impl AgentSupervisor {
 
             if let Some(execution) = &self.execution {
                 runner.knowledge_query_handler = execution.knowledge_query_handler.clone();
+                runner.code_session_registry = execution.code_session_registry.clone();
             }
 
             let task = tokio::spawn(runner.run());

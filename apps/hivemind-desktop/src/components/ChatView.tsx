@@ -439,7 +439,6 @@ const ChatView = (props: ChatViewProps) => {
   const chatTimeline = createMemo(() => {
     const items: Array<
       | { kind: 'message'; message: any; ts: number }
-      | { kind: 'question'; message: any; ts: number }
       | { kind: 'answered-question'; message: any; ts: number }
       | { kind: 'answered'; question: PendingQuestion & { answer?: string }; ts: number }
       | { kind: 'workflow-result'; wf: { instanceId: number; instance: any; events: ChatWorkflowEvent[] }; ts: number }
@@ -453,9 +452,8 @@ const ChatView = (props: ChatViewProps) => {
       if (m.interaction_request_id && m.interaction_kind === 'question') {
         if (m.interaction_answer) {
           items.push({ kind: 'answered-question', message: m, ts: m.created_at_ms });
-        } else {
-          items.push({ kind: 'question', message: m, ts: m.created_at_ms });
         }
+        // Unanswered questions are rendered separately below streaming content
         continue;
       }
       items.push({ kind: 'message', message: m, ts: m.created_at_ms });
@@ -560,32 +558,6 @@ const ChatView = (props: ChatViewProps) => {
               {/* Unified chronological stream: messages + answered questions + workflow results interleaved by timestamp */}
               <For each={chatTimeline()}>
                 {(item) => {
-                  if (item.kind === 'question') {
-                    // Unanswered question message — render as interactive InlineQuestion
-                    const m = item.message;
-                    const meta = m.interaction_meta ?? {};
-                    const q: PendingQuestion = {
-                      request_id: m.interaction_request_id!,
-                      text: m.content,
-                      choices: meta.choices ?? [],
-                      allow_freeform: meta.allow_freeform !== false,
-                      multi_select: meta.multi_select === true,
-                      session_id: props.selectedSessionId() ?? undefined,
-                      agent_id: meta.agent_id,
-                      agent_name: meta.agent_name,
-                      timestamp: m.created_at_ms,
-                      message: meta.message ?? undefined,
-                      workflow_instance_id: meta.workflow_instance_id ?? undefined,
-                      workflow_step_id: meta.workflow_step_id ?? undefined,
-                    };
-                    return (
-                      <InlineQuestion
-                        question={q}
-                        session_id={props.selectedSessionId()!}
-                        onAnswered={props.onQuestionAnswered}
-                      />
-                    );
-                  }
                   if (item.kind === 'answered-question') {
                     // Answered question message — render as AnsweredQuestion
                     const m = item.message;
@@ -1001,12 +973,41 @@ const ChatView = (props: ChatViewProps) => {
                 </article>
               </Show>
 
-              {/* Pending questions from legacy path (no corresponding message) — fallback */}
+              {/* Unanswered questions — always rendered below streaming content */}
               <Show when={props.selectedSessionId()}>
+                {/* Questions from messages (interaction gates) */}
+                <For each={(activeSession().messages ?? []).filter((m: any) =>
+                  m.interaction_request_id && m.interaction_kind === 'question' && !m.interaction_answer
+                )}>
+                  {(m: any) => {
+                    const meta = m.interaction_meta ?? {};
+                    const q: PendingQuestion = {
+                      request_id: m.interaction_request_id!,
+                      text: m.content,
+                      choices: meta.choices ?? [],
+                      allow_freeform: meta.allow_freeform !== false,
+                      multi_select: meta.multi_select === true,
+                      session_id: props.selectedSessionId() ?? undefined,
+                      agent_id: meta.agent_id,
+                      agent_name: meta.agent_name,
+                      timestamp: m.created_at_ms,
+                      message: meta.message ?? undefined,
+                      workflow_instance_id: meta.workflow_instance_id ?? undefined,
+                      workflow_step_id: meta.workflow_step_id ?? undefined,
+                    };
+                    return (
+                      <InlineQuestion
+                        question={q}
+                        session_id={props.selectedSessionId()!}
+                        onAnswered={props.onQuestionAnswered}
+                      />
+                    );
+                  }}
+                </For>
+                {/* Legacy pending questions (no corresponding message) */}
                 <For each={props.allQuestions().filter((q) => {
                   if (q.answer) return false;
                   if (q.session_id !== props.selectedSessionId()) return false;
-                  // Skip questions that already have a message in the timeline
                   const msgs = activeSession().messages ?? [];
                   return !msgs.some((m: any) => m.interaction_request_id === q.request_id);
                 })}>

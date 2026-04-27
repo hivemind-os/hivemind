@@ -139,6 +139,15 @@ pub enum ReasoningEvent {
         tool_name: Option<String>,
         arguments_so_far: String,
     },
+    /// CodeAct: a Python code block was executed.
+    CodeExecution {
+        code: String,
+        stdout: String,
+        stderr: String,
+        is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+    },
 }
 
 /// Defines how a modality stores conversation data and assembles context.

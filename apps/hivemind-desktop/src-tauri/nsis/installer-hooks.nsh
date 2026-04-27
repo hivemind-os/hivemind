@@ -4,6 +4,10 @@
 ; shortcuts, and registry entries.  We use it to silently install the
 ; Microsoft Visual C++ Redistributable that was bundled alongside the app,
 ; then remove it from the install directory so it is not left behind for users.
+;
+; NSIS_HOOK_PREUNINSTALL runs before Tauri removes installed files.  We use it
+; to remove the daemon auto-start registry key and stop the running daemon so
+; files are not locked and the daemon does not restart after removal.
 
 !macro NSIS_HOOK_POSTINSTALL
   ExecWait '"$INSTDIR\vc_redist.exe" /install /quiet /norestart' $0
@@ -17,4 +21,17 @@
 (exit code $0). The application may not start correctly.$\n$\nPlease install \
 the Visual C++ 2015-2022 Redistributable manually from microsoft.com."
   vcredist_ok:
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; 1. Remove the daemon auto-start registry key first so nothing can
+  ;    re-launch the daemon between kill and file removal.
+  DeleteRegValue HKCU "SOFTWARE\Microsoft\Windows\CurrentVersion\Run" "HiveMindDaemon"
+
+  ; 2. Stop the daemon and its child processes (/T = tree kill).
+  ;    taskkill returns non-zero when the process isn't running — that's fine.
+  ExecWait '"$SYSDIR\taskkill.exe" /F /T /IM hive-daemon.exe' $0
+
+  ; 3. Brief pause so the process fully releases files and ports.
+  Sleep 1000
 !macroend

@@ -2,12 +2,18 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
+use tar::Archive;
+
 const HF_BASE: &str = "https://huggingface.co";
 const BGE_REPO: &str = "BAAI/bge-small-en-v1.5";
 
 /// (remote path relative to repo root, local filename)
 const BGE_FILES: &[(&str, &str)] =
     &[("onnx/model.onnx", "model.onnx"), ("tokenizer.json", "tokenizer.json")];
+
+const PYTHON_WASM_URL: &str = "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0-wasi-sdk-20.0.tar.gz";
+const PYTHON_WASM_ASSET: &str = "python-3.12.0-wasi-sdk-20.0.tar.gz";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -91,6 +97,101 @@ fn fetch_models() {
     println!("Models ready at: {}", vendor.display());
 }
 
+/// Download and stage the CPython WASI runtime into `src-tauri/python-wasm/`
+/// so Tauri can bundle it as a resource. Returns the staging path for cleanup.
+fn stage_python_wasm(desktop_dir: &Path) -> PathBuf {
+    let staging = desktop_dir.join("src-tauri").join("python-wasm");
+
+    // Skip download if already staged (e.g. re-running after a Tauri failure)
+    let wasm_bin = staging.join("bin").join("python.wasm");
+    if wasm_bin.exists() {
+        println!("  python.wasm already staged at {}", staging.display());
+        return staging;
+    }
+
+    println!("  Downloading CPython WASI runtime...");
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .expect("failed to build HTTP client");
+
+    let resp = client
+        .get(PYTHON_WASM_URL)
+        .send()
+        .unwrap_or_else(|e| panic!("failed to download {PYTHON_WASM_ASSET}: {e}"));
+    if !resp.status().is_success() {
+        panic!("HTTP {} downloading {PYTHON_WASM_ASSET}", resp.status());
+    }
+    let tar_bytes = resp
+        .bytes()
+        .unwrap_or_else(|e| panic!("failed to read {PYTHON_WASM_ASSET}: {e}"));
+    println!(
+        "  Downloaded {} ({:.1} MB)",
+        PYTHON_WASM_ASSET,
+        tar_bytes.len() as f64 / 1_048_576.0
+    );
+
+    // Extract to a temp dir, then copy to the normalized layout
+    let temp_dir = std::env::temp_dir().join(format!("hivemind-python-wasm-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+    println!("  Extracting...");
+    let tar_gz = std::io::Cursor::new(&tar_bytes);
+    let decoder = GzDecoder::new(tar_gz);
+    let mut archive = Archive::new(decoder);
+    archive.unpack(&temp_dir).expect("failed to extract tarball");
+
+    // Stage into normalized layout: python-wasm/{bin/python.wasm, lib/python3.12/, lib/python312.zip}
+    let bin_dir = staging.join("bin");
+    let lib_dir = staging.join("lib");
+    fs::create_dir_all(&bin_dir).expect("failed to create python-wasm/bin");
+    fs::create_dir_all(&lib_dir).expect("failed to create python-wasm/lib");
+
+    // Find python*.wasm in extracted bin/
+    let extracted_bin = temp_dir.join("bin");
+    let wasm_file = fs::read_dir(&extracted_bin)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", extracted_bin.display()))
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("python") && name.ends_with(".wasm")
+        })
+        .unwrap_or_else(|| panic!("no python*.wasm found in archive"));
+    fs::copy(wasm_file.path(), bin_dir.join("python.wasm"))
+        .expect("failed to copy python.wasm");
+
+    // Copy stdlib directory
+    let stdlib_src = temp_dir.join("usr").join("local").join("lib").join("python3.12");
+    if stdlib_src.exists() {
+        copy_dir_recursive(&stdlib_src, &lib_dir.join("python3.12"));
+    }
+
+    // Copy zipped stdlib
+    let zip_src = temp_dir.join("usr").join("local").join("lib").join("python312.zip");
+    if zip_src.exists() {
+        fs::copy(&zip_src, lib_dir.join("python312.zip")).expect("failed to copy python312.zip");
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+    println!("  python.wasm staged at {}", staging.display());
+    staging
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).unwrap_or_else(|e| panic!("mkdir {}: {e}", dst.display()));
+    for entry in fs::read_dir(src).unwrap_or_else(|e| panic!("read {}: {e}", src.display())) {
+        let entry = entry.expect("dir entry");
+        let dest = dst.join(entry.file_name());
+        if entry.file_type().expect("file_type").is_dir() {
+            copy_dir_recursive(&entry.path(), &dest);
+        } else {
+            fs::copy(entry.path(), &dest)
+                .unwrap_or_else(|e| panic!("copy {}: {e}", entry.path().display()));
+        }
+    }
+}
+
 fn build_installer(args: &[String]) {
     let target = parse_target_arg(args);
     let root = project_root();
@@ -161,6 +262,46 @@ fn run_macos_build(root: &Path, arch: &str) {
     }
 }
 
+/// Download the VC++ Redistributable into `dest` if it doesn't already exist.
+/// Returns `true` if the file was downloaded (so the caller can clean it up).
+fn stage_vc_redist(dest: &Path, target: &str) -> bool {
+    if dest.exists() {
+        println!("  vc_redist.exe already present at {}", dest.display());
+        return false;
+    }
+
+    let url = if target.starts_with("aarch64") {
+        "https://aka.ms/vs/17/release/vc_redist.arm64.exe"
+    } else {
+        "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    };
+
+    println!("  Downloading VC++ Redistributable from {url}...");
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .expect("failed to build HTTP client");
+
+    let resp = client
+        .get(url)
+        .send()
+        .unwrap_or_else(|e| panic!("failed to download vc_redist.exe: {e}"));
+    if !resp.status().is_success() {
+        panic!("HTTP {} downloading vc_redist.exe", resp.status());
+    }
+    let bytes = resp.bytes().unwrap_or_else(|e| panic!("failed to read vc_redist.exe: {e}"));
+    if bytes.len() < 1_000_000 {
+        panic!("vc_redist.exe is unexpectedly small ({} bytes)", bytes.len());
+    }
+
+    fs::write(dest, &bytes).unwrap_or_else(|e| panic!("failed to write vc_redist.exe: {e}"));
+    println!(
+        "  vc_redist.exe downloaded ({:.1} MB)",
+        bytes.len() as f64 / 1_048_576.0
+    );
+    true
+}
+
 fn run_windows_build(root: &Path, target: &str) {
     println!("==> Building Windows NSIS installer for {target}...");
 
@@ -213,7 +354,15 @@ fn run_windows_build(root: &Path, target: &str) {
             .unwrap_or_else(|e| panic!("failed to copy {} to staging: {e}", src.display()));
     }
 
-    // 3. Build Tauri NSIS installer with the bundled binaries.
+    // 3. Download VC++ Redistributable so the NSIS installer can bundle it
+    let vc_redist_path = desktop_dir.join("src-tauri").join("vc_redist.exe");
+    let vc_redist_downloaded = stage_vc_redist(&vc_redist_path, target);
+
+    // 4. Stage python-wasm runtime so Tauri bundles it as a resource
+    println!("  Staging python-wasm runtime...");
+    let wasm_staging = stage_python_wasm(&desktop_dir);
+
+    // 5. Build Tauri NSIS installer with the bundled binaries.
     //    The config override tells Tauri to include the staged binaries as
     //    resources, which places them alongside the main exe on Windows.
     println!("  Building Tauri installer...");
@@ -234,8 +383,12 @@ fn run_windows_build(root: &Path, target: &str) {
         .status()
         .expect("failed to run tauri build");
 
-    // Clean up staging directory
+    // Clean up staging directories
     let _ = fs::remove_dir_all(&staging_dir);
+    let _ = fs::remove_dir_all(&wasm_staging);
+    if vc_redist_downloaded {
+        let _ = fs::remove_file(&vc_redist_path);
+    }
 
     if !status.success() {
         eprintln!("Tauri build failed");

@@ -29,6 +29,12 @@ pub mod workflows;
 // Legacy module (will be removed after hive-api migration)
 pub mod legacy;
 
+// CodeAct code-block extraction
+pub mod code_extraction;
+
+// CodeAct system prompt construction
+pub mod code_act_prompt;
+
 // Token budget enforcement middleware
 pub mod token_budget;
 
@@ -68,11 +74,12 @@ pub use traits::{
 
 // ── Legacy re-exports (for hive-api backward compatibility) ────────────────
 pub use legacy::{
-    parse_tool_call, AgentContext, AgentOrchestrator, BoxFuture, ConversationContext,
-    ConversationJournal, JournalEntry, JournalPhase, JournalToolCall, KnowledgeQueryHandler,
-    LoopContext, LoopError, LoopEvent, LoopExecutor, LoopMiddleware, LoopResult, LoopStrategy,
-    PlanThenExecuteStrategy, ReActStrategy, RoutingConfig, SecurityContext, SequentialStrategy,
-    StrategyKind, ToolCall as LegacyToolCall, ToolsContext, UserInteractionGate,
+    parse_tool_call, AgentContext, AgentOrchestrator, BoxFuture, CodeActStrategy,
+    CodeExecutionPhase, ConversationContext, ConversationJournal, JournalEntry, JournalPhase,
+    JournalToolCall, KnowledgeQueryHandler, LoopContext, LoopError, LoopEvent, LoopExecutor,
+    LoopMiddleware, LoopResult, LoopStrategy, PlanThenExecuteStrategy, ReActStrategy,
+    RoutingConfig, SecurityContext, SequentialStrategy, StrategyKind,
+    ToolCall as LegacyToolCall, ToolsContext, UserInteractionGate,
 };
 
 // ── Stall detection + adaptive budget ─────────────────────────────────────

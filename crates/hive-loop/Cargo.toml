@@ -7,6 +7,7 @@ version.workspace = true
 
 [dependencies]
 hive-classification = { path = "../hive-classification" }
+hive-code-executor = { path = "../hive-code-executor" }
 hive-connectors = { path = "../hive-connectors" }
 hive-contracts = { path = "../hive-contracts" }
 hive-core = { path = "../hive-core" }
@@ -37,3 +38,4 @@ hive-process = { path = "../hive-process" }
 arc-swap.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-stream.workspace = true
