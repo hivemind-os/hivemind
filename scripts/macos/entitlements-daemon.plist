@@ -8,8 +8,13 @@
     <true/>
     <key>com.apple.security.personal-information.contacts</key>
     <true/>
-    <!-- Allow JIT compilation — required by Wasmtime for CodeAct WASM execution -->
+    <!-- Allow JIT compilation — required by Wasmtime for CodeAct WASM execution.
+         Wasmtime 29.x uses mprotect(PROT_EXEC) on anonymous pages (not MAP_JIT),
+         so allow-unsigned-executable-memory is the operative entitlement.
+         allow-jit is kept for forward-compatibility if Wasmtime adopts MAP_JIT. -->
     <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
 </dict>
 </plist>
