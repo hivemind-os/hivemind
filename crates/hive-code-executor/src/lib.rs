@@ -58,19 +58,42 @@ pub struct PythonWasmPaths {
 /// 4. macOS: `Contents/Resources/python-wasm/` inside the .app bundle
 ///
 /// Returns `None` if no valid runtime is found.
+///
+/// **Validation**: In addition to checking `python.wasm` and the stdlib directory,
+/// this also verifies that `python312.zip` (or the equivalent for the detected
+/// version) exists in the stdlib parent. CPython WASI requires this zip archive
+/// for the `encodings` module during `Py_Initialize()` — without it, CPython
+/// crashes immediately with a fatal error before reading stdin.
 pub fn resolve_python_wasm(hivemind_home: Option<&std::path::Path>) -> Option<PythonWasmPaths> {
     use std::path::PathBuf;
 
-    // Helper: check that both paths exist
+    // Helper: check that wasm binary, stdlib dir, AND the critical zip archive all exist.
+    // CPython WASI hard-crashes during Py_Initialize() if the zip is missing.
     let check = |wasm: PathBuf, stdlib: PathBuf| -> Option<PythonWasmPaths> {
-        if wasm.exists() && stdlib.exists() {
-            Some(PythonWasmPaths {
-                wasm_binary: wasm,
-                stdlib_dir: stdlib,
-            })
-        } else {
-            None
+        if !wasm.exists() || !stdlib.exists() {
+            return None;
         }
+
+        // Derive the zip filename from the stdlib directory name.
+        // e.g. "python3.12" → "python312.zip" (dots removed from version)
+        let stdlib_name = stdlib.file_name()?.to_str()?;
+        let zip_name = format!("{}.zip", stdlib_name.replace('.', ""));
+        let zip_path = stdlib.parent()?.join(&zip_name);
+
+        if !zip_path.exists() {
+            tracing::warn!(
+                zip = %zip_path.display(),
+                stdlib = %stdlib.display(),
+                "python.wasm found but critical stdlib zip archive is missing — \
+                 CPython will crash during initialization without it"
+            );
+            return None;
+        }
+
+        Some(PythonWasmPaths {
+            wasm_binary: wasm,
+            stdlib_dir: stdlib,
+        })
     };
 
     // 1. Environment variables (highest priority)

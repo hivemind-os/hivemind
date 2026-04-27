@@ -124,6 +124,8 @@ struct WasmInstance {
     wasm_task: tokio::task::JoinHandle<()>,
     /// Engine handle for epoch advancement.
     engine: Arc<Engine>,
+    /// Captured stderr from CPython (for crash diagnostics).
+    stderr_buf: Arc<tokio::sync::Mutex<String>>,
 }
 
 /// A code executor backed by CPython running inside a Wasmtime WASM sandbox.
@@ -211,16 +213,27 @@ impl WasmExecutor {
     }
 
     /// Ensure the WASM instance is running, spawning if needed.
+    /// If a previous instance crashed, it's cleaned up and a new one spawned.
     pub async fn ensure_instance(&self) -> Result<(), ExecutorError> {
-        let guard = self.instance.lock().await;
-        if guard.is_some() {
-            return Ok(());
+        let mut guard = self.instance.lock().await;
+        if let Some(ref inst) = *guard {
+            if !inst.wasm_task.is_finished() {
+                return Ok(());
+            }
+            // Previous instance is dead — clean up and respawn
+            tracing::warn!("WASM Python instance died — respawning");
+            let _ = guard.take();
         }
         drop(guard);
         self.spawn_instance().await
     }
 
     /// Spawn a fresh WASM Python instance.
+    ///
+    /// After spawning, this waits for CPython to actually initialize successfully
+    /// (by checking the task hasn't exited and stdout is responsive). If CPython
+    /// crashes during Py_Initialize() (e.g., missing python312.zip), this returns
+    /// an error with the captured stderr instead of a misleading "broken pipe" later.
     async fn spawn_instance(&self) -> Result<(), ExecutorError> {
         let engine = Arc::clone(&self.engine);
         let module = Arc::clone(&self.module);
@@ -230,15 +243,60 @@ impl WasmExecutor {
         let workspace_dir = self.config.working_directory.clone();
         let tmp_dir = self.tmp_dir.clone();
 
+        // Validate that the critical python312.zip exists before spawning.
+        // This catches the most common failure mode early with a clear message.
+        let stdlib_parent = stdlib_dir.parent().unwrap_or(&stdlib_dir);
+        if let Some(stdlib_name) = stdlib_dir.file_name().and_then(|n| n.to_str()) {
+            let zip_name = format!("{}.zip", stdlib_name.replace('.', ""));
+            let zip_path = stdlib_parent.join(&zip_name);
+            if !zip_path.exists() {
+                return Err(ExecutorError::NotReady(format!(
+                    "CPython WASI runtime is incomplete: '{}' is missing. \
+                     CPython requires this archive for the 'encodings' module during initialization. \
+                     Reinstall the application or ensure the WASM runtime is fully extracted.",
+                    zip_path.display()
+                )));
+            }
+        }
+
         // Create bidirectional channels for stdin/stdout.
         // Host writes to host_stdin_writer → WASM reads from wasm_stdin_reader
         // WASM writes to wasm_stdout_writer → Host reads from host_stdout_reader
         let (host_stdin_writer, wasm_stdin_reader) = tokio::io::duplex(65536);
         let (wasm_stdout_writer, host_stdout_reader) = tokio::io::duplex(65536);
 
+        // Capture stderr into a shared buffer instead of inheriting.
+        // If CPython crashes during init, we can report what went wrong.
+        let (wasm_stderr_writer, wasm_stderr_reader) = tokio::io::duplex(8192);
+        let stderr_buf: Arc<tokio::sync::Mutex<String>> = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let stderr_buf_for_task = Arc::clone(&stderr_buf);
+
+        // Spawn a task to drain stderr into the buffer
+        let stderr_drain = tokio::spawn(async move {
+            let mut reader = BufReader::new(wasm_stderr_reader);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        tracing::debug!(target: "cpython_stderr", "{}", line.trim_end());
+                        let mut buf = stderr_buf_for_task.lock().await;
+                        // Cap buffer at 8KB to prevent unbounded growth
+                        if buf.len() < 8192 {
+                            buf.push_str(&line);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         let engine_for_task = Arc::clone(&engine);
 
-        // Spawn the WASM execution on a tokio task
+        // Spawn the WASM execution on a tokio task.
+        // tokio::task::spawn catches panics — they become JoinError::Panic
+        // rather than crashing the daemon.
         let wasm_task = tokio::task::spawn(async move {
             if let Err(e) = run_wasm_instance(
                 &engine_for_task,
@@ -248,6 +306,7 @@ impl WasmExecutor {
                 memory_limit,
                 wasm_stdin_reader,
                 wasm_stdout_writer,
+                wasm_stderr_writer,
                 &nonce,
                 &tmp_dir,
             )
@@ -257,6 +316,8 @@ impl WasmExecutor {
             } else {
                 tracing::debug!("WASM Python instance exited normally");
             }
+            // Drop stderr drain when wasm task ends
+            stderr_drain.abort();
         });
 
         let instance = WasmInstance {
@@ -264,13 +325,40 @@ impl WasmExecutor {
             stdout_reader: BufReader::new(host_stdout_reader),
             wasm_task,
             engine: Arc::clone(&engine),
+            stderr_buf: Arc::clone(&stderr_buf),
         };
 
         let mut guard = self.instance.lock().await;
         *guard = Some(instance);
 
-        // Give the WASM instance a moment to initialize
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Boot readiness check: wait for CPython to initialize, but verify
+        // it hasn't crashed. If the task exits within the boot window, CPython
+        // failed during Py_Initialize() — report stderr instead of "broken pipe".
+        let boot_timeout = std::time::Duration::from_millis(500);
+        let check_interval = std::time::Duration::from_millis(50);
+        let boot_start = Instant::now();
+
+        while boot_start.elapsed() < boot_timeout {
+            tokio::time::sleep(check_interval).await;
+            if let Some(ref inst) = *guard {
+                if inst.wasm_task.is_finished() {
+                    // CPython died during initialization
+                    let stderr_content = inst.stderr_buf.lock().await.clone();
+                    let _ = guard.take(); // Clean up the dead instance
+                    let detail = if stderr_content.is_empty() {
+                        "CPython WASI process exited immediately during initialization. \
+                         This usually means the stdlib zip archive is missing or inaccessible."
+                            .to_string()
+                    } else {
+                        format!(
+                            "CPython WASI process crashed during initialization:\n{}",
+                            stderr_content.trim()
+                        )
+                    };
+                    return Err(ExecutorError::NotReady(detail));
+                }
+            }
+        }
 
         Ok(())
     }
@@ -294,10 +382,23 @@ impl WasmExecutor {
         let s_start = sentinel_start(&self.nonce);
         let s_end = sentinel_end(&self.nonce);
         let payload = format!("{s_start}\n{code}\n{s_end}\n");
-        inst.stdin_writer
-            .write_all(payload.as_bytes())
-            .await
-            .map_err(|e| ExecutorError::ExecutionFailed(format!("failed to write to WASM stdin: {e}")))?;
+        if let Err(e) = inst.stdin_writer.write_all(payload.as_bytes()).await {
+            // If we get broken pipe, CPython has crashed. Include stderr for diagnostics.
+            let stderr_content = inst.stderr_buf.lock().await.clone();
+            let detail = if stderr_content.is_empty() {
+                format!(
+                    "CPython WASM process is not running (write failed: {e}). \
+                     The process may have crashed during initialization — check that \
+                     the WASM Python runtime is fully installed."
+                )
+            } else {
+                format!(
+                    "CPython WASM process crashed (write failed: {e}):\n{}",
+                    stderr_content.trim()
+                )
+            };
+            return Err(ExecutorError::ExecutionFailed(detail));
+        }
         inst.stdin_writer
             .flush()
             .await
@@ -481,6 +582,7 @@ async fn run_wasm_instance(
     memory_limit: usize,
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
+    wasm_stderr: DuplexStream,
     nonce: &str,
     tmp_dir: &Path,
 ) -> Result<(), ExecutorError> {
@@ -495,7 +597,11 @@ async fn run_wasm_instance(
     let stdout_stream = AsyncStdoutStream::new(AsyncWriteStream::new(65536, wasm_stdout));
     wasi_builder.stdin(stdin_stream);
     wasi_builder.stdout(stdout_stream);
-    wasi_builder.inherit_stderr(); // stderr goes to host for debugging
+
+    // Wire stderr through a captured stream (not inherited) so we can
+    // report CPython crash diagnostics back to the user/caller.
+    let stderr_stream = AsyncStdoutStream::new(AsyncWriteStream::new(8192, wasm_stderr));
+    wasi_builder.stderr(stderr_stream);
 
     // Preopen Python stdlib (read-only).
     //
@@ -653,7 +759,10 @@ impl CodeExecutor for WasmExecutor {
 
     async fn is_alive(&self) -> bool {
         let guard = self.instance.lock().await;
-        guard.is_some()
+        match &*guard {
+            Some(inst) => !inst.wasm_task.is_finished(),
+            None => false,
+        }
     }
 }
 
