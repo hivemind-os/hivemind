@@ -59,7 +59,7 @@ pub(crate) struct BotService {
     pub(crate) web_search_config: Arc<ArcSwap<hive_contracts::WebSearchConfig>>,
     pub(crate) plugin_host: Option<Arc<hive_plugins::PluginHost>>,
     pub(crate) plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
-    pub(crate) code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
+    pub(crate) code_session_registry: Arc<ArcSwap<Option<Arc<hive_code_executor::SessionRegistry>>>>,
 }
 
 impl BotService {
@@ -236,7 +236,7 @@ impl BotService {
             Some(persona_tool_factory),
             Some("system/general".to_string()),
         );
-        if let Some(ref registry) = self.code_session_registry {
+        if let Some(ref registry) = **self.code_session_registry.load() {
             supervisor.set_code_session_registry(Arc::clone(registry));
         }
         let supervisor = Arc::new(supervisor);

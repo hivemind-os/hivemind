@@ -131,41 +131,16 @@ sign_binary "$REPO_ROOT/target/$TARGET/release/hive-runtime-worker" \
 echo "==> Staging daemon binaries for Tauri resource bundling..."
 DESKTOP_DIR="$REPO_ROOT/apps/hivemind-desktop"
 STAGING_DIR="$DESKTOP_DIR/src-tauri/bin"
-WASM_STAGING="$DESKTOP_DIR/src-tauri/python-wasm"
 mkdir -p "$STAGING_DIR"
 # Ensure staged files are cleaned up even on failure.
-cleanup_staging() { rm -rf "$STAGING_DIR" "$WASM_STAGING"; }
+cleanup_staging() { rm -rf "$STAGING_DIR"; }
 trap cleanup_staging EXIT
 for bin in hive-daemon hive-cli hive-runtime-worker; do
     cp "$REPO_ROOT/target/$TARGET/release/$bin" "$STAGING_DIR/$bin"
     echo "  Staged $bin"
 done
 
-# 2b. Stage CPython WASI runtime so Tauri bundles it for CodeAct.
-echo "==> Staging python-wasm runtime..."
-if [ -f "$WASM_STAGING/bin/python.wasm" ]; then
-    echo "  python.wasm already staged"
-else
-    WASM_URL="https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0-wasi-sdk-20.0.tar.gz"
-    WASM_TEMP=$(mktemp -d)
-    echo "  Downloading CPython WASI runtime..."
-    curl -fSL "$WASM_URL" -o "$WASM_TEMP/python-wasm.tar.gz"
-    echo "  Extracting..."
-    tar -xzf "$WASM_TEMP/python-wasm.tar.gz" -C "$WASM_TEMP"
-    mkdir -p "$WASM_STAGING/bin" "$WASM_STAGING/lib"
-    WASM_FILE=$(find "$WASM_TEMP/bin" -name 'python*.wasm' | head -1)
-    if [ -z "$WASM_FILE" ]; then
-        echo "ERROR: No python*.wasm found in extracted archive"
-        rm -rf "$WASM_TEMP"
-        exit 1
-    fi
-    cp "$WASM_FILE" "$WASM_STAGING/bin/python.wasm"
-    cp -r "$WASM_TEMP/usr/local/lib/python3.12" "$WASM_STAGING/lib/python3.12"
-    [ -f "$WASM_TEMP/usr/local/lib/python312.zip" ] && \
-        cp "$WASM_TEMP/usr/local/lib/python312.zip" "$WASM_STAGING/lib/python312.zip"
-    rm -rf "$WASM_TEMP"
-    echo "  python.wasm staged at $WASM_STAGING"
-fi
+# Note: python-wasm is NOT bundled — it's downloaded on first daemon startup.
 
 # 3. Build the Tauri desktop app with the macOS resource config overlay.
 # When SIGN_IDENTITY is a real certificate, pass it as APPLE_SIGNING_IDENTITY so

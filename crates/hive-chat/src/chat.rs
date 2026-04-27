@@ -1011,8 +1011,9 @@ pub struct ChatService {
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
     code_act_config: hive_contracts::CodeActConfig,
-    /// Shared session registry for CodeAct code execution (None if WASM runtime unavailable).
-    code_session_registry: Option<Arc<hive_code_executor::SessionRegistry>>,
+    /// Shared session registry for CodeAct code execution.
+    /// Starts as None if WASM runtime needs downloading; swapped to Some once available.
+    code_session_registry: Arc<ArcSwap<Option<Arc<hive_code_executor::SessionRegistry>>>>,
 
     skills_service: Arc<Mutex<Option<Arc<SkillsService>>>>,
     /// MCP service for discovering and calling MCP server tools.
@@ -1561,8 +1562,9 @@ impl ChatService {
             Arc::new(ArcSwap::from_pointee(hive_contracts::WebSearchConfig::default()));
 
         // Create the CodeAct session registry (once, shared across all conversations).
-        // Resolves python.wasm from env vars, hivemind_home, or sibling of exe.
-        let code_session_registry = {
+        // Downloads python.wasm on first run if not already installed.
+        let code_session_registry = Arc::new(ArcSwap::from_pointee(None));
+        if code_act_config.enabled {
             let session_config = hive_code_executor::SessionConfig {
                 executor: hive_code_executor::ExecutorConfig {
                     execution_timeout_secs: code_act_config.execution_timeout_secs,
@@ -1573,24 +1575,53 @@ impl ChatService {
                 },
                 idle_timeout: std::time::Duration::from_secs(code_act_config.idle_timeout_secs),
             };
-            let wasm_paths = hive_code_executor::resolve_python_wasm(Some(&hivemind_home));
-            match hive_code_executor::SessionRegistry::new_auto(
-                session_config,
-                code_act_config.max_sessions,
-                wasm_paths.as_ref().map(|p| p.wasm_binary.as_path()),
-                wasm_paths.as_ref().map(|p| p.stdlib_dir.as_path()),
-            ) {
-                Ok(registry) => Some(Arc::new(registry)),
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "CodeAct WASM runtime unavailable — CodeAct personas will not work. \
-                         Install python.wasm to {}/runtimes/python-wasm/ or set PYTHON_WASM_PATH.",
-                        hivemind_home.display()
-                    );
-                    None
+            let max_sessions = code_act_config.max_sessions;
+
+            // Fast path: check if already installed (filesystem only, no network)
+            if let Some(paths) = hive_code_executor::resolve_python_wasm(Some(&hivemind_home)) {
+                match hive_code_executor::SessionRegistry::new_auto(
+                    session_config,
+                    max_sessions,
+                    Some(paths.wasm_binary.as_path()),
+                    Some(paths.stdlib_dir.as_path()),
+                ) {
+                    Ok(registry) => {
+                        code_session_registry.store(Arc::new(Some(Arc::new(registry))));
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "CodeAct WASM runtime init failed");
+                    }
                 }
+            } else {
+                // Slow path: download in background thread so daemon starts immediately
+                let registry_swap = Arc::clone(&code_session_registry);
+                let home = hivemind_home.clone();
+                std::thread::spawn(move || {
+                    match hive_code_executor::ensure_python_wasm(&home) {
+                        Ok(paths) => {
+                            match hive_code_executor::SessionRegistry::new_auto(
+                                session_config,
+                                max_sessions,
+                                Some(paths.wasm_binary.as_path()),
+                                Some(paths.stdlib_dir.as_path()),
+                            ) {
+                                Ok(registry) => {
+                                    registry_swap.store(Arc::new(Some(Arc::new(registry))));
+                                    tracing::info!("CodeAct WASM runtime ready");
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, "CodeAct WASM registry init failed after download");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "CodeAct WASM runtime download failed");
+                        }
+                    }
+                });
             }
+        } else {
+            tracing::debug!("CodeAct disabled by configuration");
         };
 
         let bot_service = crate::bot_service::BotService {
@@ -2867,7 +2898,7 @@ impl ChatService {
             },
             tool_limits: (*self.tool_limits).clone(),
             code_act_config: self.code_act_config.clone(),
-            session_registry: self.code_session_registry.clone(),
+            session_registry: (**self.code_session_registry.load()).clone(),
             preempt_signal: None,
             cancellation_token: None,
         };        match self.loop_executor.call_tool(&context, tool_id, input).await {
@@ -4051,7 +4082,7 @@ impl ChatService {
                 Some(persona_tool_factory),
                 active_persona_id.clone(),
             );
-            if let Some(ref registry) = self.code_session_registry {
+            if let Some(ref registry) = **self.code_session_registry.load() {
                 supervisor.set_code_session_registry(Arc::clone(registry));
             }
             let supervisor = Arc::new(supervisor);
@@ -6525,7 +6556,7 @@ impl ChatService {
                 },
                 tool_limits: (*self.tool_limits).clone(),
                 code_act_config: self.code_act_config.clone(),
-                session_registry: self.code_session_registry.clone(),
+                session_registry: (**self.code_session_registry.load()).clone(),
                 preempt_signal: None, // Set below after reading session state.
                 cancellation_token: None,
             };
