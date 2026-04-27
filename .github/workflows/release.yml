@@ -26,6 +26,10 @@ on:
         description: 'Windows ARM64'
         type: boolean
         default: true
+      publish:
+        description: 'Publish GitHub Release after building'
+        type: boolean
+        default: true
 # on:
 #   push:
 #     tags: ['v*.*.*']
@@ -275,6 +279,7 @@ jobs:
     needs: [setup, build-macos, build-windows]
     if: |
       always() && !cancelled() &&
+      inputs.publish &&
       (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') &&
       (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
       (needs.build-macos.result == 'success' || needs.build-windows.result == 'success')
