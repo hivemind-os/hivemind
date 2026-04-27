@@ -2655,10 +2655,7 @@ impl LoopStrategy for CodeActStrategy {
                             }
                             None => {
                                 return Err(simple_model_error(
-                                    "CodeAct requires the WASM Python runtime. \
-                                     Run `scripts/download-python-wasm.sh` (macOS/Linux) or \
-                                     `scripts/download-python-wasm.ps1` (Windows), or set \
-                                     PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables.".into()
+                                    "CodeAct runtime is still downloading. Please wait a moment and try again.".into()
                                 ));
                             }
                         }
