@@ -8,5 +8,8 @@
     <true/>
     <key>com.apple.security.personal-information.contacts</key>
     <true/>
+    <!-- Allow JIT compilation — required by Wasmtime for CodeAct WASM execution -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
 </dict>
 </plist>

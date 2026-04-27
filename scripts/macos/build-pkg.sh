@@ -181,8 +181,39 @@ else
 fi
 cd "$REPO_ROOT"
 
-# Verify the built .app bundle signature (catches any resource/signing issues early).
+# Re-sign resource binaries inside the .app with their proper entitlements.
+# Tauri's `codesign --deep` may strip entitlements from nested Mach-O binaries,
+# so we re-apply them here.  hive-daemon needs allow-jit for Wasmtime's JIT
+# compilation of WASM modules (without it, macOS kills the process with SIGKILL
+# "Code Signature Invalid / Invalid Page").
 APP_BUNDLE=$(find "$REPO_ROOT/target/$TARGET/release/bundle" -name "HiveMind OS.app" -type d | head -1)
+if [ -n "$APP_BUNDLE" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+    echo "==> Re-signing resource binaries with entitlements..."
+    DAEMON_IN_APP="$APP_BUNDLE/Contents/Resources/hive-daemon"
+    if [ -f "$DAEMON_IN_APP" ]; then
+        sign_binary "$DAEMON_IN_APP" "com.hivemind.daemon" "$SCRIPT_DIR/entitlements-daemon.plist"
+        echo "  Re-signed hive-daemon (allow-jit for Wasmtime)"
+    fi
+    WORKER_IN_APP="$APP_BUNDLE/Contents/Resources/hive-runtime-worker"
+    if [ -f "$WORKER_IN_APP" ]; then
+        sign_binary "$WORKER_IN_APP" "com.hivemind.runtime-worker" "$SCRIPT_DIR/entitlements-cli.plist"
+        echo "  Re-signed hive-runtime-worker"
+    fi
+    CLI_IN_APP="$APP_BUNDLE/Contents/Resources/hive-cli"
+    if [ -f "$CLI_IN_APP" ]; then
+        sign_binary "$CLI_IN_APP" "com.hivemind.cli" "$SCRIPT_DIR/entitlements-cli.plist"
+        echo "  Re-signed hive-cli"
+    fi
+    # Re-sign the .app bundle envelope to update CodeResources hashes.
+    echo "==> Re-signing .app bundle envelope..."
+    codesign --force --sign "$SIGN_IDENTITY" \
+        --entitlements "$DESKTOP_DIR/src-tauri/entitlements.mac.plist" \
+        $($USE_HARDENED_RUNTIME && echo "--options runtime") \
+        "$APP_BUNDLE"
+    echo "  .app bundle re-signed"
+fi
+
+# Verify the built .app bundle signature (catches any resource/signing issues early).
 if [ -n "$APP_BUNDLE" ]; then
     echo "==> Verifying .app bundle signature..."
     codesign --verify --deep --strict "$APP_BUNDLE"
