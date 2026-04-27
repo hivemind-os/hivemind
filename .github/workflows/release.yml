@@ -222,18 +222,34 @@ jobs:
 
       - name: Sign installer (Azure Trusted Signing)
         if: env.HAS_AZURE_SIGNING == 'true'
-        uses: azure/trusted-signing-action@v0.5.1
+        uses: azure/artifact-signing-action@v1.2.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
           files-folder: target\${{ matrix.target }}\release\bundle\nsis
           files-folder-filter: exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+
+      - name: Verify Authenticode signature
+        if: env.HAS_AZURE_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "target/${{ matrix.target }}/release/bundle/nsis"
+          $exe = Get-ChildItem $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $exe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
+          Write-Host "Verifying signature on: $($exe.FullName)"
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe"
+          & $signtool verify /pa /v $exe.FullName
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "SIGNING VERIFICATION FAILED - installer is NOT signed!"
+            exit 1
+          }
+          Write-Host "Installer is properly Authenticode-signed"
 
       - name: Re-sign installer after Azure code-signing
         if: env.HAS_AZURE_SIGNING == 'true'
