@@ -21,6 +21,7 @@ use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 /// Sentinel markers for the REPL protocol (same as subprocess).
 /// Augmented with a per-session nonce to prevent accidental collision.
 const SENTINEL_ERROR: &str = "__HIVEMIND_EXEC_ERROR__";
+const SENTINEL_READY: &str = "__HIVEMIND_READY__";
 
 /// Generate a random 16-char hex nonce for sentinel uniqueness.
 fn generate_nonce() -> String {
@@ -107,6 +108,8 @@ def _hivemind_exec_loop():
         _original_stdout.write("\n{end}\n")
         _original_stdout.flush()
 
+_original_stdout.write("__HIVEMIND_READY__\n")
+_original_stdout.flush()
 _hivemind_exec_loop()
 "#,
         start = start,
@@ -120,6 +123,9 @@ struct WasmInstance {
     stdin_writer: DuplexStream,
     /// Read output from the WASM Python's stdout.
     stdout_reader: BufReader<DuplexStream>,
+    /// Read CPython's stderr (fatal errors, boot diagnostics).
+    #[allow(dead_code)]
+    stderr_reader: BufReader<DuplexStream>,
     /// Handle to the WASM execution task.
     wasm_task: tokio::task::JoinHandle<()>,
     /// Engine handle for epoch advancement.
@@ -230,11 +236,13 @@ impl WasmExecutor {
         let workspace_dir = self.config.working_directory.clone();
         let tmp_dir = self.tmp_dir.clone();
 
-        // Create bidirectional channels for stdin/stdout.
+        // Create bidirectional channels for stdin/stdout/stderr.
         // Host writes to host_stdin_writer → WASM reads from wasm_stdin_reader
         // WASM writes to wasm_stdout_writer → Host reads from host_stdout_reader
+        // WASM writes to wasm_stderr_writer → Host reads from host_stderr_reader
         let (host_stdin_writer, wasm_stdin_reader) = tokio::io::duplex(65536);
         let (wasm_stdout_writer, host_stdout_reader) = tokio::io::duplex(65536);
+        let (wasm_stderr_writer, host_stderr_reader) = tokio::io::duplex(65536);
 
         let engine_for_task = Arc::clone(&engine);
 
@@ -248,6 +256,7 @@ impl WasmExecutor {
                 memory_limit,
                 wasm_stdin_reader,
                 wasm_stdout_writer,
+                wasm_stderr_writer,
                 &nonce,
                 &tmp_dir,
             )
@@ -259,18 +268,82 @@ impl WasmExecutor {
             }
         });
 
+        // Wait for the WASM Python instance to signal readiness by printing
+        // the ready sentinel to stdout.  If it dies before that (e.g. missing
+        // stdlib), we capture stderr so the caller gets a useful error.
+        let mut stdout_reader = BufReader::new(host_stdout_reader);
+        let mut stderr_reader = BufReader::new(host_stderr_reader);
+        let boot_timeout = std::time::Duration::from_secs(30);
+
+        let ready_result = tokio::time::timeout(boot_timeout, async {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                let n = stdout_reader.read_line(&mut line).await.map_err(|e| {
+                    ExecutorError::NotReady(format!(
+                        "failed to read WASM stdout during boot: {e}"
+                    ))
+                })?;
+                if n == 0 {
+                    // EOF — the WASM task exited before signaling readiness.
+                    // Drain whatever stderr is available for diagnostics.
+                    let mut stderr_buf = String::new();
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(500),
+                        async {
+                            let mut tmp = String::new();
+                            loop {
+                                tmp.clear();
+                                match stderr_reader.read_line(&mut tmp).await {
+                                    Ok(0) | Err(_) => break,
+                                    Ok(_) => stderr_buf.push_str(&tmp),
+                                }
+                            }
+                        },
+                    )
+                    .await;
+                    let detail = if stderr_buf.is_empty() {
+                        "no stderr output captured".to_string()
+                    } else {
+                        stderr_buf.trim().to_string()
+                    };
+                    return Err(ExecutorError::NotReady(format!(
+                        "WASM Python instance exited during boot: {detail}"
+                    )));
+                }
+                if line.trim() == SENTINEL_READY {
+                    return Ok(());
+                }
+            }
+        })
+        .await;
+
+        match ready_result {
+            Ok(Ok(())) => {
+                tracing::debug!("WASM Python instance signaled readiness");
+            }
+            Ok(Err(e)) => {
+                wasm_task.abort();
+                return Err(e);
+            }
+            Err(_elapsed) => {
+                wasm_task.abort();
+                return Err(ExecutorError::NotReady(
+                    "WASM Python instance did not become ready within 30s".into(),
+                ));
+            }
+        }
+
         let instance = WasmInstance {
             stdin_writer: host_stdin_writer,
-            stdout_reader: BufReader::new(host_stdout_reader),
+            stdout_reader,
+            stderr_reader,
             wasm_task,
             engine: Arc::clone(&engine),
         };
 
         let mut guard = self.instance.lock().await;
         *guard = Some(instance);
-
-        // Give the WASM instance a moment to initialize
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         Ok(())
     }
@@ -481,6 +554,7 @@ async fn run_wasm_instance(
     memory_limit: usize,
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
+    wasm_stderr: DuplexStream,
     nonce: &str,
     tmp_dir: &Path,
 ) -> Result<(), ExecutorError> {
@@ -495,7 +569,8 @@ async fn run_wasm_instance(
     let stdout_stream = AsyncStdoutStream::new(AsyncWriteStream::new(65536, wasm_stdout));
     wasi_builder.stdin(stdin_stream);
     wasi_builder.stdout(stdout_stream);
-    wasi_builder.inherit_stderr(); // stderr goes to host for debugging
+    let stderr_stream = AsyncStdoutStream::new(AsyncWriteStream::new(65536, wasm_stderr));
+    wasi_builder.stderr(stderr_stream);
 
     // Preopen Python stdlib (read-only).
     //
@@ -653,7 +728,10 @@ impl CodeExecutor for WasmExecutor {
 
     async fn is_alive(&self) -> bool {
         let guard = self.instance.lock().await;
-        guard.is_some()
+        match &*guard {
+            Some(inst) => !inst.wasm_task.is_finished(),
+            None => false,
+        }
     }
 }
 
