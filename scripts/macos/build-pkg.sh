@@ -220,6 +220,29 @@ if [ -n "$APP_BUNDLE" ]; then
     echo "  Signature verified"
 fi
 
+# Re-create the updater .tar.gz from the re-signed .app so in-app updates also
+# get the correct entitlements.  Tauri's original archive was built before our
+# re-signing pass.  We also re-generate the Ed25519 .sig for the updater.
+BUNDLE_DIR="$REPO_ROOT/target/$TARGET/release/bundle/macos"
+if [ -n "$APP_BUNDLE" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+    APP_NAME=$(basename "$APP_BUNDLE")
+    UPDATER_TAR="$BUNDLE_DIR/${APP_NAME}.tar.gz"
+    echo "==> Re-creating updater archive from re-signed .app..."
+    # Tauri expects the .tar.gz to contain the .app directory at top level
+    tar -czf "$UPDATER_TAR" -C "$(dirname "$APP_BUNDLE")" "$APP_NAME"
+    echo "  Updated $UPDATER_TAR"
+    # Re-sign with Ed25519 for the Tauri updater if key is available
+    if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+        echo "==> Re-signing updater archive (Ed25519)..."
+        cd "$DESKTOP_DIR"
+        npx tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+            ${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:+--password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"} \
+            "$UPDATER_TAR"
+        cd "$REPO_ROOT"
+        echo "  Updater .sig regenerated"
+    fi
+fi
+
 # Rename updater artifacts to include architecture so aarch64 and x86_64
 # don't collide when uploaded to the same GitHub release.
 BUNDLE_DIR="$REPO_ROOT/target/$TARGET/release/bundle/macos"
