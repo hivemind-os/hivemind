@@ -123,6 +123,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           rm -f cert.p12
 
+      - name: Clean stale build artifacts from cache
+        run: |
+          rm -rf "target/${{ matrix.target }}/release/bundle/macos"
+          rm -rf dist
+
       - name: Build PKG installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -204,6 +209,15 @@ jobs:
             exit 1
           }
 
+      - name: Clean stale NSIS artifacts from cache
+        shell: pwsh
+        run: |
+          $nsisDir = "target/${{ matrix.target }}/release/bundle/nsis"
+          if (Test-Path $nsisDir) {
+            Write-Host "Removing stale NSIS artifacts from $nsisDir"
+            Remove-Item -Path $nsisDir -Recurse -Force
+          }
+
       - name: Build NSIS installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -248,22 +262,23 @@ jobs:
         run: |
           $nsisDir = "target/${{ matrix.target }}/release/bundle/nsis"
 
-          $setupExe = Get-ChildItem -Path $nsisDir |
-                      Where-Object { $_.Name -like "*-setup.exe" } |
-                      Select-Object -First 1
-          if (-not $setupExe) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
-          Write-Host "Using signed installer: $($setupExe.Name)"
+          $setupExes = Get-ChildItem -Path $nsisDir |
+                       Where-Object { $_.Name -like "*-setup.exe" }
+          if (-not $setupExes) { Write-Error "No setup exe found in $nsisDir"; exit 1 }
 
-          # Azure code-signing modified the exe binary, so the existing
-          # Ed25519 updater signature is now invalid. Re-sign it.
-          Remove-Item "$($setupExe.FullName).sig" -Force -ErrorAction SilentlyContinue
-          Push-Location apps/hivemind-desktop
-          npx tauri signer sign "$($setupExe.FullName)"
-          Pop-Location
-          if (-not (Test-Path "$($setupExe.FullName).sig")) {
-            Write-Error "Ed25519 signature file was not created"; exit 1
+          # Azure code-signing modified the exe binaries, so the existing
+          # Ed25519 updater signatures are now invalid. Re-sign them.
+          foreach ($setupExe in $setupExes) {
+            Write-Host "Re-signing: $($setupExe.Name)"
+            Remove-Item "$($setupExe.FullName).sig" -Force -ErrorAction SilentlyContinue
+            Push-Location apps/hivemind-desktop
+            npx tauri signer sign "$($setupExe.FullName)"
+            Pop-Location
+            if (-not (Test-Path "$($setupExe.FullName).sig")) {
+              Write-Error "Ed25519 signature file was not created for $($setupExe.Name)"; exit 1
+            }
+            Write-Host "Ed25519-signed: $($setupExe.Name).sig"
           }
-          Write-Host "Ed25519-signed: $($setupExe.Name).sig"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
