@@ -44,7 +44,7 @@ system_prompt: |
   - You own test writing — write thorough tests and do not proceed until they all pass.
   - Do NOT skip QA validation or code review — always spawn both sub-agents.
   - Write meaningful commit-ready code, not placeholders or TODOs.
-loop_strategy: react
+loop_strategy: code_act
 allowed_tools:
   - "*"
 avatar: "⚙️"
