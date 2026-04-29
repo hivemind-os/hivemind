@@ -55,10 +55,7 @@ struct CountingExecutor {
 
 impl CountingExecutor {
     fn new() -> Self {
-        Self {
-            tool_calls: Mutex::new(Vec::new()),
-            feedback_requests: Mutex::new(Vec::new()),
-        }
+        Self { tool_calls: Mutex::new(Vec::new()), feedback_requests: Mutex::new(Vec::new()) }
     }
 }
 
@@ -70,10 +67,7 @@ impl StepExecutor for CountingExecutor {
         arguments: Value,
         _ctx: &ExecutionContext,
     ) -> Result<Value, String> {
-        self.tool_calls
-            .lock()
-            .await
-            .push((tool_id.to_string(), arguments.clone()));
+        self.tool_calls.lock().await.push((tool_id.to_string(), arguments.clone()));
         // Return the item being processed for verification
         let item = arguments.get("item").cloned().unwrap_or(Value::Null);
         Ok(json!({"processed": true, "item": item}))
@@ -120,10 +114,11 @@ impl StepExecutor for CountingExecutor {
         _allow_freeform: bool,
         _ctx: &ExecutionContext,
     ) -> Result<String, String> {
-        self.feedback_requests
-            .lock()
-            .await
-            .push((instance_id, step_id.to_string(), prompt.to_string()));
+        self.feedback_requests.lock().await.push((
+            instance_id,
+            step_id.to_string(),
+            prompt.to_string(),
+        ));
         Ok(format!("preview-req-{}", step_id))
     }
 
@@ -171,19 +166,12 @@ impl StepExecutor for CountingExecutor {
 // Build engine helper
 // ---------------------------------------------------------------------------
 
-fn build_engine(
-    store: Arc<WorkflowStore>,
-    executor: Arc<dyn StepExecutor>,
-) -> WorkflowEngine {
+fn build_engine(store: Arc<WorkflowStore>, executor: Arc<dyn StepExecutor>) -> WorkflowEngine {
     let emitter = Arc::new(NullEventEmitter);
     WorkflowEngine::new(store, executor, emitter)
 }
 
-async fn launch(
-    engine: &WorkflowEngine,
-    yaml: &str,
-    inputs: Value,
-) -> i64 {
+async fn launch(engine: &WorkflowEngine, yaml: &str, inputs: Value) -> i64 {
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     engine
         .launch_with_id(
@@ -390,10 +378,7 @@ steps:
     assert_eq!(executor.tool_calls.lock().await.len(), 2);
 
     // Respond: Abort
-    engine
-        .respond_to_gate(id, "loop", json!({"selected": "Abort", "text": ""}))
-        .await
-        .unwrap();
+    engine.respond_to_gate(id, "loop", json!({"selected": "Abort", "text": ""})).await.unwrap();
 
     wait_for_terminal(&store, id).await;
 

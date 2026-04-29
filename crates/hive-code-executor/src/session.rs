@@ -142,17 +142,17 @@ impl SessionRegistry {
 
         match (wasm_path, stdlib_path) {
             (Some(wasm_path), Some(stdlib_path)) if wasm_path.exists() && stdlib_path.exists() => {
-                let registry = Self::try_create_wasm_registry(config, max_sessions, &wasm_path, &stdlib_path)?;
+                let registry =
+                    Self::try_create_wasm_registry(config, max_sessions, &wasm_path, &stdlib_path)?;
                 tracing::info!("CodeAct: SessionRegistry using WASM backend");
                 Ok(registry)
             }
-            _ => {
-                Err(ExecutorError::NotReady(
-                    "CodeAct requires the WASM Python runtime (python.wasm). \
+            _ => Err(ExecutorError::NotReady(
+                "CodeAct requires the WASM Python runtime (python.wasm). \
                      Set PYTHON_WASM_PATH and PYTHON_WASM_STDLIB environment variables \
-                     or bundle python.wasm with the application.".into()
-                ))
-            }
+                     or bundle python.wasm with the application."
+                    .into(),
+            )),
         }
     }
 
@@ -219,12 +219,7 @@ impl SessionRegistry {
             config.executor.working_directory = Some(ws.to_string());
         }
 
-        let session = Session::new(
-            session_id.to_string(),
-            config,
-            &self.wasm_runtime,
-        )
-        .await?;
+        let session = Session::new(session_id.to_string(), config, &self.wasm_runtime).await?;
         let session = Arc::new(session);
 
         let mut sessions = self.sessions.lock();
@@ -278,11 +273,7 @@ impl SessionRegistry {
     pub async fn reap_idle(&self) {
         let idle_sessions: Vec<String> = {
             let sessions = self.sessions.lock();
-            sessions
-                .iter()
-                .filter(|(_, s)| s.is_idle())
-                .map(|(id, _)| id.clone())
-                .collect()
+            sessions.iter().filter(|(_, s)| s.is_idle()).map(|(id, _)| id.clone()).collect()
         };
 
         for id in idle_sessions {
@@ -302,10 +293,7 @@ impl SessionRegistry {
                 return;
             }
             // Find LRU session
-            sessions
-                .iter()
-                .max_by_key(|(_, s)| s.idle_duration())
-                .map(|(id, _)| id.clone())
+            sessions.iter().max_by_key(|(_, s)| s.idle_duration()).map(|(id, _)| id.clone())
         };
 
         if let Some(id) = to_evict {

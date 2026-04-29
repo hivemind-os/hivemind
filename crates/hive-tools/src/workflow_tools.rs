@@ -1,8 +1,8 @@
 use crate::{BoxFuture, Tool, ToolError, ToolResult};
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::{ToolAnnotations, ToolApproval, ToolDefinition};
-use hive_workflow_service::WorkflowService;
 use hive_workflow::ExecutionMode;
+use hive_workflow_service::WorkflowService;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -76,12 +76,7 @@ impl WorkflowLaunchTool {
         session_id: Option<String>,
         workspace_path: Option<String>,
     ) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-            session_id,
-            workspace_path,
-        }
+        Self { definition: Self::tool_definition(), service, session_id, workspace_path }
     }
 }
 
@@ -187,10 +182,7 @@ impl WorkflowStatusTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 
@@ -272,10 +264,7 @@ impl WorkflowListTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 
@@ -367,10 +356,7 @@ impl WorkflowPauseTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 
@@ -434,10 +420,7 @@ impl WorkflowResumeTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 
@@ -501,10 +484,7 @@ impl WorkflowKillTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 
@@ -577,10 +557,7 @@ impl WorkflowRespondTool {
     }
 
     pub fn new(service: Arc<WorkflowService>) -> Self {
-        Self {
-            definition: Self::tool_definition(),
-            service,
-        }
+        Self { definition: Self::tool_definition(), service }
     }
 }
 

@@ -101,11 +101,7 @@ impl DataStoreTool {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .map_err(|e| format!("failed to configure data store: {e}"))?;
 
-        Ok(Self {
-            definition: Self::tool_definition(),
-            _db_path: db_path,
-            conn: Mutex::new(conn),
-        })
+        Ok(Self { definition: Self::tool_definition(), _db_path: db_path, conn: Mutex::new(conn) })
     }
 }
 

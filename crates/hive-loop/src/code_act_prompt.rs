@@ -4,7 +4,7 @@
 //! system prompt. These tell the LLM to write Python code in fenced blocks,
 //! list available bridged tool functions, and explain the observation format.
 
-use hive_code_executor::{BridgedToolInfo, CodeActToolMode, tool_id_to_python_name};
+use hive_code_executor::{tool_id_to_python_name, BridgedToolInfo, CodeActToolMode};
 
 /// Build the CodeAct supplement that is appended to the persona system prompt.
 ///
@@ -48,10 +48,8 @@ pub fn build_code_act_instructions(
     }
 
     // List bridged tool functions
-    let tool_funcs: Vec<&BridgedToolInfo> = bridged_tools
-        .iter()
-        .filter(|t| t.mode != CodeActToolMode::Native)
-        .collect();
+    let tool_funcs: Vec<&BridgedToolInfo> =
+        bridged_tools.iter().filter(|t| t.mode != CodeActToolMode::Native).collect();
 
     if !tool_funcs.is_empty() {
         parts.push("\n## Available Python Functions\n".to_string());
@@ -95,11 +93,7 @@ pub fn build_code_act_instructions(
 fn build_function_signature(tool: &BridgedToolInfo) -> String {
     let func_name = tool_id_to_display_name(&tool.tool_id);
 
-    let params = match tool
-        .input_schema
-        .get("properties")
-        .and_then(|v| v.as_object())
-    {
+    let params = match tool.input_schema.get("properties").and_then(|v| v.as_object()) {
         Some(props) if !props.is_empty() => {
             let required: Vec<&str> = tool
                 .input_schema

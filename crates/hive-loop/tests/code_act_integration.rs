@@ -19,13 +19,12 @@ use tempfile::TempDir;
 
 use hive_classification::{ChannelClass, DataClass};
 use hive_contracts::{
-    CodeActConfig, LoopStrategy as ConfigLoopStrategy, PermissionRule, Persona,
-    SessionPermissions, ToolAnnotations, ToolApproval, ToolDefinition, ToolExecutionMode,
-    ToolLimitsConfig,
+    CodeActConfig, LoopStrategy as ConfigLoopStrategy, PermissionRule, Persona, SessionPermissions,
+    ToolAnnotations, ToolApproval, ToolDefinition, ToolExecutionMode, ToolLimitsConfig,
 };
 use hive_loop::{
-    AgentContext, CodeActStrategy, ConversationContext, LoopContext, LoopError,
-    LoopEvent, LoopExecutor, RoutingConfig, SecurityContext, ToolsContext,
+    AgentContext, CodeActStrategy, ConversationContext, LoopContext, LoopError, LoopEvent,
+    LoopExecutor, RoutingConfig, SecurityContext, ToolsContext,
 };
 use hive_model::{
     Capability, CompletionChunk, CompletionMessage, CompletionRequest, CompletionResponse,
@@ -36,13 +35,8 @@ use hive_tools::{Tool, ToolError, ToolRegistry, ToolResult};
 
 /// Returns true if the WASM Python runtime is available for integration tests.
 fn wasm_available() -> bool {
-    match (
-        std::env::var("PYTHON_WASM_PATH"),
-        std::env::var("PYTHON_WASM_STDLIB"),
-    ) {
-        (Ok(p), Ok(s)) => {
-            std::path::Path::new(&p).exists() && std::path::Path::new(&s).exists()
-        }
+    match (std::env::var("PYTHON_WASM_PATH"), std::env::var("PYTHON_WASM_STDLIB")) {
+        (Ok(p), Ok(s)) => std::path::Path::new(&p).exists() && std::path::Path::new(&s).exists(),
         _ => false,
     }
 }
@@ -123,9 +117,7 @@ impl ScriptProvider {
 
     /// A response containing a Python code block in the content (CodeAct style).
     fn code_response(text_before: &str, python_code: &str, text_after: &str) -> CompletionResponse {
-        let content = format!(
-            "{text_before}\n```python\n{python_code}\n```\n{text_after}"
-        );
+        let content = format!("{text_before}\n```python\n{python_code}\n```\n{text_after}");
         CompletionResponse {
             provider_id: "test-provider".to_string(),
             model: "test-model".to_string(),
@@ -392,9 +384,7 @@ fn registry_with(tools: Vec<Arc<MockTool>>) -> Arc<ToolRegistry> {
 /// immediately with the text content.
 #[tokio::test]
 async fn code_act_plain_text_terminates() {
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("The answer is 42."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("The answer is 42.")]);
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
     let ctx = make_code_act_context(tools, "What is the answer?");
@@ -412,11 +402,7 @@ async fn code_act_executes_python_and_returns_result() {
     require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Iteration 0: model writes Python code
-        ScriptProvider::code_response(
-            "Let me calculate that.",
-            "print(2 + 2)",
-            "",
-        ),
+        ScriptProvider::code_response("Let me calculate that.", "print(2 + 2)", ""),
         // Iteration 1: model sees "4" in observation, returns final answer
         ScriptProvider::text("The result is 4."),
     ]);
@@ -441,11 +427,7 @@ async fn code_act_handles_execution_error_and_retries() {
     require_wasm!();
     let provider = ScriptProvider::new(vec![
         // Iteration 0: model writes buggy code
-        ScriptProvider::code_response(
-            "Let me try:",
-            "print(1/0)",
-            "",
-        ),
+        ScriptProvider::code_response("Let me try:", "print(1/0)", ""),
         // Iteration 1: model sees ZeroDivisionError, writes fix
         ScriptProvider::code_response(
             "I see the error, let me fix:",
@@ -472,9 +454,7 @@ async fn code_act_handles_execution_error_and_retries() {
 /// when allow_network is true.
 #[tokio::test]
 async fn code_act_prompt_includes_network_access() {
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("I have network access."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("I have network access.")]);
     let recorder = provider.recorder();
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
@@ -505,9 +485,7 @@ async fn code_act_prompt_includes_network_access() {
 /// when allow_network is false.
 #[tokio::test]
 async fn code_act_prompt_excludes_network_when_disabled() {
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("No network."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("No network.")]);
     let recorder = provider.recorder();
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
@@ -533,17 +511,12 @@ async fn code_act_prompt_includes_workspace_path() {
     let tmp = TempDir::new().unwrap();
     let workspace_path = tmp.path().to_path_buf();
 
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("I know where I am."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("I know where I am.")]);
     let recorder = provider.recorder();
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
-    let ctx = make_code_act_context_with_workspace(
-        tools,
-        "Where are you?",
-        Some(workspace_path.clone()),
-    );
+    let ctx =
+        make_code_act_context_with_workspace(tools, "Where are you?", Some(workspace_path.clone()));
     let executor = make_code_act_executor();
 
     let _ = executor.run(ctx, router).await.expect("loop should succeed");
@@ -596,7 +569,8 @@ async fn code_act_instructions_persist_across_iterations() {
     let second_messages: String = requests[1].messages.iter().map(|m| m.content.clone()).collect();
     let combined = format!("{second_prompt}\n{second_messages}");
     assert!(
-        combined.contains("Bias toward action") || combined.contains("persistent Python environment")
+        combined.contains("Bias toward action")
+            || combined.contains("persistent Python environment")
             || combined.contains("fresh environment"),
         "Iteration 1 should still have CodeAct instructions in the prompt.\nGot:\n{}",
         &combined[..combined.len().min(2000)]
@@ -635,11 +609,7 @@ async fn code_act_writes_file_to_workspace() {
     assert_eq!(result.content, "File has been written.");
 
     // Verify the file was actually created in the workspace
-    assert!(
-        file_path.exists(),
-        "Expected output.txt to exist in workspace at {:?}",
-        file_path
-    );
+    assert!(file_path.exists(), "Expected output.txt to exist in workspace at {:?}", file_path);
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert_eq!(content, "hello from codeact");
 }
@@ -668,10 +638,8 @@ async fn code_act_emits_execution_events() {
     }
 
     // Should have CodeExecution events (Started + Completed)
-    let code_exec_events: Vec<_> = events
-        .iter()
-        .filter(|e| matches!(e, LoopEvent::CodeExecution { .. }))
-        .collect();
+    let code_exec_events: Vec<_> =
+        events.iter().filter(|e| matches!(e, LoopEvent::CodeExecution { .. })).collect();
     assert!(
         code_exec_events.len() >= 2,
         "Expected at least 2 CodeExecution events (Started + Completed), got {}",
@@ -686,11 +654,7 @@ async fn code_act_respects_budget_limit() {
     // Set up a model that always returns code (never terminates naturally)
     let mut responses = Vec::new();
     for i in 0..50 {
-        responses.push(ScriptProvider::code_response(
-            "",
-            &format!("print('iteration {i}')"),
-            "",
-        ));
+        responses.push(ScriptProvider::code_response("", &format!("print('iteration {i}')"), ""));
     }
     let provider = ScriptProvider::new(responses);
     let router = make_router(provider);
@@ -724,7 +688,7 @@ async fn code_act_executes_multiple_code_blocks() {
             "Let me do two things:\n\
              ```python\nprint('block1')\n```\n\
              And also:\n\
-             ```python\nprint('block2')\n```"
+             ```python\nprint('block2')\n```",
         ),
         // Sees both outputs, returns final answer
         ScriptProvider::text("Both blocks executed."),
@@ -753,9 +717,7 @@ async fn code_act_executes_multiple_code_blocks() {
 /// Test 12: The "bias toward action" instruction is present in the prompt.
 #[tokio::test]
 async fn code_act_prompt_has_action_bias() {
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("OK."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("OK.")]);
     let recorder = provider.recorder();
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
@@ -769,7 +731,8 @@ async fn code_act_prompt_has_action_bias() {
     let all_messages: String = requests[0].messages.iter().map(|m| m.content.clone()).collect();
     let combined = format!("{first_prompt}\n{all_messages}");
     assert!(
-        combined.contains("Bias toward action") || combined.contains("act immediately")
+        combined.contains("Bias toward action")
+            || combined.contains("act immediately")
             || combined.contains("Act immediately"),
         "Prompt should contain action bias instruction"
     );
@@ -778,9 +741,7 @@ async fn code_act_prompt_has_action_bias() {
 /// Test 13: Completion rules tell the agent not to present follow-up menus.
 #[tokio::test]
 async fn code_act_prompt_forbids_followup_menus() {
-    let provider = ScriptProvider::new(vec![
-        ScriptProvider::text("OK."),
-    ]);
+    let provider = ScriptProvider::new(vec![ScriptProvider::text("OK.")]);
     let recorder = provider.recorder();
     let router = make_router(provider);
     let tools = Arc::new(ToolRegistry::new());
@@ -794,7 +755,8 @@ async fn code_act_prompt_forbids_followup_menus() {
     let all_messages: String = requests[0].messages.iter().map(|m| m.content.clone()).collect();
     let combined = format!("{first_prompt}\n{all_messages}");
     assert!(
-        combined.contains("do next") || combined.contains("follow-up menus")
+        combined.contains("do next")
+            || combined.contains("follow-up menus")
             || combined.contains("present follow-up"),
         "Completion rules should mention not asking 'what next'"
     );
@@ -810,10 +772,13 @@ async fn code_act_native_tool_call_produces_structured_history() {
     // Use multi-turn provider (OpenAiCompatible → supports_tool_history = true)
     let provider = ScriptProvider::new_multi_turn(vec![
         // Iteration 0: model makes a native tool call
-        ScriptProvider::tool_call("mock_question_tool", json!({
-            "question": "What format?",
-            "choices": ["JSON", "Text"],
-        })),
+        ScriptProvider::tool_call(
+            "mock_question_tool",
+            json!({
+                "question": "What format?",
+                "choices": ["JSON", "Text"],
+            }),
+        ),
         // Iteration 1: model sees the structured tool result and finishes
         ScriptProvider::text("OK, I'll use JSON format."),
     ]);
@@ -821,9 +786,8 @@ async fn code_act_native_tool_call_produces_structured_history() {
     let router = make_router(provider);
 
     // Register a mock tool that returns an answer
-    let ask_tool = Arc::new(
-        MockTool::new("mock_question_tool").with_response(json!({"answer": "JSON"})),
-    );
+    let ask_tool =
+        Arc::new(MockTool::new("mock_question_tool").with_response(json!({"answer": "JSON"})));
     let tools = registry_with(vec![ask_tool]);
     let ctx = make_code_act_context(tools, "Save weather to file");
     let executor = make_code_act_executor();
@@ -842,7 +806,9 @@ async fn code_act_native_tool_call_produces_structured_history() {
     // 3. A tool message with ToolResult blocks
 
     let has_tool_use = second_request.messages.iter().any(|m| {
-        m.blocks.iter().any(|b| matches!(b, MessageBlock::ToolUse { name, .. } if name == "mock_question_tool"))
+        m.blocks.iter().any(
+            |b| matches!(b, MessageBlock::ToolUse { name, .. } if name == "mock_question_tool"),
+        )
     });
     assert!(
         has_tool_use,
@@ -860,7 +826,9 @@ async fn code_act_native_tool_call_produces_structured_history() {
     );
 
     // The tool result content should contain the user's answer
-    let tool_result_content: String = second_request.messages.iter()
+    let tool_result_content: String = second_request
+        .messages
+        .iter()
         .filter(|m| m.role == "tool")
         .map(|m| m.content.clone())
         .collect();

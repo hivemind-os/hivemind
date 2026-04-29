@@ -34,11 +34,7 @@ impl RiskLevel {
 // ---------------------------------------------------------------------------
 
 /// Known tool ID prefixes that produce external / destructive side-effects.
-const DANGER_TOOL_PREFIXES: &[&str] = &[
-    "connector.send_message",
-    "http.request",
-    "process.start",
-];
+const DANGER_TOOL_PREFIXES: &[&str] = &["connector.send_message", "http.request", "process.start"];
 
 /// Classify a single tool by its definition metadata.
 ///
@@ -58,10 +54,7 @@ pub fn classify_tool(tool_def: &ToolDefinition) -> RiskLevel {
     {
         return RiskLevel::Danger;
     }
-    if DANGER_TOOL_PREFIXES
-        .iter()
-        .any(|p| tool_def.id.starts_with(p))
-    {
+    if DANGER_TOOL_PREFIXES.iter().any(|p| tool_def.id.starts_with(p)) {
         return RiskLevel::Danger;
     }
     if tool_def.side_effects {
@@ -79,10 +72,7 @@ pub fn classify_tool(tool_def: &ToolDefinition) -> RiskLevel {
 /// For `CallTool` steps, uses the provided `tool_lookup` to resolve tool
 /// metadata.  If the tool is not found, returns `Unknown` (which
 /// `should_intercept()` treats the same as `Caution`).
-pub fn classify_task(
-    task: &TaskDef,
-    tool_lookup: &dyn Fn(&str) -> Option<RiskLevel>,
-) -> RiskLevel {
+pub fn classify_task(task: &TaskDef, tool_lookup: &dyn Fn(&str) -> Option<RiskLevel>) -> RiskLevel {
     match task {
         TaskDef::CallTool { tool_id, .. } => tool_lookup(tool_id).unwrap_or(RiskLevel::Unknown),
         TaskDef::InvokeAgent { .. } | TaskDef::InvokePrompt { .. } => RiskLevel::Caution,
@@ -259,7 +249,9 @@ fn categorize_task(task: &TaskDef, tool_defs: &HashMap<String, ToolDefinition>) 
             }
             ImpactCategory::None
         }
-        TaskDef::InvokeAgent { .. } | TaskDef::InvokePrompt { .. } => ImpactCategory::AgentInvocation,
+        TaskDef::InvokeAgent { .. } | TaskDef::InvokePrompt { .. } => {
+            ImpactCategory::AgentInvocation
+        }
         TaskDef::ScheduleTask { .. } => ImpactCategory::ScheduledTask,
         _ => ImpactCategory::None,
     }
@@ -278,7 +270,9 @@ fn action_summary(task: &TaskDef) -> String {
         }
         TaskDef::InvokeAgent { persona_id, .. } => format!("Invokes agent '{persona_id}'"),
         TaskDef::InvokePrompt { persona_id, .. } => format!("Invokes prompt '{persona_id}'"),
-        TaskDef::LaunchWorkflow { workflow_name, .. } => format!("Launches workflow '{workflow_name}'"),
+        TaskDef::LaunchWorkflow { workflow_name, .. } => {
+            format!("Launches workflow '{workflow_name}'")
+        }
         TaskDef::ScheduleTask { schedule } => format!("Schedules task '{}'", schedule.name),
         TaskDef::SignalAgent { .. } => "Signals agent".to_string(),
         TaskDef::SetVariable { .. } => "Sets variable".to_string(),
@@ -333,9 +327,7 @@ pub fn analyze_workflow(
     definition: &WorkflowDefinition,
     tool_defs: &HashMap<String, ToolDefinition>,
 ) -> WorkflowImpactEstimate {
-    let tool_lookup_risk = |id: &str| -> Option<RiskLevel> {
-        tool_defs.get(id).map(classify_tool)
-    };
+    let tool_lookup_risk = |id: &str| -> Option<RiskLevel> { tool_defs.get(id).map(classify_tool) };
 
     // Build loop body → (loop_step_id, control_flow_def) mapping
     let mut loop_bodies: HashMap<String, (String, &ControlFlowDef)> = HashMap::new();
@@ -402,9 +394,7 @@ pub fn analyze_workflow(
         total_steps += 1;
 
         let (summary, category) = match &step.step_type {
-            StepType::Task { task } => {
-                (action_summary(task), categorize_task(task, tool_defs))
-            }
+            StepType::Task { task } => (action_summary(task), categorize_task(task, tool_defs)),
             StepType::Trigger { .. } => ("Trigger".to_string(), ImpactCategory::None),
             StepType::ControlFlow { .. } => ("Control flow".to_string(), ImpactCategory::None),
         };
@@ -459,8 +449,8 @@ pub fn analyze_workflow(
 mod tests {
     use super::*;
     use crate::types::TriggerType;
-    use hive_contracts::ChannelClass;
     use hive_contracts::tools::{ToolAnnotations, ToolApproval};
+    use hive_contracts::ChannelClass;
     use serde_json::json;
 
     fn make_tool(id: &str) -> ToolDefinition {
@@ -518,14 +508,14 @@ mod tests {
     }
 
     fn make_trigger_step(id: &str) -> StepDef {
-        make_step(id, StepType::Trigger {
-            trigger: crate::types::TriggerDef {
-                trigger_type: TriggerType::Manual {
-                    inputs: vec![],
-                    input_schema: None,
+        make_step(
+            id,
+            StepType::Trigger {
+                trigger: crate::types::TriggerDef {
+                    trigger_type: TriggerType::Manual { inputs: vec![], input_schema: None },
                 },
             },
-        })
+        )
     }
 
     #[test]
@@ -582,10 +572,8 @@ mod tests {
 
     #[test]
     fn unknown_tool_from_task() {
-        let task = TaskDef::CallTool {
-            tool_id: "nonexistent.tool".into(),
-            arguments: Default::default(),
-        };
+        let task =
+            TaskDef::CallTool { tool_id: "nonexistent.tool".into(), arguments: Default::default() };
         let lookup = |_: &str| -> Option<RiskLevel> { None };
         assert_eq!(classify_task(&task, &lookup), RiskLevel::Unknown);
         assert!(RiskLevel::Unknown.should_intercept());
@@ -619,9 +607,7 @@ mod tests {
 
     #[test]
     fn set_variable_is_safe() {
-        let task = TaskDef::SetVariable {
-            assignments: vec![],
-        };
+        let task = TaskDef::SetVariable { assignments: vec![] };
         assert_eq!(classify_task(&task, &|_| None), RiskLevel::Safe);
     }
 
@@ -682,27 +668,31 @@ mod tests {
         let mut send_tool = make_tool("connector.send_message");
         send_tool.side_effects = true;
 
-        let tool_defs: HashMap<String, ToolDefinition> = [
-            ("fs.read".to_string(), read_tool),
-            ("connector.send_message".to_string(), send_tool),
-        ]
-        .into_iter()
-        .collect();
+        let tool_defs: HashMap<String, ToolDefinition> =
+            [("fs.read".to_string(), read_tool), ("connector.send_message".to_string(), send_tool)]
+                .into_iter()
+                .collect();
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("read_step", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "fs.read".into(),
-                    arguments: Default::default(),
+            make_step(
+                "read_step",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "fs.read".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
-            make_step("send_step", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "connector.send_message".into(),
-                    arguments: Default::default(),
+            ),
+            make_step(
+                "send_step",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "connector.send_message".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -725,28 +715,31 @@ mod tests {
         let mut send_tool = make_tool("connector.send_message");
         send_tool.side_effects = true;
 
-        let tool_defs: HashMap<String, ToolDefinition> = [
-            ("connector.send_message".to_string(), send_tool),
-        ]
-        .into_iter()
-        .collect();
+        let tool_defs: HashMap<String, ToolDefinition> =
+            [("connector.send_message".to_string(), send_tool)].into_iter().collect();
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("loop", StepType::ControlFlow {
-                control: ControlFlowDef::ForEach {
-                    collection: "trigger.contacts".into(),
-                    item_var: "contact".into(),
-                    body: vec!["send_email".into()],
-                    preview_count: None,
+            make_step(
+                "loop",
+                StepType::ControlFlow {
+                    control: ControlFlowDef::ForEach {
+                        collection: "trigger.contacts".into(),
+                        item_var: "contact".into(),
+                        body: vec!["send_email".into()],
+                        preview_count: None,
+                    },
                 },
-            }),
-            make_step("send_email", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "connector.send_message".into(),
-                    arguments: Default::default(),
+            ),
+            make_step(
+                "send_email",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "connector.send_message".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -763,36 +756,42 @@ mod tests {
     fn impact_nested_loops() {
         let mut send_tool = make_tool("connector.send_message");
         send_tool.side_effects = true;
-        let tool_defs: HashMap<String, ToolDefinition> = [
-            ("connector.send_message".to_string(), send_tool),
-        ]
-        .into_iter()
-        .collect();
+        let tool_defs: HashMap<String, ToolDefinition> =
+            [("connector.send_message".to_string(), send_tool)].into_iter().collect();
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("outer_loop", StepType::ControlFlow {
-                control: ControlFlowDef::ForEach {
-                    collection: "trigger.departments".into(),
-                    item_var: "dept".into(),
-                    body: vec!["inner_loop".into()],
-                    preview_count: None,
+            make_step(
+                "outer_loop",
+                StepType::ControlFlow {
+                    control: ControlFlowDef::ForEach {
+                        collection: "trigger.departments".into(),
+                        item_var: "dept".into(),
+                        body: vec!["inner_loop".into()],
+                        preview_count: None,
+                    },
                 },
-            }),
-            make_step("inner_loop", StepType::ControlFlow {
-                control: ControlFlowDef::ForEach {
-                    collection: "dept.members".into(),
-                    item_var: "member".into(),
-                    body: vec!["send_email".into()],
-                    preview_count: None,
+            ),
+            make_step(
+                "inner_loop",
+                StepType::ControlFlow {
+                    control: ControlFlowDef::ForEach {
+                        collection: "dept.members".into(),
+                        item_var: "member".into(),
+                        body: vec!["send_email".into()],
+                        preview_count: None,
+                    },
                 },
-            }),
-            make_step("send_email", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "connector.send_message".into(),
-                    arguments: Default::default(),
+            ),
+            make_step(
+                "send_email",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "connector.send_message".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -810,18 +809,24 @@ mod tests {
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("unknown1", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "nonexistent.tool".into(),
-                    arguments: Default::default(),
+            make_step(
+                "unknown1",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "nonexistent.tool".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
-            make_step("unknown2", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "another.unknown".into(),
-                    arguments: Default::default(),
+            ),
+            make_step(
+                "unknown2",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "another.unknown".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -835,17 +840,20 @@ mod tests {
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("agent_step", StepType::Task {
-                task: TaskDef::InvokeAgent {
-                    persona_id: "email-drafter".into(),
-                    task: "Draft a reply".into(),
-                    async_exec: false,
-                    timeout_secs: None,
-                    permissions: vec![],
-                    attachments: vec![],
-                    agent_name: None,
+            make_step(
+                "agent_step",
+                StepType::Task {
+                    task: TaskDef::InvokeAgent {
+                        persona_id: "email-drafter".into(),
+                        task: "Draft a reply".into(),
+                        async_exec: false,
+                        timeout_secs: None,
+                        permissions: vec![],
+                        attachments: vec![],
+                        agent_name: None,
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -859,15 +867,18 @@ mod tests {
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("sched_step", StepType::Task {
-                task: TaskDef::ScheduleTask {
-                    schedule: crate::types::ScheduleTaskDef {
-                        name: "daily-check".into(),
-                        schedule: "0 9 * * *".into(),
-                        action: json!({}),
+            make_step(
+                "sched_step",
+                StepType::Task {
+                    task: TaskDef::ScheduleTask {
+                        schedule: crate::types::ScheduleTaskDef {
+                            name: "daily-check".into(),
+                            schedule: "0 9 * * *".into(),
+                            action: json!({}),
+                        },
                     },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -880,27 +891,30 @@ mod tests {
         let mut http_tool = make_tool("http.request");
         http_tool.side_effects = true;
         http_tool.annotations.open_world_hint = Some(true);
-        let tool_defs: HashMap<String, ToolDefinition> = [
-            ("http.request".to_string(), http_tool),
-        ]
-        .into_iter()
-        .collect();
+        let tool_defs: HashMap<String, ToolDefinition> =
+            [("http.request".to_string(), http_tool)].into_iter().collect();
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("poll_loop", StepType::ControlFlow {
-                control: ControlFlowDef::While {
-                    condition: "{{vars.has_more}}".into(),
-                    max_iterations: Some(50),
-                    body: vec!["fetch_page".into()],
+            make_step(
+                "poll_loop",
+                StepType::ControlFlow {
+                    control: ControlFlowDef::While {
+                        condition: "{{vars.has_more}}".into(),
+                        max_iterations: Some(50),
+                        body: vec!["fetch_page".into()],
+                    },
                 },
-            }),
-            make_step("fetch_page", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "http.request".into(),
-                    arguments: Default::default(),
+            ),
+            make_step(
+                "fetch_page",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "http.request".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);
@@ -915,23 +929,24 @@ mod tests {
     fn impact_mixed_high_confidence() {
         let mut read_tool = make_tool("fs.read");
         read_tool.annotations.read_only_hint = Some(true);
-        let tool_defs: HashMap<String, ToolDefinition> = [
-            ("fs.read".to_string(), read_tool),
-        ]
-        .into_iter()
-        .collect();
+        let tool_defs: HashMap<String, ToolDefinition> =
+            [("fs.read".to_string(), read_tool)].into_iter().collect();
 
         let def = make_definition(vec![
             make_trigger_step("trigger"),
-            make_step("read", StepType::Task {
-                task: TaskDef::CallTool {
-                    tool_id: "fs.read".into(),
-                    arguments: Default::default(),
+            make_step(
+                "read",
+                StepType::Task {
+                    task: TaskDef::CallTool {
+                        tool_id: "fs.read".into(),
+                        arguments: Default::default(),
+                    },
                 },
-            }),
-            make_step("set_var", StepType::Task {
-                task: TaskDef::SetVariable { assignments: vec![] },
-            }),
+            ),
+            make_step(
+                "set_var",
+                StepType::Task { task: TaskDef::SetVariable { assignments: vec![] } },
+            ),
         ]);
 
         let est = analyze_workflow(&def, &tool_defs);

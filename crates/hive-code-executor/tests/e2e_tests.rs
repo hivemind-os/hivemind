@@ -11,9 +11,8 @@
 //! or subprocess fallback. Both backends MUST pass all tests.
 
 use hive_code_executor::{
-    BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions,
-    ExecutorConfig, Language, ToolCallHandler,
-    ToolCallRequest, ToolCallResponse, WasmExecutor,
+    BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions, ExecutorConfig, Language,
+    ToolCallHandler, ToolCallRequest, ToolCallResponse, WasmExecutor,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -155,11 +154,7 @@ async fn e2e_basic_execution_via_trait() {
             .execute("print('hello from trait')", Language::Python)
             .await
             .unwrap_or_else(|e| panic!("[{name}] basic execution failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] unexpected error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] unexpected error: {}", result.stderr);
         assert!(
             result.stdout.contains("hello from trait"),
             "[{name}] expected 'hello from trait' in stdout, got: {:?}",
@@ -174,23 +169,16 @@ async fn e2e_basic_execution_via_trait() {
 #[tokio::test]
 async fn e2e_tool_call_through_trait() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
         // Inject bridge code
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
         let init_result = executor
             .execute_with_tools(&bridge_code, Language::Python, &options)
             .await
             .unwrap_or_else(|e| panic!("[{name}] bridge injection failed: {e}"));
-        assert!(
-            !init_result.is_error,
-            "[{name}] bridge injection error: {}",
-            init_result.stderr
-        );
+        assert!(!init_result.is_error, "[{name}] bridge injection error: {}", init_result.stderr);
 
         // Call a tool from Python
         let result = executor
@@ -201,11 +189,7 @@ async fn e2e_tool_call_through_trait() {
             )
             .await
             .unwrap_or_else(|e| panic!("[{name}] tool call failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] tool call error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] tool call error: {}", result.stderr);
         assert!(
             result.stdout.contains("7"),
             "[{name}] expected '7' in output, got: {:?}",
@@ -220,17 +204,11 @@ async fn e2e_tool_call_through_trait() {
 #[tokio::test]
 async fn e2e_multiple_tool_calls_one_block() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
 
         let code = r#"
 a = math_add(a=10, b=20)
@@ -242,11 +220,7 @@ print(f"sum={b}, greeting={greeting}")
             .execute_with_tools(code, Language::Python, &options)
             .await
             .unwrap_or_else(|e| panic!("[{name}] multi-tool failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] multi-tool error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] multi-tool error: {}", result.stderr);
         assert!(
             result.stdout.contains("sum=35"),
             "[{name}] expected 'sum=35', got: {:?}",
@@ -266,17 +240,11 @@ print(f"sum={b}, greeting={greeting}")
 #[tokio::test]
 async fn e2e_tool_call_error_handling() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
 
         let code = r#"
 try:
@@ -289,11 +257,7 @@ except RuntimeError as e:
             .execute_with_tools(code, Language::Python, &options)
             .await
             .unwrap_or_else(|e| panic!("[{name}] error handling failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] unexpected exec error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] unexpected exec error: {}", result.stderr);
         assert!(
             result.stdout.contains("caught:"),
             "[{name}] expected 'caught:' in output, got: {:?}",
@@ -304,10 +268,7 @@ except RuntimeError as e:
             "[{name}] expected error message, got: {:?}",
             result.stdout
         );
-        assert!(
-            !result.stdout.contains("SHOULD NOT REACH"),
-            "[{name}] exception was not raised"
-        );
+        assert!(!result.stdout.contains("SHOULD NOT REACH"), "[{name}] exception was not raised");
 
         executor.shutdown().await.ok();
     }
@@ -317,42 +278,24 @@ except RuntimeError as e:
 #[tokio::test]
 async fn e2e_state_persists_with_tools() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
 
         // Call 1: store tool result in variable
         executor
-            .execute_with_tools(
-                "saved_value = math_add(a=100, b=200)",
-                Language::Python,
-                &options,
-            )
+            .execute_with_tools("saved_value = math_add(a=100, b=200)", Language::Python, &options)
             .await
             .unwrap();
 
         // Call 2: use the variable from call 1
         let result = executor
-            .execute_with_tools(
-                "print(f'saved={saved_value}')",
-                Language::Python,
-                &options,
-            )
+            .execute_with_tools("print(f'saved={saved_value}')", Language::Python, &options)
             .await
             .unwrap_or_else(|e| panic!("[{name}] state persistence failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] state error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] state error: {}", result.stderr);
         assert!(
             result.stdout.contains("saved=300"),
             "[{name}] expected 'saved=300', got: {:?}",
@@ -367,31 +310,19 @@ async fn e2e_state_persists_with_tools() {
 #[tokio::test]
 async fn e2e_reset_clears_everything() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
 
-        executor
-            .execute_with_tools("x = 42", Language::Python, &options)
-            .await
-            .unwrap();
+        executor.execute_with_tools("x = 42", Language::Python, &options).await.unwrap();
 
         // Reset
         executor.reset().await.unwrap();
 
         // Variable should be gone
-        let result = executor
-            .execute("print(x)", Language::Python)
-            .await
-            .unwrap();
+        let result = executor.execute("print(x)", Language::Python).await.unwrap();
         assert!(
             result.is_error,
             "[{name}] expected NameError after reset, got success: {:?}",
@@ -405,17 +336,10 @@ async fn e2e_reset_clears_everything() {
 
         // Tool bridge should also be gone
         let result = executor
-            .execute_with_tools(
-                "math_add(a=1, b=2)",
-                Language::Python,
-                &options,
-            )
+            .execute_with_tools("math_add(a=1, b=2)", Language::Python, &options)
             .await
             .unwrap();
-        assert!(
-            result.is_error,
-            "[{name}] expected NameError for tool after reset"
-        );
+        assert!(result.is_error, "[{name}] expected NameError for tool after reset");
 
         executor.shutdown().await.ok();
     }
@@ -425,10 +349,7 @@ async fn e2e_reset_clears_everything() {
 #[tokio::test]
 async fn e2e_exception_recovery() {
     for (name, executor) in all_executors().await {
-        let r1 = executor
-            .execute("1 / 0", Language::Python)
-            .await
-            .unwrap();
+        let r1 = executor.execute("1 / 0", Language::Python).await.unwrap();
         assert!(r1.is_error, "[{name}] expected ZeroDivisionError");
         assert!(
             r1.stderr.contains("ZeroDivisionError"),
@@ -437,15 +358,8 @@ async fn e2e_exception_recovery() {
         );
 
         // Session should still be alive
-        let r2 = executor
-            .execute("print('still alive')", Language::Python)
-            .await
-            .unwrap();
-        assert!(
-            !r2.is_error,
-            "[{name}] session died after exception: {}",
-            r2.stderr
-        );
+        let r2 = executor.execute("print('still alive')", Language::Python).await.unwrap();
+        assert!(!r2.is_error, "[{name}] session died after exception: {}", r2.stderr);
         assert!(
             r2.stdout.contains("still alive"),
             "[{name}] expected 'still alive', got: {:?}",
@@ -472,11 +386,7 @@ print(f"names={names}")
             .execute(code, Language::Python)
             .await
             .unwrap_or_else(|e| panic!("[{name}] complex code failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] complex code error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] complex code error: {}", result.stderr);
         assert!(
             result.stdout.contains("average=91"),
             "[{name}] expected average=91, got: {:?}",
@@ -496,32 +406,19 @@ print(f"names={names}")
 #[tokio::test]
 async fn e2e_tool_call_without_handler() {
     let handler = MockToolHandler;
-    let with_handler = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let with_handler = ExecutionOptions { tool_call_handler: Some(&handler) };
     let no_handler = ExecutionOptions::default();
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &with_handler)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &with_handler).await.unwrap();
 
         // Call tool WITHOUT handler — should error
         let result = executor
-            .execute_with_tools(
-                "math_add(a=1, b=2)",
-                Language::Python,
-                &no_handler,
-            )
+            .execute_with_tools("math_add(a=1, b=2)", Language::Python, &no_handler)
             .await
             .unwrap();
-        assert!(
-            result.is_error,
-            "[{name}] expected error when calling tool without handler"
-        );
+        assert!(result.is_error, "[{name}] expected error when calling tool without handler");
 
         executor.shutdown().await.ok();
     }
@@ -540,11 +437,7 @@ print(data)
             .execute(code, Language::Python)
             .await
             .unwrap_or_else(|e| panic!("[{name}] stdlib import failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] stdlib error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] stdlib error: {}", result.stderr);
         assert!(
             result.stdout.contains("3.1416"),
             "[{name}] expected pi value, got: {:?}",
@@ -559,17 +452,11 @@ print(data)
 #[tokio::test]
 async fn e2e_lifecycle() {
     for (name, executor) in all_executors().await {
-        assert!(
-            executor.is_alive().await,
-            "[{name}] executor should be alive initially"
-        );
+        assert!(executor.is_alive().await, "[{name}] executor should be alive initially");
 
         executor.shutdown().await.unwrap();
 
-        assert!(
-            !executor.is_alive().await,
-            "[{name}] executor should be dead after shutdown"
-        );
+        assert!(!executor.is_alive().await, "[{name}] executor should be dead after shutdown");
     }
 }
 
@@ -577,25 +464,15 @@ async fn e2e_lifecycle() {
 #[tokio::test]
 async fn e2e_tool_results_in_computation() {
     let handler = MockToolHandler;
-    let options = ExecutionOptions {
-        tool_call_handler: Some(&handler),
-    };
+    let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
     for (name, executor) in all_executors().await {
-        let bridge_code =
-            hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
-        executor
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&test_tools());
+        executor.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
 
         // Get value from tool
         executor
-            .execute_with_tools(
-                "answer = data_lookup(key='answer')",
-                Language::Python,
-                &options,
-            )
+            .execute_with_tools("answer = data_lookup(key='answer')", Language::Python, &options)
             .await
             .unwrap();
 
@@ -608,11 +485,7 @@ async fn e2e_tool_results_in_computation() {
             )
             .await
             .unwrap_or_else(|e| panic!("[{name}] computation failed: {e}"));
-        assert!(
-            !result.is_error,
-            "[{name}] computation error: {}",
-            result.stderr
-        );
+        assert!(!result.is_error, "[{name}] computation error: {}", result.stderr);
         assert!(
             result.stdout.contains("doubled=84"),
             "[{name}] expected 'doubled=84', got: {:?}",
@@ -647,11 +520,8 @@ async fn e2e_registry_session_reuse() {
     assert_eq!(registry.active_count(), 1);
 
     // Set state in the session
-    let result = session1
-        .executor()
-        .execute("x = 42; print(f'x={x}')", Language::Python)
-        .await
-        .unwrap();
+    let result =
+        session1.executor().execute("x = 42; print(f'x={x}')", Language::Python).await.unwrap();
     assert!(result.stdout.contains("x=42"), "expected x=42, got: {}", result.stdout);
 
     // Second access to same conversation reuses the session
@@ -659,16 +529,8 @@ async fn e2e_registry_session_reuse() {
     assert_eq!(registry.active_count(), 1); // still 1
 
     // State persists across get_or_create calls
-    let result = session1b
-        .executor()
-        .execute("print(f'x={x}')", Language::Python)
-        .await
-        .unwrap();
-    assert!(
-        result.stdout.contains("x=42"),
-        "expected persistent x=42, got: {}",
-        result.stdout
-    );
+    let result = session1b.executor().execute("print(f'x={x}')", Language::Python).await.unwrap();
+    assert!(result.stdout.contains("x=42"), "expected persistent x=42, got: {}", result.stdout);
 
     // Different conversation creates a new session
     let _session2 = registry.get_or_create("conv-2", None).await.unwrap();
@@ -727,28 +589,16 @@ async fn e2e_registry_reset_session() {
     };
 
     let session = registry.get_or_create("conv-reset", None).await.unwrap();
-    session
-        .executor()
-        .execute("my_var = 'hello'", Language::Python)
-        .await
-        .unwrap();
+    session.executor().execute("my_var = 'hello'", Language::Python).await.unwrap();
 
     // Reset the session
     registry.reset("conv-reset").await.unwrap();
 
     // State should be cleared
     let session = registry.get_or_create("conv-reset", None).await.unwrap();
-    let result = session
-        .executor()
-        .execute("print(my_var)", Language::Python)
-        .await
-        .unwrap();
+    let result = session.executor().execute("print(my_var)", Language::Python).await.unwrap();
     assert!(result.is_error, "expected NameError after reset, got success");
-    assert!(
-        result.stderr.contains("NameError"),
-        "expected NameError, got: {}",
-        result.stderr
-    );
+    assert!(result.stderr.contains("NameError"), "expected NameError, got: {}", result.stderr);
 
     registry.shutdown_all().await;
 }
@@ -777,16 +627,8 @@ async fn e2e_registry_remove_session() {
 
     // Re-creating after remove gives a fresh session
     let session = registry.get_or_create("conv-remove", None).await.unwrap();
-    let result = session
-        .executor()
-        .execute("print('fresh')", Language::Python)
-        .await
-        .unwrap();
-    assert!(
-        result.stdout.contains("fresh"),
-        "expected 'fresh', got: {}",
-        result.stdout
-    );
+    let result = session.executor().execute("print('fresh')", Language::Python).await.unwrap();
+    assert!(result.stdout.contains("fresh"), "expected 'fresh', got: {}", result.stdout);
 
     registry.shutdown_all().await;
 }

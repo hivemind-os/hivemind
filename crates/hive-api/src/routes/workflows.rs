@@ -658,12 +658,7 @@ pub(crate) async fn wf_shadow_summary(
     State(state): State<AppState>,
     Path(instance_id): Path<i64>,
 ) -> Result<Json<hive_workflow::ShadowSummary>, (StatusCode, String)> {
-    state
-        .workflows
-        .get_shadow_summary(instance_id)
-        .await
-        .map(Json)
-        .map_err(workflow_error)
+    state.workflows.get_shadow_summary(instance_id).await.map(Json).map_err(workflow_error)
 }
 
 pub(crate) async fn wf_analyze(
@@ -710,7 +705,13 @@ pub(crate) async fn wf_run_tests(
 
     let (results, total_requested) = state
         .workflows
-        .run_tests(&body.definition_name, body.version.as_deref(), test_names, body.auto_respond, Some(cancel))
+        .run_tests(
+            &body.definition_name,
+            body.version.as_deref(),
+            test_names,
+            body.auto_respond,
+            Some(cancel),
+        )
         .await
         .map_err(workflow_error)?;
 
@@ -722,18 +723,11 @@ pub(crate) async fn wf_run_tests(
 
     let cancelled = results.len() < total_requested;
     let all_passed = !cancelled && results.iter().all(|r| r.passed);
-    Ok(Json(WfTestRunResponse {
-        results,
-        all_passed,
-        cancelled,
-        total_requested,
-    }))
+    Ok(Json(WfTestRunResponse { results, all_passed, cancelled, total_requested }))
 }
 
 /// Cancel the currently-running test suite (if any).
-pub(crate) async fn wf_cancel_tests(
-    State(state): State<AppState>,
-) -> Json<serde_json::Value> {
+pub(crate) async fn wf_cancel_tests(State(state): State<AppState>) -> Json<serde_json::Value> {
     let guard = state.test_cancel.lock();
     if let Some(cancel) = guard.as_ref() {
         cancel.store(true, std::sync::atomic::Ordering::Relaxed);

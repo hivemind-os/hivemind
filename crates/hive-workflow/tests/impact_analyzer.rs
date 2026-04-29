@@ -18,10 +18,7 @@ fn trigger_step(id: &str) -> StepDef {
         id: id.to_string(),
         step_type: StepType::Trigger {
             trigger: TriggerDef {
-                trigger_type: TriggerType::Manual {
-                    inputs: vec![],
-                    input_schema: None,
-                },
+                trigger_type: TriggerType::Manual { inputs: vec![], input_schema: None },
             },
         },
         outputs: HashMap::new(),
@@ -89,9 +86,7 @@ fn step_risk_levels_correct() {
     let mut tools: HashMap<String, hive_contracts::tools::ToolDefinition> = HashMap::new();
     tools.insert(
         "fs.read".into(),
-        ToolDefinitionBuilder::new("fs.read", "Read File")
-            .read_only()
-            .build(),
+        ToolDefinitionBuilder::new("fs.read", "Read File").read_only().build(),
     );
     tools.insert(
         "connector.send_message".into(),
@@ -104,10 +99,7 @@ fn step_risk_levels_correct() {
         trigger_step("trigger"),
         task_step(
             "read",
-            TaskDef::CallTool {
-                tool_id: "fs.read".into(),
-                arguments: Default::default(),
-            },
+            TaskDef::CallTool { tool_id: "fs.read".into(), arguments: Default::default() },
         ),
         task_step(
             "send",
@@ -130,10 +122,7 @@ fn step_risk_levels_correct() {
         ),
         task_step(
             "unknown",
-            TaskDef::CallTool {
-                tool_id: "nonexistent.tool".into(),
-                arguments: Default::default(),
-            },
+            TaskDef::CallTool { tool_id: "nonexistent.tool".into(), arguments: Default::default() },
         ),
     ]);
 
@@ -157,9 +146,7 @@ fn foreach_multiplier_in_expression() {
     let mut tools: HashMap<String, hive_contracts::tools::ToolDefinition> = HashMap::new();
     tools.insert(
         "connector.send_message".into(),
-        ToolDefinitionBuilder::new("connector.send_message", "Send")
-            .side_effects(true)
-            .build(),
+        ToolDefinitionBuilder::new("connector.send_message", "Send").side_effects(true).build(),
     );
 
     let def = make_def(vec![
@@ -230,10 +217,7 @@ fn nested_loops_both_multipliers() {
         ),
         task_step(
             "fetch",
-            TaskDef::CallTool {
-                tool_id: "http.request".into(),
-                arguments: Default::default(),
-            },
+            TaskDef::CallTool { tool_id: "http.request".into(), arguments: Default::default() },
         ),
     ]);
 
@@ -261,16 +245,17 @@ fn all_unknown_tools_low_confidence() {
 
 #[test]
 fn all_known_tools_high_confidence() {
-    let tools: HashMap<String, hive_contracts::tools::ToolDefinition> = [(
-        "fs.read".into(),
-        ToolDefinitionBuilder::new("fs.read", "Read").read_only().build(),
-    )]
-    .into_iter()
-    .collect();
+    let tools: HashMap<String, hive_contracts::tools::ToolDefinition> =
+        [("fs.read".into(), ToolDefinitionBuilder::new("fs.read", "Read").read_only().build())]
+            .into_iter()
+            .collect();
 
     let def = make_def(vec![
         trigger_step("trigger"),
-        task_step("r", TaskDef::CallTool { tool_id: "fs.read".into(), arguments: Default::default() }),
+        task_step(
+            "r",
+            TaskDef::CallTool { tool_id: "fs.read".into(), arguments: Default::default() },
+        ),
         task_step("v", TaskDef::SetVariable { assignments: vec![] }),
     ]);
 
@@ -348,10 +333,7 @@ fn scheduled_tasks_counted_and_danger() {
 fn while_loop_shows_max_iterations() {
     let tools: HashMap<String, hive_contracts::tools::ToolDefinition> = [(
         "http.request".into(),
-        ToolDefinitionBuilder::new("http.request", "HTTP")
-            .side_effects(true)
-            .open_world()
-            .build(),
+        ToolDefinitionBuilder::new("http.request", "HTTP").side_effects(true).open_world().build(),
     )]
     .into_iter()
     .collect();
@@ -368,10 +350,7 @@ fn while_loop_shows_max_iterations() {
         ),
         task_step(
             "req",
-            TaskDef::CallTool {
-                tool_id: "http.request".into(),
-                arguments: Default::default(),
-            },
+            TaskDef::CallTool { tool_id: "http.request".into(), arguments: Default::default() },
         ),
     ]);
 
@@ -396,7 +375,10 @@ fn pure_safe_workflow_zero_impact() {
 
     let def = make_def(vec![
         trigger_step("trigger"),
-        task_step("list", TaskDef::CallTool { tool_id: "fs.list".into(), arguments: Default::default() }),
+        task_step(
+            "list",
+            TaskDef::CallTool { tool_id: "fs.list".into(), arguments: Default::default() },
+        ),
         task_step("var", TaskDef::SetVariable { assignments: vec![] }),
         task_step("wait", TaskDef::Delay { duration_secs: 1 }),
     ]);
@@ -414,9 +396,7 @@ fn pure_safe_workflow_zero_impact() {
 fn destructive_tool_counted() {
     let tools: HashMap<String, hive_contracts::tools::ToolDefinition> = [(
         "db.delete_all".into(),
-        ToolDefinitionBuilder::new("db.delete_all", "Delete All")
-            .destructive()
-            .build(),
+        ToolDefinitionBuilder::new("db.delete_all", "Delete All").destructive().build(),
     )]
     .into_iter()
     .collect();
@@ -425,10 +405,7 @@ fn destructive_tool_counted() {
         trigger_step("trigger"),
         task_step(
             "destroy",
-            TaskDef::CallTool {
-                tool_id: "db.delete_all".into(),
-                arguments: Default::default(),
-            },
+            TaskDef::CallTool { tool_id: "db.delete_all".into(), arguments: Default::default() },
         ),
     ]);
 
@@ -445,9 +422,7 @@ fn destructive_tool_counted() {
 fn no_multiplier_for_top_level_steps() {
     let tools: HashMap<String, hive_contracts::tools::ToolDefinition> = [(
         "connector.send_message".into(),
-        ToolDefinitionBuilder::new("connector.send_message", "Send")
-            .side_effects(true)
-            .build(),
+        ToolDefinitionBuilder::new("connector.send_message", "Send").side_effects(true).build(),
     )]
     .into_iter()
     .collect();

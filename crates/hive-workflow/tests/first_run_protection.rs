@@ -126,10 +126,7 @@ fn make_simple_def(name: &str) -> WorkflowDefinition {
                 id: "trigger".to_string(),
                 step_type: StepType::Trigger {
                     trigger: TriggerDef {
-                        trigger_type: TriggerType::Manual {
-                            inputs: vec![],
-                            input_schema: None,
-                        },
+                        trigger_type: TriggerType::Manual { inputs: vec![], input_schema: None },
                     },
                 },
                 outputs: HashMap::new(),
@@ -141,9 +138,7 @@ fn make_simple_def(name: &str) -> WorkflowDefinition {
             },
             StepDef {
                 id: "end".to_string(),
-                step_type: StepType::ControlFlow {
-                    control: ControlFlowDef::EndWorkflow,
-                },
+                step_type: StepType::ControlFlow { control: ControlFlowDef::EndWorkflow },
                 outputs: HashMap::new(),
                 on_error: None,
                 next: vec![],
@@ -329,10 +324,7 @@ async fn failed_run_does_not_mark_tested() {
                 id: "trigger".to_string(),
                 step_type: StepType::Trigger {
                     trigger: TriggerDef {
-                        trigger_type: TriggerType::Manual {
-                            inputs: vec![],
-                            input_schema: None,
-                        },
+                        trigger_type: TriggerType::Manual { inputs: vec![], input_schema: None },
                     },
                 },
                 outputs: HashMap::new(),
@@ -375,31 +367,87 @@ async fn failed_run_does_not_mark_tested() {
     struct FailExecutor;
     #[async_trait]
     impl StepExecutor for FailExecutor {
-        async fn call_tool(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<Value, String> {
+        async fn call_tool(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Err("deliberate failure".to_string())
         }
-        async fn invoke_agent(&self, _: &str, _: &str, _: bool, _: Option<u64>, _: &[PermissionEntry], _: Option<&str>, _: Option<&str>, _: &ExecutionContext) -> Result<Value, String> {
+        async fn invoke_agent(
+            &self,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: Option<u64>,
+            _: &[PermissionEntry],
+            _: Option<&str>,
+            _: Option<&str>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Err("fail".to_string())
         }
-        async fn signal_agent(&self, _: &SignalTarget, _: &str, _: &ExecutionContext) -> Result<Value, String> {
+        async fn signal_agent(
+            &self,
+            _: &SignalTarget,
+            _: &str,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Ok(json!({}))
         }
-        async fn wait_for_agent(&self, _: &str, _: Option<u64>, _: &ExecutionContext) -> Result<Value, String> {
+        async fn wait_for_agent(
+            &self,
+            _: &str,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Ok(json!({}))
         }
-        async fn create_feedback_request(&self, _: i64, _: &str, _: &str, _: Option<&[String]>, _: bool, _: &ExecutionContext) -> Result<String, String> {
+        async fn create_feedback_request(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&[String]>,
+            _: bool,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
             Ok("r".into())
         }
-        async fn register_event_gate(&self, _: i64, _: &str, _: &str, _: Option<&str>, _: Option<u64>, _: &ExecutionContext) -> Result<String, String> {
+        async fn register_event_gate(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
             Ok("s".into())
         }
-        async fn launch_workflow(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<i64, String> {
+        async fn launch_workflow(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<i64, String> {
             Ok(0)
         }
-        async fn schedule_task(&self, _: &ScheduleTaskDef, _: &ExecutionContext) -> Result<String, String> {
+        async fn schedule_task(
+            &self,
+            _: &ScheduleTaskDef,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
             Ok("t".into())
         }
-        async fn render_prompt_template(&self, _: &str, _: &str, _: Value, _: &ExecutionContext) -> Result<String, String> {
+        async fn render_prompt_template(
+            &self,
+            _: &str,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
             Ok(String::new())
         }
     }
@@ -440,23 +488,17 @@ fn record_successful_run_newer_wins() {
     store.save_definition(&yaml, &def).unwrap();
 
     // Record run at time 1000 with hash "aaa"
-    store
-        .record_successful_run("test/ordering", "1.0", "aaa", 1000)
-        .unwrap();
+    store.record_successful_run("test/ordering", "1.0", "aaa", 1000).unwrap();
 
     // Record run at time 2000 with hash "bbb" — should overwrite
-    store
-        .record_successful_run("test/ordering", "1.0", "bbb", 2000)
-        .unwrap();
+    store.record_successful_run("test/ordering", "1.0", "bbb", 2000).unwrap();
 
     let summaries = store.list_definitions().unwrap();
     let s = summaries.iter().find(|s| s.name == "test/ordering").unwrap();
     assert_eq!(s.last_successful_run_at_ms, Some(2000));
 
     // Record run at time 500 with hash "ccc" — should NOT overwrite (stale)
-    store
-        .record_successful_run("test/ordering", "1.0", "ccc", 500)
-        .unwrap();
+    store.record_successful_run("test/ordering", "1.0", "ccc", 500).unwrap();
 
     let summaries = store.list_definitions().unwrap();
     let s = summaries.iter().find(|s| s.name == "test/ordering").unwrap();

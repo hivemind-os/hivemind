@@ -149,11 +149,8 @@ impl SessionLogger {
             }
             LoopEvent::CodeExecution { code, stdout, stderr, is_error, .. } => {
                 let code_preview = truncate(code, 100);
-                let output_preview = if !stdout.is_empty() {
-                    truncate(stdout, 200)
-                } else {
-                    truncate(stderr, 200)
-                };
+                let output_preview =
+                    if !stdout.is_empty() { truncate(stdout, 200) } else { truncate(stderr, 200) };
                 let tag = if *is_error { "CODE_ERROR" } else { "CODE_EXEC" };
                 self.log_loop(&format!("{tag} code={code_preview} output={output_preview}"));
             }
@@ -384,11 +381,8 @@ fn format_reasoning_event(event: &ReasoningEvent) -> String {
         }
         ReasoningEvent::CodeExecution { code, stdout, stderr, is_error, .. } => {
             let code_preview = truncate(code, 100);
-            let output_preview = if !stdout.is_empty() {
-                truncate(stdout, 200)
-            } else {
-                truncate(stderr, 200)
-            };
+            let output_preview =
+                if !stdout.is_empty() { truncate(stdout, 200) } else { truncate(stderr, 200) };
             if *is_error {
                 format!("CODE_ERROR code={} output={}", code_preview, output_preview)
             } else {

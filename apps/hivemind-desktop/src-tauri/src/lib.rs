@@ -3522,11 +3522,8 @@ async fn chat_subscribe_stream(app: tauri::AppHandle, session_id: String) -> Res
 #[tauri::command(rename_all = "snake_case")]
 async fn chat_cancel_other_streams(keep_session_id: String) -> Result<(), String> {
     if let Ok(mut streams) = ACTIVE_STREAMS.lock() {
-        let to_cancel: Vec<String> = streams
-            .keys()
-            .filter(|k| **k != keep_session_id)
-            .cloned()
-            .collect();
+        let to_cancel: Vec<String> =
+            streams.keys().filter(|k| **k != keep_session_id).cloned().collect();
         for key in to_cancel {
             if let Some(handle) = streams.remove(&key) {
                 handle.abort();
@@ -3534,11 +3531,8 @@ async fn chat_cancel_other_streams(keep_session_id: String) -> Result<(), String
         }
     }
     if let Ok(mut streams) = AGENT_STAGE_STREAMS.lock() {
-        let to_cancel: Vec<String> = streams
-            .keys()
-            .filter(|k| **k != keep_session_id)
-            .cloned()
-            .collect();
+        let to_cancel: Vec<String> =
+            streams.keys().filter(|k| **k != keep_session_id).cloned().collect();
         for key in to_cancel {
             if let Some(handle) = streams.remove(&key) {
                 handle.abort();
@@ -4747,12 +4741,9 @@ async fn workflow_run_tests(
 #[tauri::command(rename_all = "snake_case")]
 async fn workflow_cancel_tests() -> Result<(), String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
-    async_post_empty::<serde_json::Value>(
-        &base_url,
-        "/api/v1/workflows/test/cancel",
-    )
-    .await
-    .map(|_| ())
+    async_post_empty::<serde_json::Value>(&base_url, "/api/v1/workflows/test/cancel")
+        .await
+        .map(|_| ())
 }
 
 #[tauri::command(rename_all = "snake_case")]

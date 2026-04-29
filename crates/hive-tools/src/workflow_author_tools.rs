@@ -1093,21 +1093,15 @@ impl Tool for WfAuthorRunTestsTool {
 
     fn execute(&self, input: Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
         Box::pin(async move {
-            let definition_name = input
-                .get("definition_name")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
+            let definition_name =
+                input.get("definition_name").and_then(|v| v.as_str()).ok_or_else(|| {
                     ToolError::InvalidInput("definition_name is required".to_string())
                 })?;
 
             let test_names: Option<Vec<String>> = input
                 .get("test_names")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                });
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
 
             let test_names_ref = test_names.as_deref();
 
@@ -1164,26 +1158,34 @@ impl Tool for WfAuthorRunTestsTool {
                         obj["actual_status"] = json!(status);
                     }
                     if !r.failures.is_empty() {
-                        obj["failures"] = json!(r.failures.iter().map(|f| {
-                            json!({
-                                "expectation": f.expectation,
-                                "expected": f.expected,
-                                "actual": f.actual,
+                        obj["failures"] = json!(r
+                            .failures
+                            .iter()
+                            .map(|f| {
+                                json!({
+                                    "expectation": f.expectation,
+                                    "expected": f.expected,
+                                    "actual": f.actual,
+                                })
                             })
-                        }).collect::<Vec<_>>());
+                            .collect::<Vec<_>>());
                     }
                     // Compact step statuses (id + status only, no outputs)
                     if !r.step_results.is_empty() {
-                        obj["step_statuses"] = json!(r.step_results.iter().map(|s| {
-                            let mut step = json!({
-                                "step_id": s.step_id,
-                                "status": s.status,
-                            });
-                            if let Some(err) = &s.error {
-                                step["error"] = json!(err);
-                            }
-                            step
-                        }).collect::<Vec<_>>());
+                        obj["step_statuses"] = json!(r
+                            .step_results
+                            .iter()
+                            .map(|s| {
+                                let mut step = json!({
+                                    "step_id": s.step_id,
+                                    "status": s.status,
+                                });
+                                if let Some(err) = &s.error {
+                                    step["error"] = json!(err);
+                                }
+                                step
+                            })
+                            .collect::<Vec<_>>());
                     }
                     obj
                 })

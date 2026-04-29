@@ -125,7 +125,14 @@ impl WorkflowEventEmitter for EventBusEmitter {
                 "workflow.test.case_started",
                 json!({ "definition_name": definition_name, "test_name": test_name, "index": index, "total": total }),
             ),
-            WorkflowEvent::TestCaseCompleted { definition_name, test_name, passed, duration_ms, index, total } => (
+            WorkflowEvent::TestCaseCompleted {
+                definition_name,
+                test_name,
+                passed,
+                duration_ms,
+                index,
+                total,
+            } => (
                 "workflow.test.case_completed",
                 json!({ "definition_name": definition_name, "test_name": test_name, "passed": passed, "duration_ms": duration_ms, "index": index, "total": total }),
             ),
@@ -1274,9 +1281,7 @@ impl WorkflowService {
         let cases: Vec<&hive_workflow::WorkflowTestCase> = def
             .tests
             .iter()
-            .filter(|tc| {
-                test_names.map_or(true, |filter| filter.iter().any(|n| n == &tc.name))
-            })
+            .filter(|tc| test_names.map_or(true, |filter| filter.iter().any(|n| n == &tc.name)))
             .collect();
         let total = cases.len();
 
@@ -1707,10 +1712,12 @@ impl StepExecutor for ServiceStepExecutor {
                         )
                         .await?;
 
-                    let now_ms = || std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
+                    let now_ms = || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64
+                    };
 
                     // Persist intercepted tool calls from shadow-mode agents
                     for ic in intercepted_calls {

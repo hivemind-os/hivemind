@@ -175,7 +175,7 @@ fn make_context(model: &str) -> LoopContext {
                 hive_classification::DataClass::Public.to_i64() as u8,
             )),
             connector_service: None,
-                shadow_mode: false,
+            shadow_mode: false,
         },
         tools_ctx: ToolsContext {
             tools: Arc::new(hive_tools::ToolRegistry::new()),
@@ -213,15 +213,30 @@ fn make_request(prompt_chars: usize, messages: Vec<CompletionMessage>) -> Comple
 }
 
 fn user_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "user".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
+    CompletionMessage {
+        role: "user".into(),
+        content: content.into(),
+        content_parts: vec![],
+        blocks: vec![],
+    }
 }
 
 fn assistant_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "assistant".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
+    CompletionMessage {
+        role: "assistant".into(),
+        content: content.into(),
+        content_parts: vec![],
+        blocks: vec![],
+    }
 }
 
 fn system_msg(content: &str) -> CompletionMessage {
-    CompletionMessage { role: "system".into(), content: content.into(), content_parts: vec![], blocks: vec![] }
+    CompletionMessage {
+        role: "system".into(),
+        content: content.into(),
+        content_parts: vec![],
+        blocks: vec![],
+    }
 }
 
 /// Build N user/assistant turn pairs, each with `chars_per_msg` characters.

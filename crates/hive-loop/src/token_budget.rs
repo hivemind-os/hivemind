@@ -47,16 +47,12 @@ pub fn estimate_request_tokens(request: &CompletionRequest) -> usize {
                     hive_model::MessageBlock::ToolUse { id, name, input } => {
                         let args =
                             serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
-                        estimate_tokens(id)
-                            + estimate_tokens(name)
-                            + estimate_tokens(&args)
-                            + 10 // structural overhead
+                        estimate_tokens(id) + estimate_tokens(name) + estimate_tokens(&args) + 10
+                        // structural overhead
                     }
-                    hive_model::MessageBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        ..
-                    } => estimate_tokens(tool_use_id) + estimate_tokens(content) + 10,
+                    hive_model::MessageBlock::ToolResult { tool_use_id, content, .. } => {
+                        estimate_tokens(tool_use_id) + estimate_tokens(content) + 10
+                    }
                 })
                 .sum();
             block_tokens + 4 // role overhead

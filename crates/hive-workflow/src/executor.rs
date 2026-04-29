@@ -895,21 +895,14 @@ impl WorkflowEngine {
         }
 
         // Check if this is a loop preview pause response
-        let is_preview_resume = instance
-            .active_loops
-            .get(step_id)
-            .map_or(false, |ls| ls.preview_paused);
+        let is_preview_resume =
+            instance.active_loops.get(step_id).map_or(false, |ls| ls.preview_paused);
 
         if is_preview_resume {
             // Parse response — gate responses arrive as {"selected": "...", "text": "..."}
-            let selected = response
-                .get("selected")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let gate_request_id = instance
-                .step_states
-                .get(step_id)
-                .and_then(|s| s.interaction_request_id.clone());
+            let selected = response.get("selected").and_then(|v| v.as_str()).unwrap_or("");
+            let gate_request_id =
+                instance.step_states.get(step_id).and_then(|s| s.interaction_request_id.clone());
 
             if selected == "Abort" {
                 // Complete the loop early with partial results
@@ -1326,20 +1319,15 @@ impl WorkflowEngine {
 
     async fn run_loop(&self, mut instance: WorkflowInstance) -> Result<(), WorkflowError> {
         // Wrap the step executor for shadow mode — intercept risky actions
-        let effective_executor: Arc<dyn StepExecutor> =
-            if instance.execution_mode == ExecutionMode::Shadow {
-                let tip: Arc<dyn ToolInfoProvider> = self
-                    .tool_info_provider
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(NullToolInfoProvider));
-                Arc::new(ShadowStepExecutor::new(
-                    self.step_executor.clone(),
-                    tip,
-                    self.store.clone(),
-                ))
-            } else {
-                self.step_executor.clone()
-            };
+        let effective_executor: Arc<dyn StepExecutor> = if instance.execution_mode
+            == ExecutionMode::Shadow
+        {
+            let tip: Arc<dyn ToolInfoProvider> =
+                self.tool_info_provider.clone().unwrap_or_else(|| Arc::new(NullToolInfoProvider));
+            Arc::new(ShadowStepExecutor::new(self.step_executor.clone(), tip, self.store.clone()))
+        } else {
+            self.step_executor.clone()
+        };
 
         let mut goto_activation_count: usize = 0;
         let mut running_recovery_attempts: usize = 0;
@@ -1535,8 +1523,7 @@ impl WorkflowEngine {
                 if instance.status == WorkflowStatus::Completed
                     && instance.execution_mode == ExecutionMode::Normal
                 {
-                    let def_json =
-                        serde_json::to_string(&instance.definition).unwrap_or_default();
+                    let def_json = serde_json::to_string(&instance.definition).unwrap_or_default();
                     let hash = sha256_hex(&def_json);
                     if let Err(e) = store.record_successful_run(
                         &instance.definition.name,
@@ -2000,7 +1987,10 @@ impl WorkflowEngine {
                             };
                             // Populate ForEach-specific fields
                             if let StepType::ControlFlow {
-                                control: ControlFlowDef::ForEach { collection, item_var, preview_count, .. },
+                                control:
+                                    ControlFlowDef::ForEach {
+                                        collection, item_var, preview_count, ..
+                                    },
                             } = &step_def.step_type
                             {
                                 let expr_ctx = build_expression_context(&instance, Some(&step_id));
@@ -2131,10 +2121,7 @@ impl WorkflowEngine {
                         let prompt = format!(
                             "Processed {completed}/{total} items. Review the results and decide whether to continue with the remaining {remaining} items.",
                         );
-                        let choices_owned = vec![
-                            "Continue All".to_string(),
-                            "Abort".to_string(),
-                        ];
+                        let choices_owned = vec!["Continue All".to_string(), "Abort".to_string()];
 
                         match effective_executor
                             .create_feedback_request(
@@ -2152,10 +2139,8 @@ impl WorkflowEngine {
                                     state.status = StepStatus::WaitingOnInput;
                                     state.interaction_request_id = Some(request_id);
                                     state.interaction_prompt = Some(prompt);
-                                    state.interaction_choices = Some(vec![
-                                        "Continue All".to_string(),
-                                        "Abort".to_string(),
-                                    ]);
+                                    state.interaction_choices =
+                                        Some(vec!["Continue All".to_string(), "Abort".to_string()]);
                                     state.interaction_allow_freeform = Some(false);
                                 }
                                 self.event_emitter

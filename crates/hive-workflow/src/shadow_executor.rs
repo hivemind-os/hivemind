@@ -60,11 +60,7 @@ impl ShadowStepExecutor {
         tool_info: Arc<dyn ToolInfoProvider>,
         store: Arc<dyn WorkflowPersistence>,
     ) -> Self {
-        Self {
-            inner,
-            tool_info,
-            store,
-        }
+        Self { inner, tool_info, store }
     }
 
     /// Persist an intercepted action to the store.
@@ -116,10 +112,7 @@ impl StepExecutor for ShadowStepExecutor {
         ctx: &ExecutionContext,
     ) -> Result<Value, String> {
         let tool_def = self.tool_info.get_tool_definition(tool_id);
-        let risk = tool_def
-            .as_ref()
-            .map(classify_tool)
-            .unwrap_or(RiskLevel::Unknown);
+        let risk = tool_def.as_ref().map(classify_tool).unwrap_or(RiskLevel::Unknown);
 
         if !risk.should_intercept() {
             return self.inner.call_tool(tool_id, arguments, ctx).await;
@@ -290,9 +283,7 @@ impl StepExecutor for ShadowStepExecutor {
         ctx: &ExecutionContext,
     ) -> Result<String, String> {
         // Pass through — template rendering is side-effect-free
-        self.inner
-            .render_prompt_template(persona_id, prompt_id, parameters, ctx)
-            .await
+        self.inner.render_prompt_template(persona_id, prompt_id, parameters, ctx).await
     }
 
     async fn on_instance_stopped(&self, instance_id: i64) -> Result<(), String> {
@@ -303,10 +294,8 @@ impl StepExecutor for ShadowStepExecutor {
 /// Produce a pseudo-random offset for synthetic child workflow IDs.
 fn rand_offset() -> i64 {
     use std::time::SystemTime;
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
+    let nanos =
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().subsec_nanos();
     (nanos % 999) as i64 + 1
 }
 
@@ -341,9 +330,7 @@ mod tests {
 
     impl RecordingExecutor {
         fn new() -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-            }
+            Self { calls: Mutex::new(Vec::new()) }
         }
         fn call_count(&self) -> usize {
             self.calls.lock().unwrap().len()
@@ -358,10 +345,7 @@ mod tests {
             arguments: Value,
             _ctx: &ExecutionContext,
         ) -> Result<Value, String> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((tool_id.to_string(), arguments.clone()));
+            self.calls.lock().unwrap().push((tool_id.to_string(), arguments.clone()));
             Ok(json!({ "real": true }))
         }
         async fn invoke_agent(
@@ -459,8 +443,8 @@ mod tests {
     }
 
     fn make_tool(id: &str, read_only: bool, side_effects: bool) -> ToolDefinition {
-        use hive_contracts::ChannelClass;
         use hive_contracts::tools::{ToolAnnotations, ToolApproval};
+        use hive_contracts::ChannelClass;
         ToolDefinition {
             id: id.to_string(),
             name: id.to_string(),
@@ -547,10 +531,7 @@ mod tests {
         let shadow = build_shadow(inner.clone(), tools);
         let ctx = test_ctx();
 
-        let result = shadow
-            .call_tool("read.data", json!({"q": "test"}), &ctx)
-            .await
-            .unwrap();
+        let result = shadow.call_tool("read.data", json!({"q": "test"}), &ctx).await.unwrap();
         assert_eq!(result["real"], json!(true));
         assert_eq!(inner.call_count(), 1);
     }
@@ -559,18 +540,12 @@ mod tests {
     async fn side_effect_tool_is_intercepted() {
         let inner = Arc::new(RecordingExecutor::new());
         let mut tools = HashMap::new();
-        tools.insert(
-            "some.write".into(),
-            make_tool("some.write", false, true),
-        );
+        tools.insert("some.write".into(), make_tool("some.write", false, true));
 
         let shadow = build_shadow(inner.clone(), tools);
         let ctx = test_ctx();
 
-        let result = shadow
-            .call_tool("some.write", json!({"data": "x"}), &ctx)
-            .await
-            .unwrap();
+        let result = shadow.call_tool("some.write", json!({"data": "x"}), &ctx).await.unwrap();
         assert_eq!(result["shadow"], json!(true));
         assert_eq!(inner.call_count(), 0); // not passed through
     }
@@ -581,10 +556,7 @@ mod tests {
         let shadow = build_shadow(inner.clone(), HashMap::new());
         let ctx = test_ctx();
 
-        let result = shadow
-            .call_tool("nonexistent.tool", json!({}), &ctx)
-            .await
-            .unwrap();
+        let result = shadow.call_tool("nonexistent.tool", json!({}), &ctx).await.unwrap();
         assert_eq!(result["shadow"], json!(true));
         assert_eq!(inner.call_count(), 0);
     }
@@ -610,10 +582,7 @@ mod tests {
         let shadow = build_shadow(inner, HashMap::new());
         let ctx = test_ctx();
 
-        let id = shadow
-            .launch_workflow("child-wf", json!({}), &ctx)
-            .await
-            .unwrap();
+        let id = shadow.launch_workflow("child-wf", json!({}), &ctx).await.unwrap();
         assert!(id < 0, "shadow workflow ID should be negative, got {id}");
     }
 
@@ -623,13 +592,9 @@ mod tests {
         let shadow = build_shadow(inner, HashMap::new());
         let ctx = test_ctx();
 
-        let result = shadow
-            .register_event_gate(1, "step-1", "some.topic", None, None, &ctx)
-            .await;
+        let result = shadow.register_event_gate(1, "step-1", "some.topic", None, None, &ctx).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("not supported in shadow mode"));
+        assert!(result.unwrap_err().contains("not supported in shadow mode"));
     }
 
     #[tokio::test]
@@ -638,9 +603,7 @@ mod tests {
         let shadow = build_shadow(inner, HashMap::new());
         let ctx = test_ctx();
 
-        let result = shadow
-            .create_feedback_request(1, "step-1", "prompt", None, true, &ctx)
-            .await;
+        let result = shadow.create_feedback_request(1, "step-1", "prompt", None, true, &ctx).await;
         assert!(result.is_ok());
     }
 
@@ -650,9 +613,7 @@ mod tests {
         let shadow = build_shadow(inner, HashMap::new());
         let ctx = test_ctx();
 
-        let result = shadow
-            .render_prompt_template("persona-1", "prompt-1", json!({}), &ctx)
-            .await;
+        let result = shadow.render_prompt_template("persona-1", "prompt-1", json!({}), &ctx).await;
         assert_eq!(result.unwrap(), "rendered template");
     }
 
@@ -673,10 +634,7 @@ mod tests {
         let shadow = build_shadow(inner, tools);
         let ctx = test_ctx();
 
-        let result = shadow
-            .call_tool("email.send", json!({"to": "a@b.c"}), &ctx)
-            .await
-            .unwrap();
+        let result = shadow.call_tool("email.send", json!({"to": "a@b.c"}), &ctx).await.unwrap();
         assert_eq!(result["message_id"], json!(""));
         assert_eq!(result["status"], json!("sent")); // first enum value
     }
@@ -687,11 +645,8 @@ mod tests {
         let shadow = build_shadow(inner, HashMap::new());
         let ctx = test_ctx();
 
-        let schedule = ScheduleTaskDef {
-            name: "w".into(),
-            schedule: "* * * * *".into(),
-            action: json!({}),
-        };
+        let schedule =
+            ScheduleTaskDef { name: "w".into(), schedule: "* * * * *".into(), action: json!({}) };
 
         let result = shadow.schedule_task(&schedule, &ctx).await.unwrap();
         assert!(result.starts_with("shadow-schedule-"));
@@ -701,9 +656,7 @@ mod tests {
     async fn intercepted_actions_are_persisted() {
         let inner = Arc::new(RecordingExecutor::new());
         let store = Arc::new(crate::store::WorkflowStore::in_memory().unwrap());
-        let tool_info: Arc<dyn ToolInfoProvider> = Arc::new(MockToolInfo {
-            tools: HashMap::new(),
-        });
+        let tool_info: Arc<dyn ToolInfoProvider> = Arc::new(MockToolInfo { tools: HashMap::new() });
 
         // Create a minimal definition + instance so the FK constraint is satisfied
         let def = crate::types::WorkflowDefinition {
@@ -765,14 +718,8 @@ mod tests {
         };
 
         // Make a few intercepted calls
-        shadow
-            .call_tool("unknown.tool", json!({"a": 1}), &ctx)
-            .await
-            .unwrap();
-        shadow
-            .launch_workflow("child", json!({}), &ctx)
-            .await
-            .unwrap();
+        shadow.call_tool("unknown.tool", json!({"a": 1}), &ctx).await.unwrap();
+        shadow.launch_workflow("child", json!({}), &ctx).await.unwrap();
 
         // Verify persisted
         let page = store.list_intercepted_actions(id, 100, 0).unwrap();

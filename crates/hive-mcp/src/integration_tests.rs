@@ -272,10 +272,7 @@ async fn inject_mock_into_service(
     let tools_result = client_svc.list_all_tools().await.unwrap_or_default();
     let resources_result = client_svc.list_all_resources().await.unwrap_or_default();
 
-    let tools: Vec<McpToolInfo> = tools_result
-        .into_iter()
-        .map(crate::tool_to_info)
-        .collect();
+    let tools: Vec<McpToolInfo> = tools_result.into_iter().map(crate::tool_to_info).collect();
 
     let resources: Vec<McpResourceInfo> = resources_result
         .iter()
@@ -866,8 +863,8 @@ async fn catalog_all_cataloged_tools_multi_server() {
                 name: "tool-b1".to_string(),
                 description: "Public tool".to_string(),
                 input_schema: json!({"type": "object"}),
-                    ui_meta: None,
-                }],
+                ui_meta: None,
+            }],
             vec![],
             vec![],
         )
@@ -1865,7 +1862,6 @@ async fn test_build_sandbox_from_global_config_actually_sandboxes() {
     );
 }
 
-
 // ═══════════════════════════════════════════════════════════════════════
 // MCP Apps Integration Tests
 // ═══════════════════════════════════════════════════════════════════════
@@ -1909,28 +1905,19 @@ async fn test_ui_resource_cache() {
     let _server = inject_mock_into_service(&service, "mock", mock).await;
 
     // First fetch should work
-    let resource = service
-        .fetch_ui_resource("mock", "ui://widget/app.html", None)
-        .await
-        .unwrap();
+    let resource = service.fetch_ui_resource("mock", "ui://widget/app.html", None).await.unwrap();
     assert!(!resource.html.is_empty(), "Should return HTML content");
     assert_eq!(resource.uri, "ui://widget/app.html");
 
     // Second fetch should return cached result (same content)
-    let cached = service
-        .fetch_ui_resource("mock", "ui://widget/app.html", None)
-        .await
-        .unwrap();
+    let cached = service.fetch_ui_resource("mock", "ui://widget/app.html", None).await.unwrap();
     assert_eq!(cached.html, resource.html, "Cached result should match");
 
     // Invalidation should clear the cache
     service.invalidate_ui_cache("mock").await;
 
     // After invalidation, fetch works again (hits the server)
-    let refreshed = service
-        .fetch_ui_resource("mock", "ui://widget/app.html", None)
-        .await
-        .unwrap();
+    let refreshed = service.fetch_ui_resource("mock", "ui://widget/app.html", None).await.unwrap();
     assert_eq!(refreshed.uri, "ui://widget/app.html");
 }
 
@@ -1964,9 +1951,7 @@ async fn test_catalog_preserves_ui_meta_after_disconnect() {
     // Step 2: persist to catalog (simulating discover_and_catalog)
     let dir = TempDir::new().unwrap();
     let catalog = McpCatalogStore::new(dir.path());
-    catalog
-        .upsert("vanjs", "ck-vanjs", ChannelClass::Internal, tools, vec![], vec![])
-        .await;
+    catalog.upsert("vanjs", "ck-vanjs", ChannelClass::Internal, tools, vec![], vec![]).await;
 
     // Step 3: disconnect clears state.tools (tool_count becomes 0)
     let snapshot = service.disconnect("vanjs").await.unwrap();
@@ -1977,10 +1962,7 @@ async fn test_catalog_preserves_ui_meta_after_disconnect() {
     assert_eq!(cached_tools.len(), 2, "catalog should have 2 tools");
 
     let cached_ui_tool = cached_tools.iter().find(|t| t.name == "get-time").unwrap();
-    assert!(
-        cached_ui_tool.ui_meta.is_some(),
-        "ui_meta should survive catalog round-trip"
-    );
+    assert!(cached_ui_tool.ui_meta.is_some(), "ui_meta should survive catalog round-trip");
     assert_eq!(
         cached_ui_tool.ui_meta.as_ref().unwrap().resource_uri.as_deref(),
         Some("ui://get-time/mcp-app.html"),
@@ -2000,8 +1982,7 @@ async fn test_catalog_preserves_ui_meta_after_disconnect() {
         serde_json::to_string_pretty(json_ui_tool).unwrap()
     );
     assert_eq!(
-        json_ui_tool["ui_meta"]["resource_uri"],
-        "ui://get-time/mcp-app.html",
+        json_ui_tool["ui_meta"]["resource_uri"], "ui://get-time/mcp-app.html",
         "JSON resource_uri should match"
     );
 }
@@ -2090,8 +2071,5 @@ async fn test_frontend_mcp_app_lookup_pattern() {
     );
 
     // Non-UI tool should NOT be in the map
-    assert!(
-        !app_tools.contains_key("Vanilla::echo"),
-        "non-UI tool should not be in mcpAppTools"
-    );
+    assert!(!app_tools.contains_key("Vanilla::echo"), "non-UI tool should not be in mcpAppTools");
 }

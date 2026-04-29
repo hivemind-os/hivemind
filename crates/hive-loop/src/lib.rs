@@ -78,8 +78,8 @@ pub use legacy::{
     CodeExecutionPhase, ConversationContext, ConversationJournal, JournalEntry, JournalPhase,
     JournalToolCall, KnowledgeQueryHandler, LoopContext, LoopError, LoopEvent, LoopExecutor,
     LoopMiddleware, LoopResult, LoopStrategy, PlanThenExecuteStrategy, ReActStrategy,
-    RoutingConfig, SecurityContext, SequentialStrategy, StrategyKind,
-    ToolCall as LegacyToolCall, ToolsContext, UserInteractionGate,
+    RoutingConfig, SecurityContext, SequentialStrategy, StrategyKind, ToolCall as LegacyToolCall,
+    ToolsContext, UserInteractionGate,
 };
 
 // ── Stall detection + adaptive budget ─────────────────────────────────────
