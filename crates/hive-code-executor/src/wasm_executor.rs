@@ -289,18 +289,18 @@ impl WasmExecutor {
         // tokio::task::spawn catches panics — they become JoinError::Panic
         // rather than crashing the daemon.
         let wasm_task = tokio::task::spawn(async move {
-            if let Err(e) = run_wasm_instance(
-                &engine_for_task,
-                &module,
-                &stdlib_dir,
-                workspace_dir.as_deref(),
+            if let Err(e) = run_wasm_instance(WasmInstanceArgs {
+                engine: &engine_for_task,
+                module: &module,
+                stdlib_dir: &stdlib_dir,
+                workspace_dir: workspace_dir.as_deref(),
                 memory_limit,
-                wasm_stdin_reader,
-                wasm_stdout_writer,
-                wasm_stderr_writer,
-                &nonce,
-                &tmp_dir,
-            )
+                wasm_stdin: wasm_stdin_reader,
+                wasm_stdout: wasm_stdout_writer,
+                wasm_stderr: wasm_stderr_writer,
+                nonce: &nonce,
+                tmp_dir: &tmp_dir,
+            })
             .await
             {
                 tracing::error!(error = %e, "WASM Python instance exited with error");
@@ -558,21 +558,36 @@ struct WasmState {
     limits: StoreLimits,
 }
 
-/// Run the CPython WASI module inside Wasmtime.
-///
-/// This function blocks the async task until the Python REPL exits.
-async fn run_wasm_instance(
-    engine: &Engine,
-    module: &Module,
-    stdlib_dir: &Path,
-    workspace_dir: Option<&str>,
+/// I/O streams and per-instance metadata passed to [`run_wasm_instance`].
+struct WasmInstanceArgs<'a> {
+    engine: &'a Engine,
+    module: &'a Module,
+    stdlib_dir: &'a Path,
+    workspace_dir: Option<&'a str>,
     memory_limit: usize,
     wasm_stdin: DuplexStream,
     wasm_stdout: DuplexStream,
     wasm_stderr: DuplexStream,
-    nonce: &str,
-    tmp_dir: &Path,
-) -> Result<(), ExecutorError> {
+    nonce: &'a str,
+    tmp_dir: &'a Path,
+}
+
+/// Run the CPython WASI module inside Wasmtime.
+///
+/// This function blocks the async task until the Python REPL exits.
+async fn run_wasm_instance(args: WasmInstanceArgs<'_>) -> Result<(), ExecutorError> {
+    let WasmInstanceArgs {
+        engine,
+        module,
+        stdlib_dir,
+        workspace_dir,
+        memory_limit,
+        wasm_stdin,
+        wasm_stdout,
+        wasm_stderr,
+        nonce,
+        tmp_dir,
+    } = args;
     use wasmtime_wasi::pipe::{AsyncReadStream, AsyncWriteStream};
     use wasmtime_wasi::{AsyncStdinStream, AsyncStdoutStream};
 

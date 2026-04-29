@@ -62,16 +62,11 @@ pub trait ToolCallHandler: Send + Sync {
 
 /// Optional context passed alongside `execute()` calls when tool
 /// bridging is active.
+#[derive(Default)]
 pub struct ExecutionOptions<'a> {
     /// Handler for tool calls originating from the Python bridge.
     /// If `None`, any tool call from Python raises a RuntimeError.
     pub tool_call_handler: Option<&'a dyn ToolCallHandler>,
-}
-
-impl<'a> Default for ExecutionOptions<'a> {
-    fn default() -> Self {
-        Self { tool_call_handler: None }
-    }
 }
 
 // ── Tool classification ───────────────────────────────────────────────
