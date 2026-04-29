@@ -62,7 +62,7 @@ jobs:
           mkdir -p "$STAGING/bin" "$STAGING/lib" "$EXTRACT"
           TARBALL="$RUNNER_TEMP/python-wasm.tar.gz"
           curl -fsSL "$WASM_URL" -o "$TARBALL"
-          tar xzf "$TARBALL" -C "$EXTRACT"
+          tar xzf "$TARBALL" --force-local -C "$EXTRACT"
           cp "$EXTRACT/bin/"python*.wasm "$STAGING/bin/python.wasm"
           cp -r "$EXTRACT/usr/local/lib/python3.12" "$STAGING/lib/python3.12"
           echo "PYTHON_WASM_PATH=$STAGING/bin/python.wasm" >> "$GITHUB_ENV"
