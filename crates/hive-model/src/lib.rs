@@ -1121,8 +1121,7 @@ impl ModelRouter {
             })
             .collect::<Vec<_>>();
 
-        providers
-            .sort_by(|left, right| right.descriptor().priority.cmp(&left.descriptor().priority));
+        providers.sort_by_key(|p| std::cmp::Reverse(p.descriptor().priority));
         providers
     }
 
@@ -1140,8 +1139,7 @@ impl ModelRouter {
             .filter(|provider| provider.descriptor().available)
             .collect::<Vec<_>>();
 
-        providers
-            .sort_by(|left, right| right.descriptor().priority.cmp(&left.descriptor().priority));
+        providers.sort_by_key(|p| std::cmp::Reverse(p.descriptor().priority));
         providers
     }
 }
