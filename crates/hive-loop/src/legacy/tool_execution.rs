@@ -23,13 +23,13 @@ use super::types::{LoopContext, LoopError, LoopEvent};
 /// Maximum characters for a single tool output before it is truncated in the prompt.
 /// ~25K tokens — large enough for most file reads but prevents a single tool from
 /// consuming the entire context window.
-pub(super) const MAX_TOOL_OUTPUT_CHARS: usize = 100_000;
+pub(crate) const MAX_TOOL_OUTPUT_CHARS: usize = 100_000;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Return the largest prefix of `s` whose byte length is ≤ `max_bytes`,
 /// without splitting a multi-byte UTF-8 character.
-pub(super) fn truncate_str(s: &str, max_bytes: usize) -> &str {
+pub(crate) fn truncate_str(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
@@ -41,7 +41,7 @@ pub(super) fn truncate_str(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Truncate a tool output string if it exceeds `MAX_TOOL_OUTPUT_CHARS`.
-pub(super) fn cap_tool_output(output: &str) -> String {
+pub(crate) fn cap_tool_output(output: &str) -> String {
     if output.len() <= MAX_TOOL_OUTPUT_CHARS {
         output.to_string()
     } else {
@@ -60,7 +60,7 @@ pub(super) fn cap_tool_output(output: &str) -> String {
 ///
 /// Uses the common heuristic of ~4 characters per token (English text).
 /// Accounts for prompt, conversation history, and tool definitions.
-pub(super) fn estimate_request_tokens(request: &CompletionRequest) -> u32 {
+pub(crate) fn estimate_request_tokens(request: &CompletionRequest) -> u32 {
     let mut chars: usize = request.prompt.len();
     for msg in &request.messages {
         // ~4 tokens overhead per message for role/separators
@@ -76,7 +76,7 @@ pub(super) fn estimate_request_tokens(request: &CompletionRequest) -> u32 {
 // ── Internal types ──────────────────────────────────────────────────────
 
 /// Result of a single tool call execution (success or error).
-pub(super) struct ToolCallOutcome {
+pub(crate) struct ToolCallOutcome {
     pub(super) tool_id: String,
     pub(super) input_str: String,
     pub(super) output: String,
@@ -90,7 +90,7 @@ pub(super) struct ToolCallOutcome {
 
 /// Execute a batch of tool calls according to the configured
 /// [`ToolExecutionMode`].
-pub(super) async fn execute_tool_batch(
+pub(crate) async fn execute_tool_batch(
     calls: &[ToolCall],
     context: &LoopContext,
     middleware: &[Arc<dyn LoopMiddleware>],
@@ -182,7 +182,7 @@ pub(super) async fn execute_tool_batch(
 }
 
 /// Execute a single tool call through the full middleware + permission pipeline.
-pub(super) async fn execute_tool_call(
+pub(crate) async fn execute_tool_call(
     context: &LoopContext,
     call: ToolCall,
     middleware: &[Arc<dyn LoopMiddleware>],
@@ -534,7 +534,7 @@ pub(super) async fn execute_tool_call(
 
 // ── Private dispatch helpers ────────────────────────────────────────────
 
-pub(super) async fn run_single_tool_call(
+pub(crate) async fn run_single_tool_call(
     tool_call: &ToolCall,
     context: &LoopContext,
     middleware: &[Arc<dyn LoopMiddleware>],
