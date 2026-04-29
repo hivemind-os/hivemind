@@ -106,6 +106,7 @@ fn escape_seatbelt(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+#[allow(dead_code)]
 pub fn sandbox_command(
     command: &str,
     policy: &SandboxPolicy,
