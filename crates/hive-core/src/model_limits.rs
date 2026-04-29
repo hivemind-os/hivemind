@@ -89,7 +89,7 @@ impl ModelMetadataRegistry {
             })
             .collect();
         // Sort by descending pattern length so longest prefix matches first.
-        entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
         Ok(Self { entries, default_context_window: file.default_context_window })
     }
 

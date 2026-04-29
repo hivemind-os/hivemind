@@ -69,7 +69,7 @@ pub async fn run_test_case(
     let inst = engine
         .store()
         .get_instance(instance_id)?
-        .ok_or_else(|| WorkflowError::InstanceNotFound { id: instance_id })?;
+        .ok_or(WorkflowError::InstanceNotFound { id: instance_id })?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -89,7 +89,7 @@ pub async fn run_test_case(
         .filter_map(|step_def| {
             inst.step_states.get(&step_def.id).map(|ss| StepStateSnapshot {
                 step_id: step_def.id.clone(),
-                status: serde_json::to_value(&ss.status)
+                status: serde_json::to_value(ss.status)
                     .ok()
                     .and_then(|v| v.as_str().map(String::from))
                     .unwrap_or_else(|| format!("{:?}", ss.status)),
@@ -108,7 +108,7 @@ pub async fn run_test_case(
         .map(|a| InterceptedActionSnapshot { step_id: a.step_id, kind: a.kind, details: a.details })
         .collect();
 
-    let actual_status = serde_json::to_value(&inst.status)
+    let actual_status = serde_json::to_value(inst.status)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_else(|| format!("{}", inst.status));
@@ -138,7 +138,7 @@ async fn wait_for_terminal(engine: &WorkflowEngine, instance_id: i64) -> Result<
         let inst = engine
             .store()
             .get_instance(instance_id)?
-            .ok_or_else(|| WorkflowError::InstanceNotFound { id: instance_id })?;
+            .ok_or(WorkflowError::InstanceNotFound { id: instance_id })?;
         if matches!(
             inst.status,
             WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Killed
@@ -250,9 +250,9 @@ fn evaluate_expectations(
     if !expected_tool_calls.is_empty() {
         // Load ALL intercepted actions for this instance.
         let page = engine.store().list_intercepted_actions(instance_id, 10000, 0)?;
-        let all_actions = if page.total as usize > page.items.len() {
+        let all_actions = if page.total > page.items.len() {
             // Re-fetch with full size.
-            engine.store().list_intercepted_actions(instance_id, page.total as usize, 0)?.items
+            engine.store().list_intercepted_actions(instance_id, page.total, 0)?.items
         } else {
             page.items
         };
@@ -380,7 +380,7 @@ fn augment(
 fn partial_match(expected: &Value, actual: &Value) -> bool {
     match (expected, actual) {
         (Value::Object(exp), Value::Object(act)) => {
-            exp.iter().all(|(k, v)| act.get(k).map_or(false, |av| partial_match(v, av)))
+            exp.iter().all(|(k, v)| act.get(k).is_some_and(|av| partial_match(v, av)))
         }
         (Value::Array(exp), Value::Array(act)) => {
             if exp.len() != act.len() {
