@@ -40,11 +40,7 @@ impl ExecutionResult {
             parts.push(self.stdout.clone());
         }
         if !self.stderr.is_empty() {
-            if self.is_error {
-                parts.push(format!("[stderr]\n{}", self.stderr));
-            } else {
-                parts.push(format!("[stderr]\n{}", self.stderr));
-            }
+            parts.push(format!("[stderr]\n{}", self.stderr));
         }
         if parts.is_empty() {
             "(no output)".to_string()
