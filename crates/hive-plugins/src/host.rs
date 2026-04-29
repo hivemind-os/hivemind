@@ -307,7 +307,6 @@ impl PluginHost {
                 loop {
                     header_buf.clear();
                     // Read headers until \r\n\r\n
-                    let mut found_empty = false;
                     let mut content_length: Option<usize> = None;
 
                     loop {
@@ -317,7 +316,6 @@ impl PluginHost {
                             Ok(_) => {
                                 let trimmed = header_buf.trim();
                                 if trimmed.is_empty() {
-                                    found_empty = true;
                                     break;
                                 }
                                 if let Some(val) = trimmed.strip_prefix("Content-Length:") {
@@ -326,10 +324,6 @@ impl PluginHost {
                             }
                             Err(_) => return,
                         }
-                    }
-
-                    if !found_empty {
-                        continue;
                     }
 
                     let len = match content_length {

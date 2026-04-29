@@ -239,7 +239,7 @@ impl PluginSandbox {
     }
 
     fn has_permission_kind<F: Fn(&Permission) -> bool>(&self, predicate: F) -> bool {
-        self.permissions.iter().any(|p| predicate(p))
+        self.permissions.iter().any(predicate)
     }
 }
 

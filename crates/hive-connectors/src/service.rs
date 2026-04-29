@@ -474,7 +474,7 @@ impl ConnectorService {
             }
         };
 
-        let trading = if let Some(_) = config.services.trading.as_ref().filter(|t| t.enabled) {
+        let trading = if config.services.trading.as_ref().filter(|t| t.enabled).is_some() {
             let client = Arc::new(build_client(config)?);
             Some(CoinbaseTradingService::new(client))
         } else {

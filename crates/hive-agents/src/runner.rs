@@ -362,7 +362,6 @@ impl AgentRunner {
                             }
                         }
                         Err(error) if error.cancelled => {
-                            messages_processed += 1;
                             debug!(agent = %agent_id, "task cancelled");
                             // Don't emit Failed — the Kill handler above (or
                             // the next inbox read) will emit Done/Completed.

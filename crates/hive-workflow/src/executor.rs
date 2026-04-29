@@ -896,7 +896,7 @@ impl WorkflowEngine {
 
         // Check if this is a loop preview pause response
         let is_preview_resume =
-            instance.active_loops.get(step_id).map_or(false, |ls| ls.preview_paused);
+            instance.active_loops.get(step_id).is_some_and(|ls| ls.preview_paused);
 
         if is_preview_resume {
             // Parse response — gate responses arrive as {"selected": "...", "text": "..."}
@@ -2013,7 +2013,7 @@ impl WorkflowEngine {
                                 }
                                 ls.item_var = Some(item_var.clone());
                                 // Initialize preview results accumulator if preview is active
-                                if preview_count.map_or(false, |pc| pc > 0) {
+                                if preview_count.is_some_and(|pc| pc > 0) {
                                     ls.preview_results = Some(Vec::new());
                                 }
                             }
@@ -3006,7 +3006,7 @@ async fn execute_control_flow(
                 if let Some(pc) = preview_count {
                     if *pc > 0
                         && next_iteration == *pc as usize
-                        && !loop_state.as_ref().map_or(false, |ls| ls.preview_paused)
+                        && !loop_state.as_ref().is_some_and(|ls| ls.preview_paused)
                     {
                         return StepOutcome::LoopPreviewPause {
                             body_steps: body.clone(),

@@ -3,10 +3,7 @@ use hive_contracts::{
     CodeActConfig, InteractionKind, LoopStrategy as ConfigLoopStrategy, Persona,
     SessionPermissions, ToolExecutionMode, ToolLimitsConfig, WorkspaceClassification,
 };
-use hive_model::{
-    Capability, CompletionMessage, ContentPart, ModelRouter, ModelRouterError, RoutingDecision,
-    RoutingRequest,
-};
+use hive_model::{Capability, CompletionMessage, ContentPart, RoutingDecision};
 use hive_tools::{ToolRegistry, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

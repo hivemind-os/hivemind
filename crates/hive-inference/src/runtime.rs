@@ -168,6 +168,13 @@ impl CandleRuntime {
 }
 
 #[cfg(not(feature = "candle"))]
+impl Default for CandleRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(feature = "candle"))]
 impl InferenceRuntime for CandleRuntime {
     fn kind(&self) -> InferenceRuntimeKind {
         InferenceRuntimeKind::Candle
@@ -243,6 +250,13 @@ impl OnnxRuntime {
 }
 
 #[cfg(not(feature = "onnx"))]
+impl Default for OnnxRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(feature = "onnx"))]
 impl InferenceRuntime for OnnxRuntime {
     fn kind(&self) -> InferenceRuntimeKind {
         InferenceRuntimeKind::Onnx
@@ -314,6 +328,13 @@ pub struct LlamaCppRuntime {
 impl LlamaCppRuntime {
     pub fn new() -> Self {
         Self { loaded_models: Mutex::new(HashMap::new()) }
+    }
+}
+
+#[cfg(not(feature = "llama-cpp"))]
+impl Default for LlamaCppRuntime {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

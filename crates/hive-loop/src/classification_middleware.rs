@@ -10,10 +10,11 @@
 //!   `channel_class`.  Returns `ToolDenied` when the channel cannot carry the
 //!   data and no approval override is possible.
 
+#[cfg(test)]
 use crate::legacy::{
-    AgentContext, ConversationContext, LoopContext, LoopError, LoopMiddleware, RoutingConfig,
-    SecurityContext, ToolsContext,
+    AgentContext, ConversationContext, RoutingConfig, SecurityContext, ToolsContext,
 };
+use crate::legacy::{LoopContext, LoopError, LoopMiddleware};
 use hive_classification::DataClass;
 use hive_connectors::ConnectorServiceHandle;
 use hive_tools::ToolResult;

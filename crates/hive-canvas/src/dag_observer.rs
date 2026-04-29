@@ -151,10 +151,9 @@ impl DagObserver {
                 // Treat code execution as a tool call in the DAG
                 let input = serde_json::json!({"code": code});
                 let output_val = serde_json::json!({"stdout": stdout, "stderr": stderr});
-                let mut events =
-                    self.handle_tool_call_started(&"code_execution".to_string(), &input);
+                let mut events = self.handle_tool_call_started("code_execution", &input);
                 events.extend(self.handle_tool_call_completed(
-                    &"code_execution".to_string(),
+                    "code_execution",
                     &output_val,
                     *is_error,
                 ));

@@ -15,9 +15,10 @@ use hive_core::model_limits::ModelLimitsRegistry;
 use hive_model::{CompletionMessage, CompletionRequest};
 use tracing::{debug, warn};
 
+use crate::legacy::{simple_model_error, LoopContext, LoopError, LoopMiddleware};
+#[cfg(test)]
 use crate::legacy::{
-    simple_model_error, AgentContext, ConversationContext, LoopContext, LoopError, LoopMiddleware,
-    RoutingConfig, SecurityContext, ToolsContext,
+    AgentContext, ConversationContext, RoutingConfig, SecurityContext, ToolsContext,
 };
 
 // ── Token estimation ────────────────────────────────────────────────

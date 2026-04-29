@@ -5,9 +5,9 @@
 
 use crate::policy::{AccessMode, SandboxPolicy};
 use crate::{SandboxError, SandboxedCommand};
-use std::io::Write;
 
 /// Try Landlock first, then bubblewrap.
+#[allow(dead_code)]
 pub fn sandbox_command(
     command: &str,
     policy: &SandboxPolicy,

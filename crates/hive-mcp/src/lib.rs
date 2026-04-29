@@ -1941,7 +1941,7 @@ fn tool_to_info(tool: Tool) -> McpToolInfo {
     if ui_meta.as_ref().and_then(|m| m.resource_uri.as_ref()).is_none() {
         if let Some(meta) = tool.meta.as_ref() {
             if let Some(uri) = meta.get("ui/resourceUri").and_then(|v| v.as_str()) {
-                let m = ui_meta.get_or_insert_with(|| McpToolUiMeta {
+                let m = ui_meta.get_or_insert(McpToolUiMeta {
                     resource_uri: None,
                     visibility: None,
                     csp: None,

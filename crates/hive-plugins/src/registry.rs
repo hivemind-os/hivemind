@@ -230,7 +230,7 @@ impl PluginRegistry {
         // Determine the actual package directory name (strip scope if present)
         let dir_name = if package_name.starts_with('@') {
             // Scoped package: @scope/name → node_modules/@scope/name
-            package_name.split('/').last().unwrap_or(package_name)
+            package_name.split('/').next_back().unwrap_or(package_name)
         } else {
             // Strip version specifiers: name@1.0.0 → name
             package_name.split('@').next().unwrap_or(package_name)
