@@ -10,9 +10,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::interaction::UserInteractionGate;
 use super::parsing::ToolCall;
-use super::types::{
-    BoxFuture, LoopContext, LoopError, LoopEvent, LoopResult,
-};
+use super::types::{BoxFuture, LoopContext, LoopError, LoopEvent, LoopResult};
 use hive_model::{CompletionRequest, CompletionResponse};
 
 // ── Middleware trait ───────────────────────────────────────────────────────

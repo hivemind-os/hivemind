@@ -114,10 +114,9 @@ pub fn resolve_client_id(
     const BUILTIN_OUTLOOK: &str = "80b5c82a-8733-4d48-a39c-bde93b9afa39";
 
     let (env_key, builtin) = match provider {
-        ConnectorProvider::Gmail => (
-            "HIVEMIND_GOOGLE_CLIENT_ID",
-            option_env!("BUILTIN_GOOGLE_CLIENT_ID"),
-        ),
+        ConnectorProvider::Gmail => {
+            ("HIVEMIND_GOOGLE_CLIENT_ID", option_env!("BUILTIN_GOOGLE_CLIENT_ID"))
+        }
         ConnectorProvider::Microsoft => ("HIVEMIND_OUTLOOK_CLIENT_ID", Some(BUILTIN_OUTLOOK)),
         _ => return None,
     };
@@ -138,10 +137,9 @@ pub fn resolve_client_secret(
     use hive_contracts::connectors::ConnectorProvider;
 
     let (env_key, builtin) = match provider {
-        ConnectorProvider::Gmail => (
-            "HIVEMIND_GOOGLE_CLIENT_SECRET",
-            option_env!("BUILTIN_GOOGLE_CLIENT_SECRET"),
-        ),
+        ConnectorProvider::Gmail => {
+            ("HIVEMIND_GOOGLE_CLIENT_SECRET", option_env!("BUILTIN_GOOGLE_CLIENT_SECRET"))
+        }
         // Outlook device code flow doesn't need a client secret
         _ => return String::new(),
     };

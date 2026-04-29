@@ -496,7 +496,17 @@ async fn test_respond_to_gate_on_waiting_step() {
     svc.save_definition(feedback_definition_yaml()).await.unwrap();
 
     let id = svc
-        .launch("user/feedback-workflow", Some("1.0"), json!({}), "s1", None, None, None, None, ExecutionMode::Normal)
+        .launch(
+            "user/feedback-workflow",
+            Some("1.0"),
+            json!({}),
+            "s1",
+            None,
+            None,
+            None,
+            None,
+            ExecutionMode::Normal,
+        )
         .await
         .unwrap();
 
@@ -529,7 +539,17 @@ async fn test_child_workflow_definition_resolved() {
     // from the store. Even if the child workflow instance isn't fully executed,
     // we verify the definition lookup succeeds by checking the parent launched.
     let id = svc
-        .launch("user/parent-workflow", Some("1.0"), json!({}), "s1", None, None, None, None, ExecutionMode::Normal)
+        .launch(
+            "user/parent-workflow",
+            Some("1.0"),
+            json!({}),
+            "s1",
+            None,
+            None,
+            None,
+            None,
+            ExecutionMode::Normal,
+        )
         .await
         .unwrap();
 

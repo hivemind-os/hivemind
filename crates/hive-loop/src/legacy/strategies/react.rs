@@ -15,7 +15,9 @@ use super::super::strategy::{LoopMiddleware, LoopStrategy};
 use super::super::streaming::StreamingToolCallFilter;
 use super::super::tool_execution::{estimate_request_tokens, execute_tool_batch};
 use super::super::types::{BoxFuture, LoopContext, LoopError, LoopEvent, LoopResult};
-use super::super::{check_preempt, is_budget_exempt, model_router_error_to_loop_error, simple_model_error};
+use super::super::{
+    check_preempt, is_budget_exempt, model_router_error_to_loop_error, simple_model_error,
+};
 
 #[derive(Default)]
 pub struct ReActStrategy;
@@ -153,7 +155,8 @@ impl LoopStrategy for ReActStrategy {
                 // Diagnostic: log the full tool list on the first iteration so
                 // we can compare shadow vs non-shadow runs.
                 if tool_iterations == 0 {
-                    let mut all_tool_ids: Vec<&str> = request.tools.iter().map(|t| t.id.as_str()).collect();
+                    let mut all_tool_ids: Vec<&str> =
+                        request.tools.iter().map(|t| t.id.as_str()).collect();
                     all_tool_ids.sort();
                     let has_send = all_tool_ids.iter().any(|id| id.contains("send_external"));
                     tracing::info!(
@@ -174,8 +177,20 @@ impl LoopStrategy for ReActStrategy {
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     request.prompt.hash(&mut hasher);
                     let prompt_hash = hasher.finish();
-                    let prompt_tail: String = request.prompt.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
-                    let msgs_summary: Vec<String> = request.messages.iter().map(|m| format!("{}:{}", m.role, m.content.len())).collect();
+                    let prompt_tail: String = request
+                        .prompt
+                        .chars()
+                        .rev()
+                        .take(300)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    let msgs_summary: Vec<String> = request
+                        .messages
+                        .iter()
+                        .map(|m| format!("{}:{}", m.role, m.content.len()))
+                        .collect();
                     tracing::info!(
                         shadow_mode = context.security.shadow_mode,
                         iteration = tool_iterations,
@@ -278,8 +293,14 @@ impl LoopStrategy for ReActStrategy {
                                 // sanitized to mcp_{server}_{tool}).  Skipping internal
                                 // tools like core_ask_user avoids flooding the event log.
                                 for d in &chunk.tool_call_arg_deltas {
-                                    let is_mcp_tool = d.name.as_deref()
-                                        .map(|n| n.starts_with("mcp_") || n.starts_with("mcp.") || n.starts_with("app."))
+                                    let is_mcp_tool = d
+                                        .name
+                                        .as_deref()
+                                        .map(|n| {
+                                            n.starts_with("mcp_")
+                                                || n.starts_with("mcp.")
+                                                || n.starts_with("app.")
+                                        })
                                         .unwrap_or(false);
                                     if is_mcp_tool {
                                         let _ = tx.try_send(LoopEvent::ToolCallArgDelta {
@@ -372,8 +393,10 @@ impl LoopStrategy for ReActStrategy {
                 // Diagnostic: log every tool call the model produces, plus
                 // the model's text content (may reveal reasoning differences).
                 {
-                    let call_ids: Vec<&str> = detected_calls.iter().map(|c| c.tool_id.as_str()).collect();
-                    let response_text_preview: String = response.content.chars().take(500).collect();
+                    let call_ids: Vec<&str> =
+                        detected_calls.iter().map(|c| c.tool_id.as_str()).collect();
+                    let response_text_preview: String =
+                        response.content.chars().take(500).collect();
                     tracing::info!(
                         shadow_mode = context.security.shadow_mode,
                         iteration = tool_iterations,
@@ -432,14 +455,22 @@ impl LoopStrategy for ReActStrategy {
                     // prompt so the model proceeds instead of re-asking.
                     for jtc in &journal_tool_calls {
                         if jtc.tool_id == "core.ask_user" {
-                            let question_prefix: String = serde_json::from_str::<serde_json::Value>(&jtc.input)
-                                .ok()
-                                .and_then(|v| v.get("question").and_then(|q| q.as_str()).map(|s| s.chars().take(120).collect()))
-                                .unwrap_or_default();
-                            let answer: String = serde_json::from_str::<serde_json::Value>(&jtc.output)
-                                .ok()
-                                .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(String::from))
-                                .unwrap_or_default();
+                            let question_prefix: String =
+                                serde_json::from_str::<serde_json::Value>(&jtc.input)
+                                    .ok()
+                                    .and_then(|v| {
+                                        v.get("question")
+                                            .and_then(|q| q.as_str())
+                                            .map(|s| s.chars().take(120).collect())
+                                    })
+                                    .unwrap_or_default();
+                            let answer: String =
+                                serde_json::from_str::<serde_json::Value>(&jtc.output)
+                                    .ok()
+                                    .and_then(|v| {
+                                        v.get("answer").and_then(|a| a.as_str()).map(String::from)
+                                    })
+                                    .unwrap_or_default();
                             ask_user_history.push((question_prefix, answer));
                         } else {
                             // A non-ask_user tool call breaks the streak
@@ -450,7 +481,9 @@ impl LoopStrategy for ReActStrategy {
                     const STALL_THRESHOLD: usize = 2;
                     if ask_user_history.len() >= STALL_THRESHOLD {
                         let last = &ask_user_history[ask_user_history.len() - 1];
-                        let repeats = ask_user_history.iter().rev()
+                        let repeats = ask_user_history
+                            .iter()
+                            .rev()
                             .take_while(|(q, a)| q == &last.0 && a == &last.1)
                             .count();
                         if repeats >= STALL_THRESHOLD {
@@ -462,7 +495,7 @@ impl LoopStrategy for ReActStrategy {
                             tool_results.push_str(
                                 "\n\n[System: The user has already confirmed this exact request. \
                                  Do NOT ask again. Proceed immediately with the appropriate \
-                                 action to fulfill the user's confirmed request.]"
+                                 action to fulfill the user's confirmed request.]",
                             );
                         }
                     }
@@ -511,10 +544,7 @@ impl LoopStrategy for ReActStrategy {
                         // Push tool result messages.
                         for jtc in &journal_with_ids {
                             if let Some(ref call_id) = jtc.tool_call_id {
-                                let safe_output =
-                                    prompt_sanitize::escape_prompt_tags(
-                                        &jtc.output,
-                                    );
+                                let safe_output = prompt_sanitize::escape_prompt_tags(&jtc.output);
                                 tool_history.push(CompletionMessage {
                                     role: "tool".into(),
                                     content: safe_output.clone(),
@@ -534,20 +564,19 @@ impl LoopStrategy for ReActStrategy {
                         } else {
                             tool_history.push(CompletionMessage {
                                 role: "system".into(),
-                                content: "[System: The user has already confirmed this exact request. \
+                                content:
+                                    "[System: The user has already confirmed this exact request. \
                                     Do NOT ask again. Proceed immediately with the appropriate \
                                     action to fulfill the user's confirmed request.]"
-                                    .to_string(),
+                                        .to_string(),
                                 content_parts: vec![],
                                 blocks: vec![],
                             });
                         }
 
                         // Count individual tool calls.
-                        tool_iterations += detected_calls
-                            .iter()
-                            .filter(|c| !is_budget_exempt(&c.tool_id))
-                            .count();
+                        tool_iterations +=
+                            detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
 
                         if let Some(ref journal) = context.conversation.conversation_journal {
                             let mut j = journal.lock();
@@ -561,10 +590,8 @@ impl LoopStrategy for ReActStrategy {
                     } else {
                         // Legacy mode: append XML to prompt.
                         prompt = format!("{prompt}{tool_results}");
-                        tool_iterations += detected_calls
-                            .iter()
-                            .filter(|c| !is_budget_exempt(&c.tool_id))
-                            .count();
+                        tool_iterations +=
+                            detected_calls.iter().filter(|c| !is_budget_exempt(&c.tool_id)).count();
 
                         if let Some(ref journal) = context.conversation.conversation_journal {
                             let mut j = journal.lock();

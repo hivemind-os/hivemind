@@ -27,10 +27,7 @@ async fn wait_for_terminal(store: &WorkflowStore, instance_id: i64) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!(
-        "instance {} did not reach terminal state in time",
-        instance_id
-    );
+    panic!("instance {} did not reach terminal state in time", instance_id);
 }
 
 struct MockToolInfo {
@@ -38,10 +35,7 @@ struct MockToolInfo {
 }
 
 impl ToolInfoProvider for MockToolInfo {
-    fn get_tool_definition(
-        &self,
-        tool_id: &str,
-    ) -> Option<hive_contracts::tools::ToolDefinition> {
+    fn get_tool_definition(&self, tool_id: &str) -> Option<hive_contracts::tools::ToolDefinition> {
         self.tools.get(tool_id).cloned()
     }
 }
@@ -52,9 +46,7 @@ struct RecordingExecutor {
 
 impl RecordingExecutor {
     fn new() -> Self {
-        Self {
-            tool_calls: Mutex::new(Vec::new()),
-        }
+        Self { tool_calls: Mutex::new(Vec::new()) }
     }
 }
 
@@ -66,10 +58,7 @@ impl StepExecutor for RecordingExecutor {
         arguments: Value,
         _ctx: &ExecutionContext,
     ) -> Result<Value, String> {
-        self.tool_calls
-            .lock()
-            .await
-            .push((tool_id.to_string(), arguments.clone()));
+        self.tool_calls.lock().await.push((tool_id.to_string(), arguments.clone()));
         Ok(json!({"echo": "real", "status": "ok"}))
     }
 
@@ -210,11 +199,10 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("connector.send_message", "Send Message")
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("connector.send_message", "Send Message")
             .side_effects(true)
-            .build(),
-    ]);
+            .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
     let instance_id = engine
@@ -287,11 +275,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("http.request", "HTTP Request")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("http.request", "HTTP Request")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
     let instance_id = engine
@@ -380,10 +366,7 @@ steps:
     let action = &page.items[0];
     assert_eq!(action.kind, "agent_invocation");
     assert_eq!(action.details["persona_id"], "researcher");
-    assert_eq!(
-        action.details["task"],
-        "Find data about Q1 sales performance and summarize"
-    );
+    assert_eq!(action.details["task"], "Find data about Q1 sales performance and summarize");
     assert_eq!(action.details["async"], false);
 }
 
@@ -430,11 +413,10 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("connector.send_message", "Send Message")
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("connector.send_message", "Send Message")
             .side_effects(true)
-            .build(),
-    ]);
+            .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -603,9 +585,7 @@ steps:
 
     // db.query is read-only, connector.send_message has side effects
     let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("db.query", "Database Query")
-            .read_only()
-            .build(),
+        ToolDefinitionBuilder::new("db.query", "Database Query").read_only().build(),
         ToolDefinitionBuilder::new("connector.send_message", "Send Message")
             .side_effects(true)
             .build(),
@@ -703,11 +683,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("email.send", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("email.send", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
     let instance_id = engine
@@ -776,11 +754,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("email.send", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("email.send", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
     let instance_id = engine
@@ -844,11 +820,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("email.send", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("email.send", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -886,16 +860,12 @@ steps:
     wait_for_terminal(&store, normal_id).await;
 
     // Shadow has intercepted actions
-    let shadow_page = store
-        .list_intercepted_actions(shadow_id, 100, 0)
-        .unwrap();
+    let shadow_page = store.list_intercepted_actions(shadow_id, 100, 0).unwrap();
     assert_eq!(shadow_page.total, 1);
     assert_eq!(shadow_page.items[0].instance_id, shadow_id);
 
     // Normal has no intercepted actions
-    let normal_page = store
-        .list_intercepted_actions(normal_id, 100, 0)
-        .unwrap();
+    let normal_page = store.list_intercepted_actions(normal_id, 100, 0).unwrap();
     assert_eq!(normal_page.total, 0);
 
     // Normal executed the real tool

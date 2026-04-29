@@ -1134,7 +1134,11 @@ mod tests {
 
         let mgr = Arc::new(NodeEnvManager::new(tmp.path().to_path_buf(), config));
         let shell_env = Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new()));
-        let svc = NodeEnvDaemonService::new(Arc::clone(&mgr), Arc::clone(&shell_env), hive_core::EventBus::new(16));
+        let svc = NodeEnvDaemonService::new(
+            Arc::clone(&mgr),
+            Arc::clone(&shell_env),
+            hive_core::EventBus::new(16),
+        );
 
         svc.start().await.expect("start should succeed");
         assert_eq!(svc.status(), ServiceStatus::Running);

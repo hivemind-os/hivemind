@@ -23,7 +23,7 @@ pub use strategy::{LoopExecutor, LoopMiddleware, LoopStrategy, StrategyKind};
 pub(crate) mod tool_execution;
 #[allow(unused_imports)] // Used by tests via `super::*`
 use tool_execution::{
-    execute_tool_batch, execute_tool_call, estimate_request_tokens, run_single_tool_call,
+    estimate_request_tokens, execute_tool_batch, execute_tool_call, run_single_tool_call,
     truncate_str,
 };
 

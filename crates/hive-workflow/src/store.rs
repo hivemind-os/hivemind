@@ -1200,7 +1200,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                     let goto_activated_steps_str: Option<String> = row.get(15)?;
                     let goto_source_steps_str: Option<String> = row.get(16)?;
                     let trigger_step_id: Option<String> = row.get(17)?;
-                    let execution_mode_str: String = row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "normal".to_string());
+                    let execution_mode_str: String =
+                        row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "normal".to_string());
                     Ok((
                         rowid,
                         def_snapshot,
@@ -1441,7 +1442,8 @@ impl WorkflowPersistence for SqliteWorkflowStore {
                 pending_agent_questions: 0,
                 child_agent_ids: Vec::new(),
                 archived: row.get::<_, i32>(15)? != 0,
-                execution_mode: row.get::<_, Option<String>>(16)?
+                execution_mode: row
+                    .get::<_, Option<String>>(16)?
                     .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok())
                     .unwrap_or_default(),
             })
@@ -2568,7 +2570,10 @@ mod tests {
             Ok(before - inner.instances.len())
         }
 
-        fn save_intercepted_action(&self, action: &InterceptedAction) -> Result<i64, WorkflowError> {
+        fn save_intercepted_action(
+            &self,
+            action: &InterceptedAction,
+        ) -> Result<i64, WorkflowError> {
             let mut inner = self.inner.lock().unwrap();
             let id = inner.next_action_id;
             inner.next_action_id += 1;
@@ -2585,11 +2590,8 @@ mod tests {
             offset: usize,
         ) -> Result<InterceptedActionPage, WorkflowError> {
             let inner = self.inner.lock().unwrap();
-            let matching: Vec<&InterceptedAction> = inner
-                .intercepted_actions
-                .iter()
-                .filter(|a| a.instance_id == instance_id)
-                .collect();
+            let matching: Vec<&InterceptedAction> =
+                inner.intercepted_actions.iter().filter(|a| a.instance_id == instance_id).collect();
             let total = matching.len();
             let items: Vec<InterceptedAction> =
                 matching.into_iter().skip(offset).take(limit).cloned().collect();

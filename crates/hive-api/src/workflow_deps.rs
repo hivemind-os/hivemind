@@ -10,8 +10,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use hive_agents::{
-    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole,
-    SupervisorEvent,
+    generate_friendly_name, generate_random_avatar, AgentMessage, AgentRole, SupervisorEvent,
 };
 use hive_chat::ChatService;
 use hive_core::EventBus;
@@ -434,13 +433,12 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         let agent_perms = if permission_rules.is_empty() {
             None
         } else {
-            Some(Arc::new(parking_lot::Mutex::new(
-                hive_contracts::SessionPermissions::with_rules(permission_rules),
-            )))
+            Some(Arc::new(parking_lot::Mutex::new(hive_contracts::SessionPermissions::with_rules(
+                permission_rules,
+            ))))
         };
 
-        let display_name =
-            agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name);
+        let display_name = agent_name.map(|s| s.to_string()).unwrap_or_else(generate_friendly_name);
 
         let spec = hive_agents::AgentSpec {
             id: agent_id.clone(),
@@ -603,7 +601,8 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         // Wait for completion using the pre-subscribed receiver.
         // In test/auto_respond mode, apply a safety-net deadline even if
         // the step definition didn't specify a timeout.
-        let effective_timeout = timeout_secs.or_else(|| if auto_respond { Some(120) } else { None });
+        let effective_timeout =
+            timeout_secs.or_else(|| if auto_respond { Some(120) } else { None });
         let deadline = effective_timeout
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
 
@@ -649,10 +648,8 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 // Capture shadow-mode tool interceptions from the agent
                 Ok(SupervisorEvent::AgentOutput {
                     agent_id: ref aid,
-                    event: hive_contracts::ReasoningEvent::ToolCallIntercepted {
-                        ref tool_id,
-                        ref input,
-                    },
+                    event:
+                        hive_contracts::ReasoningEvent::ToolCallIntercepted { ref tool_id, ref input },
                 }) if *aid == agent_id => {
                     intercepted_calls.push(InterceptedToolCall {
                         tool_id: tool_id.clone(),
@@ -663,19 +660,17 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 // Auto-respond to agent questions (ask_user) when in test mode.
                 Ok(SupervisorEvent::AgentOutput {
                     agent_id: ref aid,
-                    event: hive_contracts::ReasoningEvent::QuestionAsked {
-                        ref request_id,
-                        ref text,
-                        ref choices,
-                        ref allow_freeform,
-                        ..
-                    },
+                    event:
+                        hive_contracts::ReasoningEvent::QuestionAsked {
+                            ref request_id,
+                            ref text,
+                            ref choices,
+                            ref allow_freeform,
+                            ..
+                        },
                 }) if *aid == agent_id && auto_respond => {
-                    let auto_answer = if choices.is_empty() {
-                        "proceed".to_string()
-                    } else {
-                        choices[0].clone()
-                    };
+                    let auto_answer =
+                        if choices.is_empty() { "proceed".to_string() } else { choices[0].clone() };
                     tracing::info!(
                         agent_id = %aid,
                         request_id = %request_id,
@@ -719,12 +714,13 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
                 // Auto-approve tool approvals when in test mode.
                 Ok(SupervisorEvent::AgentOutput {
                     agent_id: ref aid,
-                    event: hive_contracts::ReasoningEvent::UserInteractionRequired {
-                        ref request_id,
-                        ref tool_id,
-                        ref input,
-                        ref reason,
-                    },
+                    event:
+                        hive_contracts::ReasoningEvent::UserInteractionRequired {
+                            ref request_id,
+                            ref tool_id,
+                            ref input,
+                            ref reason,
+                        },
                 }) if *aid == agent_id && auto_respond => {
                     tracing::info!(
                         agent_id = %aid,

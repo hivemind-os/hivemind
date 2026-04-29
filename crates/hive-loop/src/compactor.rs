@@ -77,8 +77,7 @@ impl ContextCompactorMiddleware {
                         }
                         hive_model::MessageBlock::ToolResult { content, is_error, .. } => {
                             let preview: String = content.chars().take(300).collect();
-                            let label =
-                                if *is_error { "Tool Error" } else { "Tool Result" };
+                            let label = if *is_error { "Tool Error" } else { "Tool Result" };
                             prompt.push_str(&format!("\n  [{}: {}]\n", label, preview));
                         }
                     }

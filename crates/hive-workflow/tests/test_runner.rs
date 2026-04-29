@@ -20,10 +20,7 @@ struct MockToolInfo {
 }
 
 impl ToolInfoProvider for MockToolInfo {
-    fn get_tool_definition(
-        &self,
-        tool_id: &str,
-    ) -> Option<hive_contracts::tools::ToolDefinition> {
+    fn get_tool_definition(&self, tool_id: &str) -> Option<hive_contracts::tools::ToolDefinition> {
         self.tools.get(tool_id).cloned()
     }
 }
@@ -34,9 +31,7 @@ struct RecordingExecutor {
 
 impl RecordingExecutor {
     fn new() -> Self {
-        Self {
-            tool_calls: Mutex::new(Vec::new()),
-        }
+        Self { tool_calls: Mutex::new(Vec::new()) }
     }
 }
 
@@ -48,10 +43,7 @@ impl StepExecutor for RecordingExecutor {
         arguments: Value,
         _ctx: &ExecutionContext,
     ) -> Result<Value, String> {
-        self.tool_calls
-            .lock()
-            .await
-            .push((tool_id.to_string(), arguments.clone()));
+        self.tool_calls.lock().await.push((tool_id.to_string(), arguments.clone()));
         Ok(json!({"echo": "real", "status": "ok", "count": 42}))
     }
 
@@ -164,11 +156,9 @@ fn make_tool_map(
 async fn test_passing_test_case() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("data.fetch", "Fetch data")
-            .read_only()
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("data.fetch", "Fetch data")
+        .read_only()
+        .build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"
@@ -225,24 +215,94 @@ async fn test_wrong_status_fails() {
     struct FailingExecutor;
     #[async_trait]
     impl StepExecutor for FailingExecutor {
-        async fn call_tool(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<Value, String> {
+        async fn call_tool(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Err("boom".into())
         }
-        async fn invoke_agent(&self, _: &str, _: &str, _: bool, _: Option<u64>, _: &[PermissionEntry], _: Option<&str>, _: Option<&str>, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn signal_agent(&self, _: &SignalTarget, _: &str, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn wait_for_agent(&self, _: &str, _: Option<u64>, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn create_feedback_request(&self, _: i64, _: &str, _: &str, _: Option<&[String]>, _: bool, _: &ExecutionContext) -> Result<String, String> { Ok("r".into()) }
-        async fn register_event_gate(&self, _: i64, _: &str, _: &str, _: Option<&str>, _: Option<u64>, _: &ExecutionContext) -> Result<String, String> { Ok("s".into()) }
-        async fn launch_workflow(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<i64, String> { Ok(1) }
-        async fn schedule_task(&self, _: &ScheduleTaskDef, _: &ExecutionContext) -> Result<String, String> { Ok("t".into()) }
-        async fn render_prompt_template(&self, _: &str, _: &str, _: Value, _: &ExecutionContext) -> Result<String, String> { Ok("p".into()) }
+        async fn invoke_agent(
+            &self,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: Option<u64>,
+            _: &[PermissionEntry],
+            _: Option<&str>,
+            _: Option<&str>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn signal_agent(
+            &self,
+            _: &SignalTarget,
+            _: &str,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn wait_for_agent(
+            &self,
+            _: &str,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn create_feedback_request(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&[String]>,
+            _: bool,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("r".into())
+        }
+        async fn register_event_gate(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("s".into())
+        }
+        async fn launch_workflow(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<i64, String> {
+            Ok(1)
+        }
+        async fn schedule_task(
+            &self,
+            _: &ScheduleTaskDef,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("t".into())
+        }
+        async fn render_prompt_template(
+            &self,
+            _: &str,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("p".into())
+        }
     }
 
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("broken.tool", "Broken")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("broken.tool", "Broken")
+        .side_effects(true)
+        .build()]);
     let engine = build_engine(store, Arc::new(FailingExecutor), tools);
 
     let yaml = r#"
@@ -290,24 +350,93 @@ async fn test_wrong_status_reports_failure() {
     struct FailingReadOnlyExecutor;
     #[async_trait]
     impl StepExecutor for FailingReadOnlyExecutor {
-        async fn call_tool(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<Value, String> {
+        async fn call_tool(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
             Err("database connection failed".into())
         }
-        async fn invoke_agent(&self, _: &str, _: &str, _: bool, _: Option<u64>, _: &[PermissionEntry], _: Option<&str>, _: Option<&str>, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn signal_agent(&self, _: &SignalTarget, _: &str, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn wait_for_agent(&self, _: &str, _: Option<u64>, _: &ExecutionContext) -> Result<Value, String> { Ok(json!({})) }
-        async fn create_feedback_request(&self, _: i64, _: &str, _: &str, _: Option<&[String]>, _: bool, _: &ExecutionContext) -> Result<String, String> { Ok("r".into()) }
-        async fn register_event_gate(&self, _: i64, _: &str, _: &str, _: Option<&str>, _: Option<u64>, _: &ExecutionContext) -> Result<String, String> { Ok("s".into()) }
-        async fn launch_workflow(&self, _: &str, _: Value, _: &ExecutionContext) -> Result<i64, String> { Ok(1) }
-        async fn schedule_task(&self, _: &ScheduleTaskDef, _: &ExecutionContext) -> Result<String, String> { Ok("t".into()) }
-        async fn render_prompt_template(&self, _: &str, _: &str, _: Value, _: &ExecutionContext) -> Result<String, String> { Ok("p".into()) }
+        async fn invoke_agent(
+            &self,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: Option<u64>,
+            _: &[PermissionEntry],
+            _: Option<&str>,
+            _: Option<&str>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn signal_agent(
+            &self,
+            _: &SignalTarget,
+            _: &str,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn wait_for_agent(
+            &self,
+            _: &str,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<Value, String> {
+            Ok(json!({}))
+        }
+        async fn create_feedback_request(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&[String]>,
+            _: bool,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("r".into())
+        }
+        async fn register_event_gate(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: Option<u64>,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("s".into())
+        }
+        async fn launch_workflow(
+            &self,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<i64, String> {
+            Ok(1)
+        }
+        async fn schedule_task(
+            &self,
+            _: &ScheduleTaskDef,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("t".into())
+        }
+        async fn render_prompt_template(
+            &self,
+            _: &str,
+            _: &str,
+            _: Value,
+            _: &ExecutionContext,
+        ) -> Result<String, String> {
+            Ok("p".into())
+        }
     }
 
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("db.query", "Query DB")
-            .read_only()
-            .build(),
-    ]);
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("db.query", "Query DB").read_only().build()]);
     let engine = build_engine(store, Arc::new(FailingReadOnlyExecutor), tools);
 
     let yaml = r#"
@@ -351,11 +480,8 @@ tests:
 async fn test_wrong_output_reports_diff() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("data.fetch", "Fetch")
-            .read_only()
-            .build(),
-    ]);
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("data.fetch", "Fetch").read_only().build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"
@@ -403,11 +529,9 @@ tests:
 async fn test_shadow_outputs_override_step() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("llm.invoke", "LLM")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("llm.invoke", "LLM")
+        .side_effects(true)
+        .build()]);
     let engine = build_engine(store, executor.clone(), tools);
 
     let yaml = r#"
@@ -477,11 +601,8 @@ tests:
 async fn test_steps_completed_and_not_reached() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("data.fetch", "Fetch")
-            .read_only()
-            .build(),
-    ]);
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("data.fetch", "Fetch").read_only().build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"
@@ -543,11 +664,9 @@ tests:
 async fn test_intercepted_action_counts() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("comm.send_email", "Send email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("comm.send_email", "Send email")
+        .side_effects(true)
+        .build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"
@@ -604,11 +723,8 @@ tests:
 async fn test_multiple_test_cases_reported_independently() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("data.fetch", "Fetch")
-            .read_only()
-            .build(),
-    ]);
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("data.fetch", "Fetch").read_only().build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"
@@ -728,7 +844,10 @@ tests:
     assert_eq!(roundtripped.tests[0].expectations.status.as_deref(), Some("completed"));
     assert_eq!(roundtripped.tests[0].expectations.steps_completed, vec!["start"]);
     assert_eq!(roundtripped.tests[0].expectations.steps_not_reached, vec!["never"]);
-    assert_eq!(*roundtripped.tests[0].expectations.intercepted_action_counts.get("tool_calls").unwrap(), 5);
+    assert_eq!(
+        *roundtripped.tests[0].expectations.intercepted_action_counts.get("tool_calls").unwrap(),
+        5
+    );
 
     assert_eq!(roundtripped.tests[1].name, "tc2");
     assert_eq!(roundtripped.tests[1].expectations.status.as_deref(), Some("failed"));
@@ -771,11 +890,8 @@ steps:
 async fn test_steps_not_reached_fails_when_reached() {
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("data.fetch", "Fetch")
-            .read_only()
-            .build(),
-    ]);
+    let tools =
+        make_tool_map(vec![ToolDefinitionBuilder::new("data.fetch", "Fetch").read_only().build()]);
     let engine = build_engine(store, executor, tools);
 
     let yaml = r#"

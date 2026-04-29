@@ -9,7 +9,6 @@ const BGE_REPO: &str = "BAAI/bge-small-en-v1.5";
 const BGE_FILES: &[(&str, &str)] =
     &[("onnx/model.onnx", "model.onnx"), ("tokenizer.json", "tokenizer.json")];
 
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
@@ -91,7 +90,6 @@ fn fetch_models() {
     println!();
     println!("Models ready at: {}", vendor.display());
 }
-
 
 fn build_installer(args: &[String]) {
     let target = parse_target_arg(args);
@@ -183,10 +181,8 @@ fn stage_vc_redist(dest: &Path, target: &str) -> bool {
         .build()
         .expect("failed to build HTTP client");
 
-    let resp = client
-        .get(url)
-        .send()
-        .unwrap_or_else(|e| panic!("failed to download vc_redist.exe: {e}"));
+    let resp =
+        client.get(url).send().unwrap_or_else(|e| panic!("failed to download vc_redist.exe: {e}"));
     if !resp.status().is_success() {
         panic!("HTTP {} downloading vc_redist.exe", resp.status());
     }
@@ -196,10 +192,7 @@ fn stage_vc_redist(dest: &Path, target: &str) -> bool {
     }
 
     fs::write(dest, &bytes).unwrap_or_else(|e| panic!("failed to write vc_redist.exe: {e}"));
-    println!(
-        "  vc_redist.exe downloaded ({:.1} MB)",
-        bytes.len() as f64 / 1_048_576.0
-    );
+    println!("  vc_redist.exe downloaded ({:.1} MB)", bytes.len() as f64 / 1_048_576.0);
     true
 }
 

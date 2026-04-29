@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use hive_classification::DataClass;
-use hive_contracts::{InteractionKind, InteractionResponsePayload, Persona, UserInteractionResponse};
+use hive_contracts::{
+    InteractionKind, InteractionResponsePayload, Persona, UserInteractionResponse,
+};
 use hive_tools::ToolResult;
 
 use super::interaction::UserInteractionGate;

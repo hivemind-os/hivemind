@@ -30,15 +30,13 @@ pub mod session;
 pub mod tool_bridge;
 pub mod wasm_executor;
 
-pub use executor::{
-    CodeExecutor, ExecutionResult, ExecutorConfig, ExecutorError, Language,
-};
+pub use executor::{CodeExecutor, ExecutionResult, ExecutorConfig, ExecutorError, Language};
 pub use session::{Session, SessionConfig, SessionRegistry, WasmRuntime};
-pub use wasm_executor::WasmExecutor;
 pub use tool_bridge::{
-    BridgedToolInfo, CodeActToolMode, ExecutionOptions, ToolCallHandler,
-    ToolCallRequest, ToolCallResponse, tool_id_to_python_name,
+    tool_id_to_python_name, BridgedToolInfo, CodeActToolMode, ExecutionOptions, ToolCallHandler,
+    ToolCallRequest, ToolCallResponse,
 };
+pub use wasm_executor::WasmExecutor;
 
 /// Resolved paths to the CPython WASI runtime.
 #[derive(Debug, Clone)]
@@ -90,17 +88,13 @@ pub fn resolve_python_wasm(hivemind_home: Option<&std::path::Path>) -> Option<Py
             return None;
         }
 
-        Some(PythonWasmPaths {
-            wasm_binary: wasm,
-            stdlib_dir: stdlib,
-        })
+        Some(PythonWasmPaths { wasm_binary: wasm, stdlib_dir: stdlib })
     };
 
     // 1. Environment variables (highest priority)
-    if let (Ok(wasm), Ok(stdlib)) = (
-        std::env::var("PYTHON_WASM_PATH"),
-        std::env::var("PYTHON_WASM_STDLIB"),
-    ) {
+    if let (Ok(wasm), Ok(stdlib)) =
+        (std::env::var("PYTHON_WASM_PATH"), std::env::var("PYTHON_WASM_STDLIB"))
+    {
         if let Some(paths) = check(PathBuf::from(&wasm), PathBuf::from(&stdlib)) {
             tracing::debug!("python.wasm resolved from env vars");
             return Some(paths);
@@ -161,8 +155,7 @@ pub fn resolve_python_wasm(hivemind_home: Option<&std::path::Path>) -> Option<Py
 const PYTHON_WASM_URL: &str = "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0-wasi-sdk-20.0.tar.gz";
 
 /// Expected SHA-256 digest of the tarball (lowercase hex).
-const PYTHON_WASM_SHA256: &str =
-    "6c1cddbb69ae09e87eee2906bdc70539bff5f2969818a6f8457d4e6a6eb67d4d";
+const PYTHON_WASM_SHA256: &str = "6c1cddbb69ae09e87eee2906bdc70539bff5f2969818a6f8457d4e6a6eb67d4d";
 
 /// Ensure the CPython WASI runtime is available, downloading it if necessary.
 ///
@@ -176,9 +169,7 @@ const PYTHON_WASM_SHA256: &str =
 ///
 /// Returns `Err` if the download fails or the extracted layout is invalid.
 /// Caller should degrade gracefully (CodeAct disabled) on error.
-pub fn ensure_python_wasm(
-    hivemind_home: &std::path::Path,
-) -> Result<PythonWasmPaths, String> {
+pub fn ensure_python_wasm(hivemind_home: &std::path::Path) -> Result<PythonWasmPaths, String> {
     use flate2::read::GzDecoder;
     use sha2::Digest;
     use tar::Archive;
@@ -205,15 +196,10 @@ pub fn ensure_python_wasm(
         .map_err(|e| format!("failed to download CPython WASI runtime: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!(
-            "failed to download CPython WASI runtime: HTTP {}",
-            resp.status()
-        ));
+        return Err(format!("failed to download CPython WASI runtime: HTTP {}", resp.status()));
     }
 
-    let bytes = resp
-        .bytes()
-        .map_err(|e| format!("failed to read response body: {e}"))?;
+    let bytes = resp.bytes().map_err(|e| format!("failed to read response body: {e}"))?;
 
     tracing::info!(
         size_mb = format!("{:.1}", bytes.len() as f64 / 1_048_576.0),
@@ -258,26 +244,19 @@ pub fn ensure_python_wasm(
 
     let bin_dir = final_dir.join("bin");
     let lib_dir = final_dir.join("lib");
-    std::fs::create_dir_all(&bin_dir)
-        .map_err(|e| format!("failed to create bin dir: {e}"))?;
-    std::fs::create_dir_all(&lib_dir)
-        .map_err(|e| format!("failed to create lib dir: {e}"))?;
+    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("failed to create bin dir: {e}"))?;
+    std::fs::create_dir_all(&lib_dir).map_err(|e| format!("failed to create lib dir: {e}"))?;
 
     // Find python*.wasm in extracted archive
     let extracted_bin = temp_dir.join("bin");
-    let wasm_file = find_python_wasm_sync(&extracted_bin).ok_or_else(|| {
-        "no python*.wasm found in extracted archive".to_string()
-    })?;
+    let wasm_file = find_python_wasm_sync(&extracted_bin)
+        .ok_or_else(|| "no python*.wasm found in extracted archive".to_string())?;
 
     std::fs::copy(&wasm_file, bin_dir.join("python.wasm"))
         .map_err(|e| format!("failed to copy python.wasm: {e}"))?;
 
     // Copy stdlib
-    let stdlib_src = temp_dir
-        .join("usr")
-        .join("local")
-        .join("lib")
-        .join("python3.12");
+    let stdlib_src = temp_dir.join("usr").join("local").join("lib").join("python3.12");
     if stdlib_src.exists() {
         copy_dir_all_sync(&stdlib_src, &lib_dir.join("python3.12"))
             .map_err(|e| format!("failed to copy stdlib: {e}"))?;
@@ -288,11 +267,7 @@ pub fn ensure_python_wasm(
     }
 
     // Copy python312.zip
-    let zip_src = temp_dir
-        .join("usr")
-        .join("local")
-        .join("lib")
-        .join("python312.zip");
+    let zip_src = temp_dir.join("usr").join("local").join("lib").join("python312.zip");
     if zip_src.exists() {
         std::fs::copy(&zip_src, lib_dir.join("python312.zip"))
             .map_err(|e| format!("failed to copy python312.zip: {e}"))?;
@@ -318,9 +293,8 @@ pub fn ensure_python_wasm(
     );
 
     // Resolve again to validate the installation
-    resolve_python_wasm(Some(hivemind_home)).ok_or_else(|| {
-        "CPython WASI runtime installed but validation failed".to_string()
-    })
+    resolve_python_wasm(Some(hivemind_home))
+        .ok_or_else(|| "CPython WASI runtime installed but validation failed".to_string())
 }
 
 /// Find the first python*.wasm file in a directory.
@@ -337,10 +311,7 @@ fn find_python_wasm_sync(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// Recursively copy a directory tree (blocking).
-fn copy_dir_all_sync(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-) -> Result<(), std::io::Error> {
+fn copy_dir_all_sync(src: &std::path::Path, dst: &std::path::Path) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;

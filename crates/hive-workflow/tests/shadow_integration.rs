@@ -26,10 +26,7 @@ async fn wait_for_terminal(store: &WorkflowStore, instance_id: i64) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!(
-        "instance {} did not reach terminal state in time",
-        instance_id
-    );
+    panic!("instance {} did not reach terminal state in time", instance_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -41,10 +38,7 @@ struct MockToolInfo {
 }
 
 impl ToolInfoProvider for MockToolInfo {
-    fn get_tool_definition(
-        &self,
-        tool_id: &str,
-    ) -> Option<hive_contracts::tools::ToolDefinition> {
+    fn get_tool_definition(&self, tool_id: &str) -> Option<hive_contracts::tools::ToolDefinition> {
         self.tools.get(tool_id).cloned()
     }
 }
@@ -77,10 +71,7 @@ impl StepExecutor for RecordingExecutor {
         arguments: Value,
         _ctx: &ExecutionContext,
     ) -> Result<Value, String> {
-        self.tool_calls
-            .lock()
-            .await
-            .push((tool_id.to_string(), arguments.clone()));
+        self.tool_calls.lock().await.push((tool_id.to_string(), arguments.clone()));
         Ok(json!({"echo": "real", "status": "ok", "count": 42}))
     }
 
@@ -95,10 +86,7 @@ impl StepExecutor for RecordingExecutor {
         _existing_agent_id: Option<&str>,
         _ctx: &ExecutionContext,
     ) -> Result<Value, String> {
-        self.agent_calls
-            .lock()
-            .await
-            .push((persona_id.to_string(), task.to_string()));
+        self.agent_calls.lock().await.push((persona_id.to_string(), task.to_string()));
         Ok(json!({"result": "agent_done"}))
     }
 
@@ -150,10 +138,7 @@ impl StepExecutor for RecordingExecutor {
         inputs: Value,
         _ctx: &ExecutionContext,
     ) -> Result<i64, String> {
-        self.workflow_launches
-            .lock()
-            .await
-            .push((name.to_string(), inputs));
+        self.workflow_launches.lock().await.push((name.to_string(), inputs));
         Ok(9999)
     }
 
@@ -231,11 +216,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("comm.send_email", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("comm.send_email", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -263,9 +246,7 @@ steps:
     assert_eq!(executor.tool_calls.lock().await.len(), 0);
 
     // Intercepted actions should be recorded
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "tool_call");
     assert_eq!(page.items[0].details["tool_id"], "comm.send_email");
@@ -333,9 +314,7 @@ steps:
     // but an intercepted action is still recorded for visibility.
     assert_eq!(executor.agent_calls.lock().await.len(), 1);
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "agent_invocation");
 
@@ -398,15 +377,10 @@ steps:
     let inst = store.get_instance(instance_id).unwrap().unwrap();
     assert_eq!(inst.status, WorkflowStatus::Completed);
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert!(page.total >= 1);
     let gate_action = page.items.iter().find(|a| a.kind == "event_gate_blocked");
-    assert!(
-        gate_action.is_some(),
-        "expected event_gate intercepted action"
-    );
+    assert!(gate_action.is_some(), "expected event_gate intercepted action");
 }
 
 // ===================================================================
@@ -465,9 +439,7 @@ steps:
 
     assert_eq!(executor.workflow_launches.lock().await.len(), 0);
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "workflow_launch");
     assert_eq!(page.items[0].details["workflow_name"], "child-workflow");
@@ -534,9 +506,7 @@ steps:
     let inst = store.get_instance(instance_id).unwrap().unwrap();
     assert_eq!(inst.status, WorkflowStatus::Completed);
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "scheduled_task");
 
@@ -586,12 +556,8 @@ steps:
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
     let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("contacts.list", "List Contacts")
-            .read_only()
-            .build(),
-        ToolDefinitionBuilder::new("drive.list_files", "List Files")
-            .read_only()
-            .build(),
+        ToolDefinitionBuilder::new("contacts.list", "List Contacts").read_only().build(),
+        ToolDefinitionBuilder::new("drive.list_files", "List Files").read_only().build(),
     ]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
@@ -658,11 +624,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("comm.send_email", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("comm.send_email", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -692,9 +656,7 @@ steps:
     assert_eq!(calls[0].0, "comm.send_email");
 
     // No intercepted actions
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 0);
 
     let summary = store.get_shadow_summary(instance_id).unwrap();
@@ -754,11 +716,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("comm.send_email", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("comm.send_email", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -783,9 +743,7 @@ steps:
 
     assert_eq!(executor.tool_calls.lock().await.len(), 0);
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 3);
     for action in &page.items {
         assert_eq!(action.kind, "tool_call");
@@ -855,12 +813,10 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("http.request", "HTTP Request")
-            .side_effects(true)
-            .open_world()
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("http.request", "HTTP Request")
+        .side_effects(true)
+        .open_world()
+        .build()]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
 
@@ -889,9 +845,7 @@ steps:
         inst.error
     );
 
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "tool_call");
 }
@@ -939,12 +893,8 @@ steps:
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
     let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("db.query", "Database Query")
-            .read_only()
-            .build(),
-        ToolDefinitionBuilder::new("comm.send_email", "Send Email")
-            .side_effects(true)
-            .build(),
+        ToolDefinitionBuilder::new("db.query", "Database Query").read_only().build(),
+        ToolDefinitionBuilder::new("comm.send_email", "Send Email").side_effects(true).build(),
     ]);
 
     let engine = build_engine(store.clone(), executor.clone(), tools);
@@ -974,9 +924,7 @@ steps:
     assert_eq!(calls[0].0, "db.query");
 
     // comm.send_email (side-effecting) should be intercepted
-    let page = store
-        .list_intercepted_actions(instance_id, 100, 0)
-        .unwrap();
+    let page = store.list_intercepted_actions(instance_id, 100, 0).unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].kind, "tool_call");
     assert_eq!(page.items[0].details["tool_id"], "comm.send_email");
@@ -1118,9 +1066,7 @@ steps:
     assert_eq!(normal_inst.execution_mode, ExecutionMode::Normal);
 
     // List instances should include execution_mode
-    let result = store
-        .list_instances(&InstanceFilter::default())
-        .unwrap();
+    let result = store.list_instances(&InstanceFilter::default()).unwrap();
     for inst in &result.items {
         if inst.id == shadow_id {
             assert_eq!(inst.execution_mode, ExecutionMode::Shadow);
@@ -1180,11 +1126,9 @@ steps:
     let definition: WorkflowDefinition = serde_yaml::from_str(yaml).unwrap();
     let store = Arc::new(WorkflowStore::in_memory().unwrap());
     let executor = Arc::new(RecordingExecutor::new());
-    let tools = make_tool_map(vec![
-        ToolDefinitionBuilder::new("comm.send_email", "Send Email")
-            .side_effects(true)
-            .build(),
-    ]);
+    let tools = make_tool_map(vec![ToolDefinitionBuilder::new("comm.send_email", "Send Email")
+        .side_effects(true)
+        .build()]);
 
     let engine = build_engine(store.clone(), executor, tools);
 
@@ -1204,21 +1148,15 @@ steps:
 
     wait_for_terminal(&store, instance_id).await;
 
-    let page1 = store
-        .list_intercepted_actions(instance_id, 3, 0)
-        .unwrap();
+    let page1 = store.list_intercepted_actions(instance_id, 3, 0).unwrap();
     assert_eq!(page1.items.len(), 3);
     assert_eq!(page1.total, 10);
 
-    let page2 = store
-        .list_intercepted_actions(instance_id, 3, 3)
-        .unwrap();
+    let page2 = store.list_intercepted_actions(instance_id, 3, 3).unwrap();
     assert_eq!(page2.items.len(), 3);
     assert_eq!(page2.total, 10);
 
-    let page4 = store
-        .list_intercepted_actions(instance_id, 3, 9)
-        .unwrap();
+    let page4 = store.list_intercepted_actions(instance_id, 3, 9).unwrap();
     assert_eq!(page4.items.len(), 1);
     assert_eq!(page4.total, 10);
 }

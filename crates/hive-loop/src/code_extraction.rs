@@ -49,10 +49,7 @@ pub fn extract_python_blocks(content: &str) -> Vec<CodeBlock> {
 
         // Extract the language tag (everything after the backticks on the same line)
         let tag_start = fence_start + fence_len;
-        let line_end = content[tag_start..]
-            .find('\n')
-            .map(|i| tag_start + i)
-            .unwrap_or(len);
+        let line_end = content[tag_start..].find('\n').map(|i| tag_start + i).unwrap_or(len);
         let language_tag = content[tag_start..line_end].trim().to_lowercase();
 
         // Find closing fence: matching or longer backtick run on its own line
@@ -111,7 +108,7 @@ fn find_fence_open(content: &str, from: usize) -> Option<(usize, usize)> {
     let len = bytes.len();
 
     while pos + 2 < len {
-        // Check for ``` 
+        // Check for ```
         if bytes[pos] == b'`' && bytes[pos + 1] == b'`' && bytes[pos + 2] == b'`' {
             // Verify it's at line start
             if pos == 0 || bytes[pos - 1] == b'\n' {
@@ -142,10 +139,7 @@ fn find_fence_close(content: &str, from: usize, fence_len: usize) -> Option<(usi
 
     while pos < len {
         let line_start = pos;
-        let line_end = content[pos..]
-            .find('\n')
-            .map(|i| pos + i)
-            .unwrap_or(len);
+        let line_end = content[pos..].find('\n').map(|i| pos + i).unwrap_or(len);
         let line = content[line_start..line_end].trim();
 
         // Closing fence must be at least fence_len backticks and nothing else

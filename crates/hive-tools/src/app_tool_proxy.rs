@@ -19,7 +19,10 @@ use crate::{BoxFuture, Tool, ToolError, ToolResult};
 /// This decouples AppToolProxy from the concrete UserInteractionGate type
 /// (which lives in hive-loop, a downstream crate).
 pub type InteractionRequestFn = Arc<
-    dyn Fn(String, InteractionKind) -> tokio::sync::oneshot::Receiver<hive_contracts::UserInteractionResponse>
+    dyn Fn(
+            String,
+            InteractionKind,
+        ) -> tokio::sync::oneshot::Receiver<hive_contracts::UserInteractionResponse>
         + Send
         + Sync,
 >;
@@ -126,15 +129,8 @@ impl Tool for AppToolProxy {
             match tokio::time::timeout(timeout, rx).await {
                 Ok(Ok(response)) => match response.payload {
                     InteractionResponsePayload::AppToolCallResult { content, is_error } => {
-                        let output = if is_error {
-                            json!({ "error": content })
-                        } else {
-                            content
-                        };
-                        Ok(ToolResult {
-                            output,
-                            data_class: DataClass::Internal,
-                        })
+                        let output = if is_error { json!({ "error": content }) } else { content };
+                        Ok(ToolResult { output, data_class: DataClass::Internal })
                     }
                     _ => Err(ToolError::ExecutionFailed(
                         "unexpected interaction response type".to_string(),
@@ -158,10 +154,7 @@ mod tests {
     use hive_contracts::UserInteractionResponse;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    fn make_proxy(
-        interaction_fn: InteractionRequestFn,
-        event_fn: AppToolEventFn,
-    ) -> AppToolProxy {
+    fn make_proxy(interaction_fn: InteractionRequestFn, event_fn: AppToolEventFn) -> AppToolProxy {
         AppToolProxy::new(
             "app.test1234.get_data".to_string(),
             "get_data".to_string(),

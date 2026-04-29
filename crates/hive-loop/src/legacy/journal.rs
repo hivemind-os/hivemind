@@ -196,12 +196,7 @@ mod tests {
         }
     }
 
-    fn tool_call_with_id(
-        id: &str,
-        input: &str,
-        output: &str,
-        call_id: &str,
-    ) -> JournalToolCall {
+    fn tool_call_with_id(id: &str, input: &str, output: &str, call_id: &str) -> JournalToolCall {
         JournalToolCall {
             tool_id: id.to_string(),
             input: input.to_string(),
@@ -212,7 +207,12 @@ mod tests {
     }
 
     fn tool_cycle_entry(turn: usize, calls: Vec<JournalToolCall>) -> JournalEntry {
-        JournalEntry { phase: JournalPhase::ToolCycle, turn, tool_calls: calls, assistant_content: None }
+        JournalEntry {
+            phase: JournalPhase::ToolCycle,
+            turn,
+            tool_calls: calls,
+            assistant_content: None,
+        }
     }
 
     #[test]
@@ -311,7 +311,9 @@ mod tests {
         let mut journal = ConversationJournal::default();
         // Fill to MAX_JOURNAL_ENTRIES with ToolCycle entries
         for i in 0..MAX_JOURNAL_ENTRIES {
-            journal.entries.push(tool_cycle_entry(i, vec![tool_call("t", "{}", &format!("out-{i}"))]));
+            journal
+                .entries
+                .push(tool_cycle_entry(i, vec![tool_call("t", "{}", &format!("out-{i}"))]));
         }
         assert_eq!(journal.entries.len(), MAX_JOURNAL_ENTRIES);
 
@@ -335,7 +337,9 @@ mod tests {
         });
         // Fill remaining with ToolCycle
         for i in 1..MAX_JOURNAL_ENTRIES {
-            journal.entries.push(tool_cycle_entry(i, vec![tool_call("t", "{}", &format!("out-{i}"))]));
+            journal
+                .entries
+                .push(tool_cycle_entry(i, vec![tool_call("t", "{}", &format!("out-{i}"))]));
         }
 
         // Add one more — should prune oldest ToolCycle (not the Plan)

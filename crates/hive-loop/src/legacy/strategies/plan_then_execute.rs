@@ -312,14 +312,24 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                         // ── Stall breaker (plan-and-execute) ─────────
                         for jtc in &journal_tool_calls {
                             if jtc.tool_id == "core.ask_user" {
-                                let question_prefix: String = serde_json::from_str::<serde_json::Value>(&jtc.input)
-                                    .ok()
-                                    .and_then(|v| v.get("question").and_then(|q| q.as_str()).map(|s| s.chars().take(120).collect()))
-                                    .unwrap_or_default();
-                                let answer: String = serde_json::from_str::<serde_json::Value>(&jtc.output)
-                                    .ok()
-                                    .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(String::from))
-                                    .unwrap_or_default();
+                                let question_prefix: String =
+                                    serde_json::from_str::<serde_json::Value>(&jtc.input)
+                                        .ok()
+                                        .and_then(|v| {
+                                            v.get("question")
+                                                .and_then(|q| q.as_str())
+                                                .map(|s| s.chars().take(120).collect())
+                                        })
+                                        .unwrap_or_default();
+                                let answer: String =
+                                    serde_json::from_str::<serde_json::Value>(&jtc.output)
+                                        .ok()
+                                        .and_then(|v| {
+                                            v.get("answer")
+                                                .and_then(|a| a.as_str())
+                                                .map(String::from)
+                                        })
+                                        .unwrap_or_default();
                                 ask_user_history.push((question_prefix, answer));
                             } else {
                                 ask_user_history.clear();
@@ -327,7 +337,9 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                         }
                         if ask_user_history.len() >= 2 {
                             let last = &ask_user_history[ask_user_history.len() - 1];
-                            let repeats = ask_user_history.iter().rev()
+                            let repeats = ask_user_history
+                                .iter()
+                                .rev()
                                 .take_while(|(q, a)| q == &last.0 && a == &last.1)
                                 .count();
                             if repeats >= 2 {

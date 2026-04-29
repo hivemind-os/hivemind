@@ -70,9 +70,7 @@ pub struct ExecutionOptions<'a> {
 
 impl<'a> Default for ExecutionOptions<'a> {
     fn default() -> Self {
-        Self {
-            tool_call_handler: None,
-        }
+        Self { tool_call_handler: None }
     }
 }
 
@@ -208,11 +206,41 @@ pub fn tool_id_to_python_name(id: &str) -> String {
 fn is_python_keyword(s: &str) -> bool {
     matches!(
         s,
-        "False" | "None" | "True" | "and" | "as" | "assert" | "async" | "await"
-            | "break" | "class" | "continue" | "def" | "del" | "elif" | "else"
-            | "except" | "finally" | "for" | "from" | "global" | "if" | "import"
-            | "in" | "is" | "lambda" | "nonlocal" | "not" | "or" | "pass"
-            | "raise" | "return" | "try" | "while" | "with" | "yield"
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
     )
 }
 
@@ -254,10 +282,7 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
         Some(p) if !p.is_empty() => p,
         _ => {
             // No properties or empty — use **kwargs fallback
-            return (
-                "**kwargs".to_string(),
-                "_args = dict(kwargs)".to_string(),
-            );
+            return ("**kwargs".to_string(), "_args = dict(kwargs)".to_string());
         }
     };
 
@@ -295,7 +320,8 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
             } else {
                 params.push(format!("{py_name}: {type_hint} = None"));
                 body_lines.push(format!(
-                    "    if {py_name} is not None: _args[\"{}\"] = {py_name}", escape_python_str(name)
+                    "    if {py_name} is not None: _args[\"{}\"] = {py_name}",
+                    escape_python_str(name)
                 ));
             }
         }
@@ -314,11 +340,8 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
 
     for (name, prop) in &sorted_props {
         let py_name = sanitize_param_name(name);
-        let type_hint = prop
-            .get("type")
-            .and_then(|t| t.as_str())
-            .map(json_type_to_python)
-            .unwrap_or("str");
+        let type_hint =
+            prop.get("type").and_then(|t| t.as_str()).map(json_type_to_python).unwrap_or("str");
 
         if required.contains(&name.as_str()) {
             required_params.push(format!("{py_name}: {type_hint}"));
@@ -326,7 +349,8 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
         } else {
             optional_params.push(format!("{py_name}: {type_hint} = None"));
             body_lines.push(format!(
-                "    if {py_name} is not None: _args[\"{}\"] = {py_name}", escape_python_str(name)
+                "    if {py_name} is not None: _args[\"{}\"] = {py_name}",
+                escape_python_str(name)
             ));
         }
     }
@@ -338,10 +362,8 @@ fn build_params_from_schema(schema: &Value) -> (String, String) {
 
 /// Sanitize a JSON property name into a valid Python parameter name.
 fn sanitize_param_name(name: &str) -> String {
-    let sanitized: String = name
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
-        .collect();
+    let sanitized: String =
+        name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect();
     if sanitized.is_empty() {
         return "_param".to_string();
     }
@@ -365,15 +387,9 @@ fn build_docstring(description: &str, schema: &Value) -> String {
         if !props.is_empty() {
             doc.push_str("\n\n    Args:");
             for (name, prop) in props {
-                let desc = prop
-                    .get("description")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("");
-                let short_desc = if desc.len() > 80 {
-                    format!("{}...", &desc[..80])
-                } else {
-                    desc.to_string()
-                };
+                let desc = prop.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                let short_desc =
+                    if desc.len() > 80 { format!("{}...", &desc[..80]) } else { desc.to_string() };
                 doc.push_str(&format!("\n        {name}: {short_desc}"));
             }
         }
@@ -460,10 +476,7 @@ mod tests {
     fn tool_id_to_name_basic() {
         assert_eq!(tool_id_to_python_name("filesystem.read"), "filesystem_read");
         assert_eq!(tool_id_to_python_name("core.ask_user"), "core_ask_user");
-        assert_eq!(
-            tool_id_to_python_name("mcp.github.search_code"),
-            "mcp_github_search_code"
-        );
+        assert_eq!(tool_id_to_python_name("mcp.github.search_code"), "mcp_github_search_code");
     }
 
     #[test]
@@ -518,18 +531,9 @@ mod tests {
     fn default_mode_classification() {
         assert_eq!(default_tool_mode("core.ask_user"), CodeActToolMode::Native);
         assert_eq!(default_tool_mode("workflow.start"), CodeActToolMode::Native);
-        assert_eq!(
-            default_tool_mode("filesystem.read"),
-            CodeActToolMode::Excluded
-        );
-        assert_eq!(
-            default_tool_mode("filesystem.search"),
-            CodeActToolMode::Bridged
-        );
-        assert_eq!(
-            default_tool_mode("mcp.github.search"),
-            CodeActToolMode::Bridged
-        );
+        assert_eq!(default_tool_mode("filesystem.read"), CodeActToolMode::Excluded);
+        assert_eq!(default_tool_mode("filesystem.search"), CodeActToolMode::Bridged);
+        assert_eq!(default_tool_mode("mcp.github.search"), CodeActToolMode::Bridged);
     }
 
     #[test]
@@ -544,7 +548,8 @@ mod tests {
     #[test]
     fn parse_tool_call_invalid() {
         assert!(parse_tool_call_line("normal output line").is_none());
-        assert!(parse_tool_call_line("__HIVEMIND_TOOL_CALL__bad json__HIVEMIND_TOOL_CALL_END__").is_none());
+        assert!(parse_tool_call_line("__HIVEMIND_TOOL_CALL__bad json__HIVEMIND_TOOL_CALL_END__")
+            .is_none());
     }
 
     #[test]

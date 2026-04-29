@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 use tokio::sync::Mutex;
-use wasmtime::{Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
+use wasmtime::{
+    Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline,
+};
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
@@ -25,10 +27,7 @@ const SENTINEL_ERROR: &str = "__HIVEMIND_EXEC_ERROR__";
 /// Generate a random 16-char hex nonce for sentinel uniqueness.
 fn generate_nonce() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     format!("{:016x}", seed)
 }
 
@@ -166,9 +165,8 @@ impl WasmExecutor {
 
         // Compile the CPython WASI module
         tracing::info!(path = %python_wasm_path.display(), "compiling CPython WASI module");
-        let module = Module::from_file(&engine, python_wasm_path).map_err(|e| {
-            ExecutorError::NotReady(format!("failed to compile python.wasm: {e}"))
-        })?;
+        let module = Module::from_file(&engine, python_wasm_path)
+            .map_err(|e| ExecutorError::NotReady(format!("failed to compile python.wasm: {e}")))?;
         let module = Arc::new(module);
         tracing::info!("CPython WASI module compiled successfully");
 
@@ -201,15 +199,7 @@ impl WasmExecutor {
     ) -> Self {
         let nonce = generate_nonce();
         let tmp_dir = std::env::temp_dir().join(format!("hivemind-wasm-{}", &nonce));
-        Self {
-            instance: Mutex::new(None),
-            config,
-            engine,
-            module,
-            stdlib_dir,
-            nonce,
-            tmp_dir,
-        }
+        Self { instance: Mutex::new(None), config, engine, module, stdlib_dir, nonce, tmp_dir }
     }
 
     /// Ensure the WASM instance is running, spawning if needed.
@@ -268,7 +258,8 @@ impl WasmExecutor {
         // Capture stderr into a shared buffer instead of inheriting.
         // If CPython crashes during init, we can report what went wrong.
         let (wasm_stderr_writer, wasm_stderr_reader) = tokio::io::duplex(8192);
-        let stderr_buf: Arc<tokio::sync::Mutex<String>> = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let stderr_buf: Arc<tokio::sync::Mutex<String>> =
+            Arc::new(tokio::sync::Mutex::new(String::new()));
         let stderr_buf_for_task = Arc::clone(&stderr_buf);
 
         // Spawn a task to drain stderr into the buffer
@@ -399,10 +390,9 @@ impl WasmExecutor {
             };
             return Err(ExecutorError::ExecutionFailed(detail));
         }
-        inst.stdin_writer
-            .flush()
-            .await
-            .map_err(|e| ExecutorError::ExecutionFailed(format!("failed to flush WASM stdin: {e}")))?;
+        inst.stdin_writer.flush().await.map_err(|e| {
+            ExecutorError::ExecutionFailed(format!("failed to flush WASM stdin: {e}"))
+        })?;
 
         // Start epoch ticker for CPU timeout
         let timeout_secs = self.config.execution_timeout_secs;
@@ -509,14 +499,13 @@ impl WasmExecutor {
                     }
                 };
                 let resp_json = tool_bridge::serialize_tool_response(&response);
-                inst.stdin_writer
-                    .write_all(format!("{resp_json}\n").as_bytes())
-                    .await
-                    .map_err(|e| {
+                inst.stdin_writer.write_all(format!("{resp_json}\n").as_bytes()).await.map_err(
+                    |e| {
                         ExecutorError::ExecutionFailed(format!(
                             "failed to write tool response: {e}"
                         ))
-                    })?;
+                    },
+                )?;
                 inst.stdin_writer.flush().await.map_err(|e| {
                     ExecutorError::ExecutionFailed(format!("failed to flush tool response: {e}"))
                 })?;
@@ -544,9 +533,7 @@ impl WasmExecutor {
 
             total_bytes += line.len();
             if total_bytes > max_output {
-                return Err(ExecutorError::OutputTooLarge {
-                    max_bytes: max_output,
-                });
+                return Err(ExecutorError::OutputTooLarge { max_bytes: max_output });
             }
 
             if in_stderr {
@@ -616,14 +603,10 @@ async fn run_wasm_instance(
     // We mount the *parent* directory (containing both the zip and the
     // version-specific subdirectory) at /usr/local/lib/ so CPython's
     // standard path resolution finds everything it needs.
-    let stdlib_parent = stdlib_dir
-        .parent()
-        .unwrap_or(stdlib_dir);
+    let stdlib_parent = stdlib_dir.parent().unwrap_or(stdlib_dir);
     wasi_builder
         .preopened_dir(stdlib_parent, "/usr/local/lib", DirPerms::READ, FilePerms::READ)
-        .map_err(|e| {
-            ExecutorError::NotReady(format!("failed to preopen stdlib dir: {e}"))
-        })?;
+        .map_err(|e| ExecutorError::NotReady(format!("failed to preopen stdlib dir: {e}")))?;
 
     // Preopen workspace directory (read-write) — this is the only writable
     // directory available to user code. All paths outside are inaccessible.
@@ -639,14 +622,11 @@ async fn run_wasm_instance(
     }
 
     // Preopen a scratch/tmp directory for Python's tempfile module
-    std::fs::create_dir_all(tmp_dir).map_err(|e| {
-        ExecutorError::NotReady(format!("failed to create tmp dir: {e}"))
-    })?;
+    std::fs::create_dir_all(tmp_dir)
+        .map_err(|e| ExecutorError::NotReady(format!("failed to create tmp dir: {e}")))?;
     wasi_builder
         .preopened_dir(tmp_dir, "/tmp", DirPerms::all(), FilePerms::all())
-        .map_err(|e| {
-            ExecutorError::NotReady(format!("failed to preopen tmp dir: {e}"))
-        })?;
+        .map_err(|e| ExecutorError::NotReady(format!("failed to preopen tmp dir: {e}")))?;
 
     // Pass args to CPython: python.wasm -c <wrapper_script>
     let wrapper = generate_python_wrapper(nonce);
@@ -667,14 +647,9 @@ async fn run_wasm_instance(
     let wasi_ctx = wasi_builder.build_p1();
 
     // Configure store with memory limits via wrapper state
-    let limits = StoreLimitsBuilder::new()
-        .memory_size(memory_limit)
-        .build();
+    let limits = StoreLimitsBuilder::new().memory_size(memory_limit).build();
 
-    let state = WasmState {
-        wasi: wasi_ctx,
-        limits,
-    };
+    let state = WasmState { wasi: wasi_ctx, limits };
 
     let mut store = Store::new(engine, state);
     store.limiter(|s| &mut s.limits);
@@ -684,24 +659,18 @@ async fn run_wasm_instance(
 
     // Link WASI Preview 1 functions
     let mut linker: Linker<WasmState> = Linker::new(engine);
-    preview1::add_to_linker_async(&mut linker, |s| &mut s.wasi).map_err(|e| {
-        ExecutorError::NotReady(format!("failed to link WASI functions: {e}"))
-    })?;
+    preview1::add_to_linker_async(&mut linker, |s| &mut s.wasi)
+        .map_err(|e| ExecutorError::NotReady(format!("failed to link WASI functions: {e}")))?;
 
     // Instantiate
-    let instance = linker
-        .instantiate_async(&mut store, module)
-        .await
-        .map_err(|e| {
-            ExecutorError::ExecutionFailed(format!("failed to instantiate WASM module: {e}"))
-        })?;
+    let instance = linker.instantiate_async(&mut store, module).await.map_err(|e| {
+        ExecutorError::ExecutionFailed(format!("failed to instantiate WASM module: {e}"))
+    })?;
 
     // Call _start (this runs the Python REPL loop until stdin closes)
     let start_func = instance
         .get_typed_func::<(), ()>(&mut store, "_start")
-        .map_err(|e| {
-            ExecutorError::ExecutionFailed(format!("_start function not found: {e}"))
-        })?;
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("_start function not found: {e}")))?;
 
     match start_func.call_async(&mut store, ()).await {
         Ok(()) => Ok(()),
@@ -819,10 +788,7 @@ mod tests {
             }
         };
 
-        let result = exec
-            .execute("print('hello from wasm')", Language::Python)
-            .await
-            .unwrap();
+        let result = exec.execute("print('hello from wasm')", Language::Python).await.unwrap();
         assert!(!result.is_error, "Execution error: {:?}", result);
         assert_eq!(result.stdout.trim(), "hello from wasm");
     }
@@ -855,10 +821,7 @@ mod tests {
             }
         };
 
-        let result = exec
-            .execute("raise ValueError('oops')", Language::Python)
-            .await
-            .unwrap();
+        let result = exec.execute("raise ValueError('oops')", Language::Python).await.unwrap();
         assert!(result.is_error);
         assert!(result.stderr.contains("ValueError"));
         assert!(result.stderr.contains("oops"));
@@ -979,14 +942,9 @@ print(data)
         let bridge_code = generate_bridge_code(&tools);
 
         let handler = MockHandler;
-        let options = ExecutionOptions {
-            tool_call_handler: Some(&handler),
-        };
+        let options = ExecutionOptions { tool_call_handler: Some(&handler) };
 
-        let r1 = exec
-            .execute_with_tools(&bridge_code, Language::Python, &options)
-            .await
-            .unwrap();
+        let r1 = exec.execute_with_tools(&bridge_code, Language::Python, &options).await.unwrap();
         assert!(!r1.is_error, "Bridge injection failed: {:?}", r1);
 
         let r2 = exec

@@ -452,8 +452,8 @@ pub(crate) async fn execute_tool_call(
     // and always pass through.  Read-only tools also pass through so the
     // agent can reason over real data.
     if context.security.shadow_mode {
-        let is_read_only = definition.annotations.read_only_hint == Some(true)
-            || !definition.side_effects;
+        let is_read_only =
+            definition.annotations.read_only_hint == Some(true) || !definition.side_effects;
         if !is_read_only {
             tracing::info!(
                 tool_id = %call.tool_id,
@@ -483,12 +483,8 @@ pub(crate) async fn execute_tool_call(
             // other hooks see the synthetic result.
             let mut result = result;
             for hook in middleware {
-                result = hook.after_tool_result(
-                    context,
-                    &call.tool_id,
-                    Some(&call.input),
-                    result,
-                )?;
+                result =
+                    hook.after_tool_result(context, &call.tool_id, Some(&call.input), result)?;
             }
             return Ok(result);
         }

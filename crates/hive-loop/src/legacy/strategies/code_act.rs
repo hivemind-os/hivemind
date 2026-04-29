@@ -14,7 +14,9 @@ use super::super::parsing::ToolCall;
 use super::super::strategy::{LoopMiddleware, LoopStrategy};
 use super::super::streaming::StreamingToolCallFilter;
 use super::super::tool_execution::{execute_tool_batch, execute_tool_call};
-use super::super::types::{BoxFuture, CodeExecutionPhase, LoopContext, LoopError, LoopEvent, LoopResult};
+use super::super::types::{
+    BoxFuture, CodeExecutionPhase, LoopContext, LoopError, LoopEvent, LoopResult,
+};
 use super::super::{model_router_error_to_loop_error, simple_model_error};
 
 // ── BridgedToolCallHandler: dispatches tool calls from Python to the ToolRegistry ──
@@ -40,13 +42,10 @@ impl hive_code_executor::ToolCallHandler for BridgedToolCallHandler {
         &self,
         request: hive_code_executor::ToolCallRequest,
     ) -> hive_code_executor::ToolCallResponse {
-        let call = ToolCall {
-            tool_id: request.tool_id.clone(),
-            input: request.args.clone(),
-        };
+        let call = ToolCall { tool_id: request.tool_id.clone(), input: request.args.clone() };
 
-        let input_str = serde_json::to_string(&request.args)
-            .unwrap_or_else(|_| "<unserializable>".to_string());
+        let input_str =
+            serde_json::to_string(&request.args).unwrap_or_else(|_| "<unserializable>".to_string());
 
         // Emit ToolCallStart so the frontend can track bridged tool calls.
         if let Some(ref tx) = self.event_tx {
@@ -140,8 +139,8 @@ impl LoopStrategy for CodeActStrategy {
             use crate::code_act_prompt::build_code_act_instructions;
             use crate::code_extraction::extract_python_blocks;
             use hive_code_executor::{
-                BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions,
-                ExecutorConfig, Language, WasmExecutor,
+                BridgedToolInfo, CodeActToolMode, CodeExecutor, ExecutionOptions, ExecutorConfig,
+                Language, WasmExecutor,
             };
 
             // ── Route the model ──────────────────────────────────────
@@ -221,8 +220,13 @@ impl LoopStrategy for CodeActStrategy {
                 native_count = native_tool_ids.len(),
                 "CodeAct: building system prompt supplement"
             );
-            let code_act_instructions =
-                build_code_act_instructions(&bridged_tools, &native_tool_ids, has_persistent_session, ca_cfg.allow_network, workspace_str.as_deref());
+            let code_act_instructions = build_code_act_instructions(
+                &bridged_tools,
+                &native_tool_ids,
+                has_persistent_session,
+                ca_cfg.allow_network,
+                workspace_str.as_deref(),
+            );
             tracing::debug!(
                 instructions_len = code_act_instructions.len(),
                 has_network_section = code_act_instructions.contains("Network Access"),
@@ -245,13 +249,10 @@ impl LoopStrategy for CodeActStrategy {
                 event_tx: event_tx.clone(),
                 interaction_gate: interaction_gate.clone(),
             };
-            let exec_options = ExecutionOptions {
-                tool_call_handler: Some(&tool_handler),
-            };
+            let exec_options = ExecutionOptions { tool_call_handler: Some(&tool_handler) };
 
             // Bridge code is generated once but injected lazily when executor is first created
-            let bridge_code =
-                hive_code_executor::tool_bridge::generate_bridge_code(&bridged_tools);
+            let bridge_code = hive_code_executor::tool_bridge::generate_bridge_code(&bridged_tools);
 
             // ── Main loop ────────────────────────────────────────────
             let mut prompt = context.conversation.prompt.clone();
@@ -268,15 +269,19 @@ impl LoopStrategy for CodeActStrategy {
                     let mut messages = context.conversation.history.clone();
                     // Inject CodeAct instructions into the system message.
                     if let Some(sys_msg) = messages.iter_mut().find(|m| m.role == "system") {
-                        sys_msg.content = format!("{}\n\n{}", sys_msg.content, code_act_instructions);
+                        sys_msg.content =
+                            format!("{}\n\n{}", sys_msg.content, code_act_instructions);
                     } else {
                         // No system message in history — add one with just the instructions.
-                        messages.insert(0, CompletionMessage {
-                            role: "system".into(),
-                            content: code_act_instructions.clone(),
-                            content_parts: vec![],
-                            blocks: vec![],
-                        });
+                        messages.insert(
+                            0,
+                            CompletionMessage {
+                                role: "system".into(),
+                                content: code_act_instructions.clone(),
+                                content_parts: vec![],
+                                blocks: vec![],
+                            },
+                        );
                     }
                     let user_msg = CompletionMessage {
                         role: "user".into(),
@@ -300,14 +305,18 @@ impl LoopStrategy for CodeActStrategy {
                     // to the system message in history.
                     let mut history = context.conversation.history.clone();
                     if let Some(sys_msg) = history.iter_mut().find(|m| m.role == "system") {
-                        sys_msg.content = format!("{}\n\n{}", sys_msg.content, code_act_instructions);
+                        sys_msg.content =
+                            format!("{}\n\n{}", sys_msg.content, code_act_instructions);
                     } else {
-                        history.insert(0, CompletionMessage {
-                            role: "system".into(),
-                            content: code_act_instructions.clone(),
-                            content_parts: vec![],
-                            blocks: vec![],
-                        });
+                        history.insert(
+                            0,
+                            CompletionMessage {
+                                role: "system".into(),
+                                content: code_act_instructions.clone(),
+                                content_parts: vec![],
+                                blocks: vec![],
+                            },
+                        );
                     }
                     CompletionRequest {
                         prompt: prompt.clone(),
@@ -332,7 +341,9 @@ impl LoopStrategy for CodeActStrategy {
                         provider_id: decision_clone.selected.provider_id.clone(),
                         model: decision_clone.selected.model.clone(),
                         tool_result_counts: HashMap::new(),
-                        estimated_tokens: Some(crate::token_budget::estimate_request_tokens(&request) as u32),
+                        estimated_tokens: Some(crate::token_budget::estimate_request_tokens(
+                            &request,
+                        ) as u32),
                     });
 
                     let retry_cb = |info: &RetryInfo| {
@@ -373,37 +384,32 @@ impl LoopStrategy for CodeActStrategy {
                     tokio::pin!(stream);
                     let stream_cancelled;
                     loop {
-                        let chunk_result =
-                            if let Some(ref token) = context.cancellation_token {
-                                tokio::select! {
-                                    biased;
-                                    _ = token.cancelled() => {
-                                        stream_cancelled = true;
-                                        break;
-                                    }
-                                    chunk = stream.next() => chunk,
+                        let chunk_result = if let Some(ref token) = context.cancellation_token {
+                            tokio::select! {
+                                biased;
+                                _ = token.cancelled() => {
+                                    stream_cancelled = true;
+                                    break;
                                 }
-                            } else {
-                                stream.next().await
-                            };
+                                chunk = stream.next() => chunk,
+                            }
+                        } else {
+                            stream.next().await
+                        };
                         match chunk_result {
                             Some(Ok(chunk)) => {
                                 if !chunk.delta.is_empty() {
                                     content.push_str(&chunk.delta);
                                     let visible = token_filter.feed(&chunk.delta);
                                     if !visible.is_empty() {
-                                        let _ = tx.try_send(LoopEvent::Token {
-                                            delta: visible,
-                                        });
+                                        let _ = tx.try_send(LoopEvent::Token { delta: visible });
                                     }
                                 }
                                 if !chunk.tool_calls.is_empty() {
                                     streamed_tool_calls.extend(chunk.tool_calls);
                                 }
                             }
-                            Some(Err(e)) => {
-                                return Err(simple_model_error(format!("{:#}", e)))
-                            }
+                            Some(Err(e)) => return Err(simple_model_error(format!("{:#}", e))),
                             None => {
                                 stream_cancelled = false;
                                 break;
@@ -541,7 +547,9 @@ impl LoopStrategy for CodeActStrategy {
                         let session = registry
                             .get_or_create(&session_id, workspace_str.as_deref())
                             .await
-                            .map_err(|e| simple_model_error(format!("failed to get code session: {e}")))?;
+                            .map_err(|e| {
+                                simple_model_error(format!("failed to get code session: {e}"))
+                            })?;
                         session.executor_arc()
                     } else {
                         let exec_config = ExecutorConfig {
@@ -554,12 +562,20 @@ impl LoopStrategy for CodeActStrategy {
                         let wasm_paths = hive_code_executor::resolve_python_wasm(None);
                         match wasm_paths {
                             Some(paths) => {
-                                let e = WasmExecutor::new(exec_config, &paths.wasm_binary, &paths.stdlib_dir)
-                                    .await
-                                    .map_err(|e| {
-                                        simple_model_error(format!("failed to start WASM executor: {e}"))
-                                    })?;
-                                tracing::info!("CodeAct: using WASM-sandboxed Python executor (one-shot)");
+                                let e = WasmExecutor::new(
+                                    exec_config,
+                                    &paths.wasm_binary,
+                                    &paths.stdlib_dir,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    simple_model_error(format!(
+                                        "failed to start WASM executor: {e}"
+                                    ))
+                                })?;
+                                tracing::info!(
+                                    "CodeAct: using WASM-sandboxed Python executor (one-shot)"
+                                );
                                 Arc::new(e) as Arc<dyn CodeExecutor>
                             }
                             None => {
@@ -600,7 +616,11 @@ impl LoopStrategy for CodeActStrategy {
                             // Re-inject bridge code after recovery
                             if !bridge_code.trim().is_empty() {
                                 match exec
-                                    .execute_with_tools(&bridge_code, Language::Python, &exec_options)
+                                    .execute_with_tools(
+                                        &bridge_code,
+                                        Language::Python,
+                                        &exec_options,
+                                    )
                                     .await
                                 {
                                     Ok(r) if r.is_error => {
@@ -610,7 +630,9 @@ impl LoopStrategy for CodeActStrategy {
                                         tracing::error!(error = %e, "bridge re-init failed after recovery");
                                     }
                                     _ => {
-                                        tracing::info!("CodeAct executor recovered and bridge re-initialized");
+                                        tracing::info!(
+                                            "CodeAct executor recovered and bridge re-initialized"
+                                        );
                                     }
                                 }
                             }
@@ -657,15 +679,11 @@ impl LoopStrategy for CodeActStrategy {
                                 }
 
                                 if result.is_error {
-                                    observations.push(format!(
-                                        "[Code Execution Error]\n{}",
-                                        observation
-                                    ));
+                                    observations
+                                        .push(format!("[Code Execution Error]\n{}", observation));
                                 } else {
-                                    observations.push(format!(
-                                        "[Code Execution Output]\n{}",
-                                        observation
-                                    ));
+                                    observations
+                                        .push(format!("[Code Execution Output]\n{}", observation));
                                 }
                             }
                             Err(e) => {
@@ -710,16 +728,20 @@ impl LoopStrategy for CodeActStrategy {
 
                 // ── Record in conversation journal for mid-task resume ──
                 if let Some(ref journal) = context.conversation.conversation_journal {
-                    let journal_calls: Vec<JournalToolCall> = code_blocks.iter().enumerate().map(|(i, b)| {
-                        let output = observations.get(i).cloned().unwrap_or_default();
-                        JournalToolCall {
-                            tool_id: "code_execution".to_string(),
-                            input: b.code.clone(),
-                            output,
-                            tool_call_id: None,
-                            is_error: false,
-                        }
-                    }).collect();
+                    let journal_calls: Vec<JournalToolCall> = code_blocks
+                        .iter()
+                        .enumerate()
+                        .map(|(i, b)| {
+                            let output = observations.get(i).cloned().unwrap_or_default();
+                            JournalToolCall {
+                                tool_id: "code_execution".to_string(),
+                                input: b.code.clone(),
+                                output,
+                                tool_call_id: None,
+                                is_error: false,
+                            }
+                        })
+                        .collect();
                     let mut j = journal.lock();
                     j.record(JournalEntry {
                         phase: JournalPhase::CodeExecution,
@@ -734,9 +756,8 @@ impl LoopStrategy for CodeActStrategy {
                     // native tool calls so the model sees what it called.
                     let mut assistant_blocks = Vec::new();
                     if !response.content.is_empty() {
-                        assistant_blocks.push(MessageBlock::Text {
-                            text: response.content.clone(),
-                        });
+                        assistant_blocks
+                            .push(MessageBlock::Text { text: response.content.clone() });
                     }
 
                     // Attach ToolUse blocks for each native tool call, matching
@@ -774,8 +795,7 @@ impl LoopStrategy for CodeActStrategy {
                     // Push structured tool result messages for native calls.
                     for jtc in &native_journal_with_ids {
                         if let Some(ref call_id) = jtc.tool_call_id {
-                            let safe_output =
-                                prompt_sanitize::escape_prompt_tags(&jtc.output);
+                            let safe_output = prompt_sanitize::escape_prompt_tags(&jtc.output);
                             tool_history.push(CompletionMessage {
                                 role: "tool".into(),
                                 content: safe_output.clone(),

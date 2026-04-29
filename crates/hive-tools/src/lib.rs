@@ -285,7 +285,8 @@ impl ToolRegistry {
     /// Remove all tools whose IDs start with the given prefix.
     /// Returns the number of tools removed.
     pub fn unregister_by_prefix(&mut self, prefix: &str) -> usize {
-        let ids: Vec<String> = self.tools.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        let ids: Vec<String> =
+            self.tools.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
         let count = ids.len();
         for id in ids {
             self.tools.remove(&id);
@@ -4124,8 +4125,8 @@ mod tests {
         struct EmptyTool;
         impl Tool for EmptyTool {
             fn definition(&self) -> &ToolDefinition {
-                static DEF: std::sync::LazyLock<ToolDefinition> = std::sync::LazyLock::new(|| {
-                    ToolDefinition {
+                static DEF: std::sync::LazyLock<ToolDefinition> =
+                    std::sync::LazyLock::new(|| ToolDefinition {
                         id: "".to_string(),
                         name: "".to_string(),
                         description: "".to_string(),
@@ -4141,11 +4142,13 @@ mod tests {
                             idempotent_hint: None,
                             open_world_hint: None,
                         },
-                    }
-                });
+                    });
                 &DEF
             }
-            fn execute(&self, _: serde_json::Value) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
+            fn execute(
+                &self,
+                _: serde_json::Value,
+            ) -> BoxFuture<'_, Result<ToolResult, ToolError>> {
                 Box::pin(async { Err(ToolError::ExecutionFailed("not impl".into())) })
             }
         }

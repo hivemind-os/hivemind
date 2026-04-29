@@ -347,8 +347,7 @@ Let me know if you need anything else."#;
 
     #[test]
     fn test_unicode_in_arguments() {
-        let input =
-            r#"<tool_call>{"tool": "core.echo", "input": {"value": "こんにちは世界 🌍"}}</tool_call>"#;
+        let input = r#"<tool_call>{"tool": "core.echo", "input": {"value": "こんにちは世界 🌍"}}</tool_call>"#;
         let call = parse_tool_call(input).unwrap();
         assert_eq!(call.tool_id, "core.echo");
         assert_eq!(call.input["value"], "こんにちは世界 🌍");

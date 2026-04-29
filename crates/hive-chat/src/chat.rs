@@ -979,7 +979,7 @@ pub(crate) fn agent_spec_from_persona(persona: &Persona) -> AgentSpec {
         tool_limits: None,
         persona_id: Some(persona.id.clone()),
         workflow_managed: false,
-                shadow_mode: false,
+        shadow_mode: false,
     }
 }
 
@@ -1642,7 +1642,8 @@ impl ChatService {
                                 );
                                 if attempt < MAX_ATTEMPTS {
                                     // Exponential backoff: 5s, 15s
-                                    let delay = std::time::Duration::from_secs(5 * 3u64.pow(attempt - 1));
+                                    let delay =
+                                        std::time::Duration::from_secs(5 * 3u64.pow(attempt - 1));
                                     std::thread::sleep(delay);
                                 }
                             }
@@ -2942,7 +2943,8 @@ impl ChatService {
             session_registry: (**self.code_session_registry.load()).clone(),
             preempt_signal: None,
             cancellation_token: None,
-        };        match self.loop_executor.call_tool(&context, tool_id, input).await {
+        };
+        match self.loop_executor.call_tool(&context, tool_id, input).await {
             Ok(result) => {
                 if let Err(e) = self.audit.append(NewAuditEntry::new(
                     "tools",
@@ -3829,9 +3831,9 @@ impl ChatService {
         tools: Vec<AppToolRegistration>,
     ) -> Result<(), ChatServiceError> {
         let mut sessions = self.sessions.write().await;
-        let record = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        let record = sessions.get_mut(session_id).ok_or_else(|| {
+            ChatServiceError::SessionNotFound { session_id: session_id.to_string() }
+        })?;
         record.app_tools.insert(app_instance_id.to_string(), tools);
         Ok(())
     }
@@ -3855,9 +3857,9 @@ impl ChatService {
         session_id: &str,
     ) -> Result<Arc<UserInteractionGate>, ChatServiceError> {
         let sessions = self.sessions.read().await;
-        let record = sessions
-            .get(session_id)
-            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        let record = sessions.get(session_id).ok_or_else(|| ChatServiceError::SessionNotFound {
+            session_id: session_id.to_string(),
+        })?;
         Ok(Arc::clone(&record.interaction_gate))
     }
 
@@ -3867,9 +3869,9 @@ impl ChatService {
         session_id: &str,
     ) -> Result<Vec<(String, Vec<AppToolRegistration>)>, ChatServiceError> {
         let sessions = self.sessions.read().await;
-        let record = sessions
-            .get(session_id)
-            .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })?;
+        let record = sessions.get(session_id).ok_or_else(|| ChatServiceError::SessionNotFound {
+            session_id: session_id.to_string(),
+        })?;
         Ok(record.app_tools.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 
@@ -6504,8 +6506,7 @@ impl ChatService {
                                 let interaction_fn: hive_tools::InteractionRequestFn =
                                     Arc::new(move |req_id, kind| gate.create_request(req_id, kind));
                                 let event_fn: hive_tools::AppToolEventFn = Arc::new(move |evt| {
-                                    let payload =
-                                        serde_json::to_value(&evt).unwrap_or_default();
+                                    let payload = serde_json::to_value(&evt).unwrap_or_default();
                                     let _ = bus.publish(
                                         format!("mcp.app-tool.call-requested.{}", sid2),
                                         "app-tool-proxy",
@@ -6575,7 +6576,7 @@ impl ChatService {
                     // session even if no sensitive file has been touched.
                     effective_data_class: Arc::new(AtomicU8::new(DataClass::Public.to_i64() as u8)),
                     connector_service: self.connector_service.clone(),
-                shadow_mode: false,
+                    shadow_mode: false,
                 },
                 tools_ctx: ToolsContext {
                     tools: session_tools,
@@ -6591,7 +6592,11 @@ impl ChatService {
                     personas,
                     current_agent_id: None,
                     parent_agent_id: None,
-                    workspace_path: if workspace_path.is_empty() { None } else { Some(PathBuf::from(&workspace_path)) },
+                    workspace_path: if workspace_path.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(&workspace_path))
+                    },
                     keep_alive: false,
                     session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
@@ -8757,7 +8762,12 @@ fn build_conversation_history(messages: &[ChatMessage]) -> Vec<CompletionMessage
             ChatMessageRole::Notification | ChatMessageRole::System => continue,
         };
         let content_parts = build_content_parts(&content, &msg.attachments);
-        history.push(CompletionMessage { role: role.to_string(), content, content_parts, blocks: vec![] });
+        history.push(CompletionMessage {
+            role: role.to_string(),
+            content,
+            content_parts,
+            blocks: vec![],
+        });
         total_chars += msg.content.len();
     }
 
@@ -10246,7 +10256,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
-                shadow_mode: false,
+                    shadow_mode: false,
                 },
                 None,
                 None,
@@ -11928,10 +11938,8 @@ mod tests {
             .expect("create session");
 
         // Spawn an agent via the supervisor.
-        let supervisor = service
-            .get_or_create_supervisor(&session.id)
-            .await
-            .expect("create supervisor");
+        let supervisor =
+            service.get_or_create_supervisor(&session.id).await.expect("create supervisor");
         let agent_id = supervisor
             .spawn_agent(
                 AgentSpec {
@@ -11954,7 +11962,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
-                shadow_mode: false,
+                    shadow_mode: false,
                 },
                 None,
                 None,
@@ -11986,8 +11994,15 @@ mod tests {
             .get_or_create_supervisor(&session.id)
             .await
             .expect("get supervisor after register");
-        assert!(Arc::ptr_eq(&supervisor, &supervisor_after), "supervisor must not be replaced on register");
-        assert_eq!(supervisor_after.get_all_agents().len(), 1, "agent must survive app tool registration");
+        assert!(
+            Arc::ptr_eq(&supervisor, &supervisor_after),
+            "supervisor must not be replaced on register"
+        );
+        assert_eq!(
+            supervisor_after.get_all_agents().len(),
+            1,
+            "agent must survive app tool registration"
+        );
         assert_eq!(supervisor_after.get_all_agents()[0].agent_id, agent_id);
 
         // Unregister app tools — must also NOT drop the supervisor or agents.
@@ -12000,8 +12015,15 @@ mod tests {
             .get_or_create_supervisor(&session.id)
             .await
             .expect("get supervisor after unregister");
-        assert!(Arc::ptr_eq(&supervisor, &supervisor_final), "supervisor must not be replaced on unregister");
-        assert_eq!(supervisor_final.get_all_agents().len(), 1, "agent must survive app tool unregistration");
+        assert!(
+            Arc::ptr_eq(&supervisor, &supervisor_final),
+            "supervisor must not be replaced on unregister"
+        );
+        assert_eq!(
+            supervisor_final.get_all_agents().len(),
+            1,
+            "agent must survive app tool unregistration"
+        );
 
         supervisor.kill_all().await.expect("cleanup");
     }
@@ -12020,10 +12042,7 @@ mod tests {
             .expect("create session");
 
         // Subscribe to the broadcast stream before modifying state.
-        let mut rx = service
-            .subscribe_stream(&session.id)
-            .await
-            .expect("subscribe stream");
+        let mut rx = service.subscribe_stream(&session.id).await.expect("subscribe stream");
 
         // Simulate the session being in "processing" + Running state with
         // an empty queue — this is the state right after finish_message()

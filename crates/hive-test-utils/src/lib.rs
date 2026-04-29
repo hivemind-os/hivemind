@@ -16,8 +16,8 @@ use std::time::Duration;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockCall {

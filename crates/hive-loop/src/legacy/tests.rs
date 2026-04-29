@@ -6,8 +6,8 @@ use hive_contracts::{
     ToolExecutionMode, ToolLimitsConfig, UserInteractionResponse, WorkspaceClassification,
 };
 use hive_model::{
-    Capability, CompletionRequest, CompletionResponse, ModelProvider, ModelRouter,
-    ModelSelection, ProviderDescriptor,
+    Capability, CompletionRequest, CompletionResponse, ModelProvider, ModelRouter, ModelSelection,
+    ProviderDescriptor,
 };
 use hive_tools::{
     CalculatorTool, FileSystemListTool, FileSystemReadTool, KillAgentTool, ListAgentsTool,
@@ -88,14 +88,11 @@ impl AgentOrchestrator for MockAgentOrchestrator {
 
     fn list_agents(
         &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String, String, String, Option<String>)>, String>>
-    {
+    ) -> BoxFuture<'_, Result<Vec<(String, String, String, String, Option<String>)>, String>> {
         let spawned = self.spawned.lock().unwrap();
         let agents: Vec<_> = spawned
             .iter()
-            .map(|(id, _, _)| {
-                (id.clone(), id.clone(), String::new(), "Running".to_string(), None)
-            })
+            .map(|(id, _, _)| (id.clone(), id.clone(), String::new(), "Running".to_string(), None))
             .collect();
         Box::pin(async move { Ok(agents) })
     }
@@ -129,10 +126,7 @@ impl AgentOrchestrator for MockAgentOrchestrator {
         Box::pin(async move { Ok(()) })
     }
 
-    fn get_agent_parent(
-        &self,
-        agent_id: String,
-    ) -> BoxFuture<'_, Result<Option<String>, String>> {
+    fn get_agent_parent(&self, agent_id: String) -> BoxFuture<'_, Result<Option<String>, String>> {
         // The test context sets current_agent_id = "system/general" with
         // parent_agent_id = "parent-1". Return matching relationships so
         // check_agent_family access control passes.
@@ -172,9 +166,7 @@ async fn execute_tool_call_intercepts_agent_orchestration_tools() {
     registry.register(Arc::new(SpawnAgentTool::default())).expect("register spawn tool");
     registry.register(Arc::new(SignalAgentTool::default())).expect("register signal tool");
     registry.register(Arc::new(ListAgentsTool::default())).expect("register list tool");
-    registry
-        .register(Arc::new(ListPersonasTool::default()))
-        .expect("register list personas tool");
+    registry.register(Arc::new(ListPersonasTool::default())).expect("register list personas tool");
     registry.register(Arc::new(KillAgentTool::default())).expect("register kill tool");
 
     let orchestrator = Arc::new(MockAgentOrchestrator::default());
@@ -770,10 +762,7 @@ async fn execute_tool_call_applies_workspace_classification_to_file_reads() {
 
     let result = execute_tool_call(
         &context,
-        ToolCall {
-            tool_id: "filesystem.read".to_string(),
-            input: json!({ "path": "secret.txt" }),
-        },
+        ToolCall { tool_id: "filesystem.read".to_string(), input: json!({ "path": "secret.txt" }) },
         &[classification_mw],
         None,
         None,
@@ -799,8 +788,7 @@ async fn effective_data_class_only_escalates_from_classified_file_reads() {
         std::env::temp_dir().join(format!("hive-loop-class-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace_root).expect("create temp workspace");
     std::fs::write(workspace_root.join("public.txt"), "hello world").expect("write public");
-    std::fs::write(workspace_root.join("internal.txt"), "secret stuff")
-        .expect("write internal");
+    std::fs::write(workspace_root.join("internal.txt"), "secret stuff").expect("write internal");
 
     let mut registry = ToolRegistry::new();
     registry
@@ -984,10 +972,7 @@ async fn send_public_file_through_public_connector_is_not_blocked() {
             _input: Value,
         ) -> hive_tools::BoxFuture<'_, Result<ToolResult, hive_tools::ToolError>> {
             Box::pin(async {
-                Ok(ToolResult {
-                    output: json!({"status": "sent"}),
-                    data_class: DataClass::Public,
-                })
+                Ok(ToolResult { output: json!({"status": "sent"}), data_class: DataClass::Public })
             })
         }
     }
@@ -996,8 +981,7 @@ async fn send_public_file_through_public_connector_is_not_blocked() {
         std::env::temp_dir().join(format!("hive-loop-e2e-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace_root).expect("create workspace");
     std::fs::write(workspace_root.join("public.txt"), "hello world").expect("write public");
-    std::fs::write(workspace_root.join("internal.txt"), "secret stuff")
-        .expect("write internal");
+    std::fs::write(workspace_root.join("internal.txt"), "secret stuff").expect("write internal");
 
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(FileSystemReadTool::new(workspace_root.clone()))).unwrap();
@@ -1083,10 +1067,7 @@ async fn send_public_file_through_public_connector_is_not_blocked() {
 
     // 2. Agent reads public.txt
     let outcome = run_single_tool_call(
-        &ToolCall {
-            tool_id: "filesystem.read".to_string(),
-            input: json!({"path": "public.txt"}),
-        },
+        &ToolCall { tool_id: "filesystem.read".to_string(), input: json!({"path": "public.txt"}) },
         &context,
         mw,
         None,
@@ -1298,10 +1279,7 @@ async fn default_workspace_classification_does_not_taint_session() {
 
     // Read a file with no override — should resolve to workspace default (Internal)
     let outcome = run_single_tool_call(
-        &ToolCall {
-            tool_id: "filesystem.read".to_string(),
-            input: json!({"path": "readme.txt"}),
-        },
+        &ToolCall { tool_id: "filesystem.read".to_string(), input: json!({"path": "readme.txt"}) },
         &context,
         mw,
         None,
@@ -1383,7 +1361,6 @@ fn parse_plan_parses_all_steps() {
     // parse_plan returns all parsed steps; truncation to MAX_PLAN_STEPS happens in run()
     assert_eq!(steps.len(), 15);
 }
-
 
 fn make_batch_context(mode: ToolExecutionMode) -> LoopContext {
     let mut registry = ToolRegistry::new();
@@ -1552,10 +1529,7 @@ async fn bare_email_deny_rule_blocks_comm_send() {
             _input: Value,
         ) -> hive_tools::BoxFuture<'_, Result<ToolResult, hive_tools::ToolError>> {
             Box::pin(async {
-                Ok(ToolResult {
-                    output: json!({"status": "sent"}),
-                    data_class: DataClass::Public,
-                })
+                Ok(ToolResult { output: json!({"status": "sent"}), data_class: DataClass::Public })
             })
         }
     }
@@ -1719,10 +1693,7 @@ async fn qualified_comm_deny_rule_blocks_comm_send() {
             _input: Value,
         ) -> hive_tools::BoxFuture<'_, Result<ToolResult, hive_tools::ToolError>> {
             Box::pin(async {
-                Ok(ToolResult {
-                    output: json!({"status": "sent"}),
-                    data_class: DataClass::Public,
-                })
+                Ok(ToolResult { output: json!({"status": "sent"}), data_class: DataClass::Public })
             })
         }
     }
@@ -2158,7 +2129,6 @@ async fn react_no_preempt_when_no_tools_called() {
     assert_eq!(result.content, "Just a text response");
 }
 
-
 // ── Budget exemption tests ──────────────────────────────────────
 
 #[test]
@@ -2235,18 +2205,12 @@ impl AgentOrchestrator for AccessControlOrchestrator {
     fn message_session(&self, _: String, _: String) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(async { Ok(()) })
     }
-    fn feedback_agent(
-        &self,
-        _: String,
-        _: String,
-        _: String,
-    ) -> BoxFuture<'_, Result<(), String>> {
+    fn feedback_agent(&self, _: String, _: String, _: String) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(async { Ok(()) })
     }
     fn list_agents(
         &self,
-    ) -> BoxFuture<'_, Result<Vec<(String, String, String, String, Option<String>)>, String>>
-    {
+    ) -> BoxFuture<'_, Result<Vec<(String, String, String, String, Option<String>)>, String>> {
         Box::pin(async { Ok(vec![]) })
     }
     fn get_agent_result(
@@ -2259,10 +2223,7 @@ impl AgentOrchestrator for AccessControlOrchestrator {
         self.kills.lock().unwrap().push(agent_id);
         Box::pin(async { Ok(()) })
     }
-    fn get_agent_parent(
-        &self,
-        agent_id: String,
-    ) -> BoxFuture<'_, Result<Option<String>, String>> {
+    fn get_agent_parent(&self, agent_id: String) -> BoxFuture<'_, Result<Option<String>, String>> {
         let parent = self.parents.get(&agent_id).cloned();
         Box::pin(async move { parent.ok_or_else(|| format!("agent '{agent_id}' not found")) })
     }
@@ -2355,8 +2316,7 @@ async fn signal_agent_allows_child_to_parent() {
         ("child-agent", Some("parent-agent")),
     ]));
     // child signals parent — caller_parent matches target_id
-    let ctx =
-        make_access_control_context(orch.clone(), Some("child-agent"), Some("parent-agent"));
+    let ctx = make_access_control_context(orch.clone(), Some("child-agent"), Some("parent-agent"));
     let result = execute_tool_call(
         &ctx,
         ToolCall {
@@ -2400,8 +2360,7 @@ async fn signal_agent_allows_siblings() {
 #[tokio::test]
 async fn signal_agent_allows_root_siblings() {
     // Both root-level agents (no parent — spawned by session)
-    let orch =
-        Arc::new(AccessControlOrchestrator::new(vec![("root-a", None), ("root-b", None)]));
+    let orch = Arc::new(AccessControlOrchestrator::new(vec![("root-a", None), ("root-b", None)]));
     let ctx = make_access_control_context(orch.clone(), Some("root-a"), None);
     let result = execute_tool_call(
         &ctx,
@@ -2515,8 +2474,7 @@ async fn kill_agent_denies_child_killing_parent() {
         ("parent-agent", None),
         ("child-agent", Some("parent-agent")),
     ]));
-    let ctx =
-        make_access_control_context(orch.clone(), Some("child-agent"), Some("parent-agent"));
+    let ctx = make_access_control_context(orch.clone(), Some("child-agent"), Some("parent-agent"));
     let result = execute_tool_call(
         &ctx,
         ToolCall {
@@ -2899,10 +2857,7 @@ async fn execute_tool_call_without_token_runs_normally() {
 
     let result = execute_tool_call(
         &context,
-        ToolCall {
-            tool_id: "math.calculate".to_string(),
-            input: json!({"expression": "2 + 2"}),
-        },
+        ToolCall { tool_id: "math.calculate".to_string(), input: json!({"expression": "2 + 2"}) },
         &[],
         None,
         None,

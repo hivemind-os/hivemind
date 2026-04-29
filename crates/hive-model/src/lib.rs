@@ -1912,8 +1912,12 @@ enum AnthropicContent {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicContentPart {
-    Text { text: String },
-    Image { source: AnthropicImageSource },
+    Text {
+        text: String,
+    },
+    Image {
+        source: AnthropicImageSource,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -2098,7 +2102,12 @@ fn parse_openai_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult
     let chunk = if delta_text.is_empty() && finish_reason.is_none() && tool_call_deltas.is_empty() {
         None
     } else {
-        Some(CompletionChunk { delta: delta_text, finish_reason, tool_calls: vec![], tool_call_arg_deltas: vec![] })
+        Some(CompletionChunk {
+            delta: delta_text,
+            finish_reason,
+            tool_calls: vec![],
+            tool_call_arg_deltas: vec![],
+        })
     };
 
     Ok(SseParseResult { chunk, tool_call_deltas })

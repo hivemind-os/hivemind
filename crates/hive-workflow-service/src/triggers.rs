@@ -844,7 +844,17 @@ impl TriggerManager {
             drop(svc_guard);
 
             match svc
-                .launch(name, version, inputs.clone(), "trigger-manager", None, None, None, None, ExecutionMode::Normal)
+                .launch(
+                    name,
+                    version,
+                    inputs.clone(),
+                    "trigger-manager",
+                    None,
+                    None,
+                    None,
+                    None,
+                    ExecutionMode::Normal,
+                )
                 .await
             {
                 Ok(id) => {

@@ -59,7 +59,8 @@ pub(crate) struct BotService {
     pub(crate) web_search_config: Arc<ArcSwap<hive_contracts::WebSearchConfig>>,
     pub(crate) plugin_host: Option<Arc<hive_plugins::PluginHost>>,
     pub(crate) plugin_registry: Option<Arc<hive_plugins::PluginRegistry>>,
-    pub(crate) code_session_registry: Arc<ArcSwap<Option<Arc<hive_code_executor::SessionRegistry>>>>,
+    pub(crate) code_session_registry:
+        Arc<ArcSwap<Option<Arc<hive_code_executor::SessionRegistry>>>>,
 }
 
 impl BotService {
@@ -289,9 +290,9 @@ impl BotService {
                             if let Some(logger) = bot_svc.get_or_create_logger(bid).await {
                                 logger.handle_event(&SessionEvent::Supervisor(event.clone()));
                                 logger.persist_event(&event);
-                                logger.persist_session_event(
-                                    &SessionEvent::Supervisor(event.clone()),
-                                );
+                                logger.persist_session_event(&SessionEvent::Supervisor(
+                                    event.clone(),
+                                ));
                             }
                         }
                         match &event {

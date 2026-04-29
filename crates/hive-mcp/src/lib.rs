@@ -1058,11 +1058,7 @@ impl McpService {
         // Serialize the full result as raw JSON for MCP Apps
         let raw = serde_json::to_value(&result).ok();
 
-        Ok(McpCallToolResult {
-            content,
-            is_error: result.is_error.unwrap_or(false),
-            raw,
-        })
+        Ok(McpCallToolResult { content, is_error: result.is_error.unwrap_or(false), raw })
     }
 
     /// Return every tool from every *connected* server, together with the
@@ -1233,18 +1229,11 @@ impl McpService {
 
         // Fetch from server using structured read_resource
         let result = self.read_resource(server_id, resource_uri).await?;
-        let html = result
-            .contents
-            .iter()
-            .filter_map(|c| c.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let html =
+            result.contents.iter().filter_map(|c| c.text.as_deref()).collect::<Vec<_>>().join("\n");
 
-        let resource = McpAppResource {
-            uri: resource_uri.to_string(),
-            html,
-            ui_meta: _ui_meta.cloned(),
-        };
+        let resource =
+            McpAppResource { uri: resource_uri.to_string(), html, ui_meta: _ui_meta.cloned() };
 
         // Cache the result
         {
@@ -1823,19 +1812,13 @@ impl ClientHandler for McpClientHandler {
         use std::collections::BTreeMap;
 
         let mut ui_ext = serde_json::Map::new();
-        ui_ext.insert(
-            "mimeTypes".to_string(),
-            serde_json::json!(["text/html;profile=mcp-app"]),
-        );
+        ui_ext.insert("mimeTypes".to_string(), serde_json::json!(["text/html;profile=mcp-app"]));
         let mut extensions = BTreeMap::new();
         extensions.insert("io.modelcontextprotocol/ui".to_string(), ui_ext);
 
         rmcp::model::ClientInfo {
             protocol_version: Default::default(),
-            capabilities: ClientCapabilities {
-                extensions: Some(extensions),
-                ..Default::default()
-            },
+            capabilities: ClientCapabilities { extensions: Some(extensions), ..Default::default() },
             client_info: Implementation {
                 name: "hivemind".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),

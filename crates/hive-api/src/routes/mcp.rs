@@ -362,11 +362,7 @@ pub(crate) async fn call_mcp_tool(
         Some(_) => return Err((StatusCode::BAD_REQUEST, "arguments must be an object".into())),
         None => serde_json::Map::new(),
     };
-    let result = state
-        .mcp
-        .call_tool(&server_id, &req.name, args)
-        .await
-        .map_err(mcp_error)?;
+    let result = state.mcp.call_tool(&server_id, &req.name, args).await.map_err(mcp_error)?;
     Ok(Json(CallToolResponse {
         content: result.content,
         is_error: result.is_error,
@@ -387,11 +383,7 @@ pub(crate) async fn read_mcp_resource(
     Path(server_id): Path<String>,
     Json(req): Json<ReadResourceRequest>,
 ) -> Result<Json<hive_mcp::McpReadResourceResult>, (StatusCode, String)> {
-    let result = state
-        .mcp
-        .read_resource(&server_id, &req.uri)
-        .await
-        .map_err(mcp_error)?;
+    let result = state.mcp.read_resource(&server_id, &req.uri).await.map_err(mcp_error)?;
     Ok(Json(result))
 }
 
@@ -411,11 +403,8 @@ pub(crate) async fn fetch_mcp_ui_resource(
     // Ensure the server is connected — UI resources require a live session
     // because they're fetched via the MCP resources/read protocol call.
     state.mcp.ensure_connected(&server_id).await.map_err(mcp_error)?;
-    let resource = state
-        .mcp
-        .fetch_ui_resource(&server_id, &req.uri, None)
-        .await
-        .map_err(mcp_error)?;
+    let resource =
+        state.mcp.fetch_ui_resource(&server_id, &req.uri, None).await.map_err(mcp_error)?;
     Ok(Json(resource))
 }
 
@@ -474,9 +463,7 @@ pub(crate) async fn mcp_sampling_create_message(
             SamplingContent::Text(t) => t.clone(),
             SamplingContent::Parts(parts) => parts
                 .iter()
-                .filter_map(|p| {
-                    if p.kind == "text" { p.text.clone() } else { None }
-                })
+                .filter_map(|p| if p.kind == "text" { p.text.clone() } else { None })
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
@@ -637,7 +624,10 @@ pub(crate) async fn mcp_app_tools_respond(
     };
 
     if !gate.respond(response) {
-        return Err((StatusCode::BAD_REQUEST, "No pending request found for this request_id".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No pending request found for this request_id".to_string(),
+        ));
     }
 
     Ok(Json(json!({ "ok": true })))

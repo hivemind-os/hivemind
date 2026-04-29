@@ -57,8 +57,8 @@ use hive_mcp::{McpCatalogStore, McpService, McpServiceError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -2289,7 +2289,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/mcp/servers/{server_id}/install-runtime", post(mcp::install_mcp_runtime))
         .route("/api/v1/mcp/servers/{server_id}/call-tool", post(mcp::call_mcp_tool))
         .route("/api/v1/mcp/servers/{server_id}/read-resource", post(mcp::read_mcp_resource))
-        .route("/api/v1/mcp/servers/{server_id}/fetch-ui-resource", post(mcp::fetch_mcp_ui_resource))
+        .route(
+            "/api/v1/mcp/servers/{server_id}/fetch-ui-resource",
+            post(mcp::fetch_mcp_ui_resource),
+        )
         .route("/api/v1/mcp/sampling/create-message", post(mcp::mcp_sampling_create_message))
         .route("/api/v1/mcp/app-tools/register", post(mcp::mcp_app_tools_register))
         .route("/api/v1/mcp/app-tools/unregister", post(mcp::mcp_app_tools_unregister))
@@ -2488,22 +2491,10 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/workflows/instances/{instance_id}/shadow-summary",
             get(workflows::wf_shadow_summary),
         )
-        .route(
-            "/api/v1/workflows/analyze",
-            post(workflows::wf_analyze),
-        )
-        .route(
-            "/api/v1/workflows/test",
-            post(workflows::wf_run_tests),
-        )
-        .route(
-            "/api/v1/workflows/test/cancel",
-            post(workflows::wf_cancel_tests),
-        )
-        .route(
-            "/api/v1/workflows/simulate-trigger",
-            post(workflows::wf_simulate_trigger),
-        )
+        .route("/api/v1/workflows/analyze", post(workflows::wf_analyze))
+        .route("/api/v1/workflows/test", post(workflows::wf_run_tests))
+        .route("/api/v1/workflows/test/cancel", post(workflows::wf_cancel_tests))
+        .route("/api/v1/workflows/simulate-trigger", post(workflows::wf_simulate_trigger))
         .route("/api/v1/workflows/events", get(workflows::wf_event_stream))
         .route("/api/v1/workflows/topics", get(workflows::wf_list_topics))
         .route("/api/v1/workflows/triggers/active", get(workflows::wf_list_active_triggers))
@@ -2955,7 +2946,7 @@ mod tests {
                     tool_limits: None,
                     persona_id: None,
                     workflow_managed: false,
-                shadow_mode: false,
+                    shadow_mode: false,
                 },
                 None,
                 None,
@@ -3957,7 +3948,7 @@ mod tests {
             tool_limits: None,
             persona_id: None,
             workflow_managed: false,
-                shadow_mode: false,
+            shadow_mode: false,
         }
     }
 

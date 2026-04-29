@@ -7,9 +7,9 @@
 use serde_json::Value;
 
 use crate::{
-    WorkflowDefinition, WorkflowEngine, WorkflowError, WorkflowTestCase, TestExpectations,
-    TestFailure, TestResult, StepStateSnapshot, InterceptedActionSnapshot, WorkflowStatus,
-    ExpectedToolCall,
+    ExpectedToolCall, InterceptedActionSnapshot, StepStateSnapshot, TestExpectations, TestFailure,
+    TestResult, WorkflowDefinition, WorkflowEngine, WorkflowError, WorkflowStatus,
+    WorkflowTestCase,
 };
 
 /// Run **all** test cases defined on a workflow definition.
@@ -21,7 +21,9 @@ pub async fn run_all_tests(
 ) -> Result<Vec<TestResult>, WorkflowError> {
     let mut results = Vec::with_capacity(definition.tests.len());
     for tc in &definition.tests {
-        results.push(run_test_case(engine, definition, tc, auto_respond, workspace_path.clone()).await?);
+        results.push(
+            run_test_case(engine, definition, tc, auto_respond, workspace_path.clone()).await?,
+        );
     }
     Ok(results)
 }
@@ -103,11 +105,7 @@ pub async fn run_test_case(
     let intercepted_actions: Vec<InterceptedActionSnapshot> = action_page
         .items
         .into_iter()
-        .map(|a| InterceptedActionSnapshot {
-            step_id: a.step_id,
-            kind: a.kind,
-            details: a.details,
-        })
+        .map(|a| InterceptedActionSnapshot { step_id: a.step_id, kind: a.kind, details: a.details })
         .collect();
 
     let actual_status = serde_json::to_value(&inst.status)
@@ -134,10 +132,7 @@ pub async fn run_test_case(
 // ---------------------------------------------------------------------------
 
 /// Poll the store until the instance reaches a terminal state.
-async fn wait_for_terminal(
-    engine: &WorkflowEngine,
-    instance_id: i64,
-) -> Result<(), WorkflowError> {
+async fn wait_for_terminal(engine: &WorkflowEngine, instance_id: i64) -> Result<(), WorkflowError> {
     // 4800 × 25ms = 120s — long enough for agent invocations with auto-respond.
     for _ in 0..4800 {
         let inst = engine
@@ -196,9 +191,8 @@ fn evaluate_expectations(
         let state = inst.step_states.get(step_id);
         let completed = state.is_some_and(|s| s.status == crate::StepStatus::Completed);
         if !completed {
-            let actual_status = state
-                .map(|s| format!("{:?}", s.status))
-                .unwrap_or_else(|| "not found".into());
+            let actual_status =
+                state.map(|s| format!("{:?}", s.status)).unwrap_or_else(|| "not found".into());
             failures.push(TestFailure {
                 expectation: format!("steps_completed: {step_id}"),
                 expected: "Completed".into(),
@@ -211,15 +205,11 @@ fn evaluate_expectations(
     for step_id in &expect.steps_not_reached {
         let state = inst.step_states.get(step_id);
         let reached = state.is_some_and(|s| {
-            !matches!(
-                s.status,
-                crate::StepStatus::Pending | crate::StepStatus::Skipped
-            )
+            !matches!(s.status, crate::StepStatus::Pending | crate::StepStatus::Skipped)
         });
         if reached {
-            let actual_status = state
-                .map(|s| format!("{:?}", s.status))
-                .unwrap_or_else(|| "not found".into());
+            let actual_status =
+                state.map(|s| format!("{:?}", s.status)).unwrap_or_else(|| "not found".into());
             failures.push(TestFailure {
                 expectation: format!("steps_not_reached: {step_id}"),
                 expected: "Pending or Skipped".into(),
@@ -297,10 +287,7 @@ fn evaluate_expectations(
             let compatible: Vec<Vec<bool>> = expected
                 .iter()
                 .map(|exp| {
-                    actual_for_step
-                        .iter()
-                        .map(|act| expected_matches_actual(exp, act))
-                        .collect()
+                    actual_for_step.iter().map(|act| expected_matches_actual(exp, act)).collect()
                 })
                 .collect();
 
@@ -393,9 +380,7 @@ fn augment(
 fn partial_match(expected: &Value, actual: &Value) -> bool {
     match (expected, actual) {
         (Value::Object(exp), Value::Object(act)) => {
-            exp.iter().all(|(k, v)| {
-                act.get(k).map_or(false, |av| partial_match(v, av))
-            })
+            exp.iter().all(|(k, v)| act.get(k).map_or(false, |av| partial_match(v, av)))
         }
         (Value::Array(exp), Value::Array(act)) => {
             if exp.len() != act.len() {
@@ -423,18 +408,12 @@ mod tests {
 
     #[test]
     fn partial_match_subset() {
-        assert!(partial_match(
-            &json!({"a": 1}),
-            &json!({"a": 1, "b": 2})
-        ));
+        assert!(partial_match(&json!({"a": 1}), &json!({"a": 1, "b": 2})));
     }
 
     #[test]
     fn partial_match_mismatch() {
-        assert!(!partial_match(
-            &json!({"a": 2}),
-            &json!({"a": 1, "b": 2})
-        ));
+        assert!(!partial_match(&json!({"a": 2}), &json!({"a": 1, "b": 2})));
     }
 
     #[test]
@@ -468,10 +447,7 @@ mod tests {
     #[test]
     fn bipartite_match_perfect() {
         // 1:1 mapping — each expected matches exactly one actual
-        let compat = vec![
-            vec![true, false],
-            vec![false, true],
-        ];
+        let compat = vec![vec![true, false], vec![false, true]];
         let result = bipartite_match(2, 2, &compat);
         assert_eq!(result, vec![Some(0), Some(1)]);
     }
@@ -481,8 +457,8 @@ mod tests {
         // Rubber-duck case: broad + specific expected, both could match actual[0]
         // expected[0] = broad (matches both), expected[1] = specific (matches only actual[0])
         let compat = vec![
-            vec![true, true],   // broad: matches actual[0] and actual[1]
-            vec![true, false],  // specific: matches only actual[0]
+            vec![true, true],  // broad: matches actual[0] and actual[1]
+            vec![true, false], // specific: matches only actual[0]
         ];
         let result = bipartite_match(2, 2, &compat);
         // Correct: specific gets actual[0], broad gets actual[1]
@@ -506,7 +482,7 @@ mod tests {
     fn bipartite_match_more_expected_than_actual() {
         let compat = vec![
             vec![true],
-            vec![true],  // both want actual[0] but only one can have it
+            vec![true], // both want actual[0] but only one can have it
         ];
         let result = bipartite_match(2, 1, &compat);
         let matched = result.iter().filter(|r| r.is_some()).count();
@@ -519,8 +495,11 @@ mod tests {
     fn expected_matches_tool_id_only() {
         let exp = ExpectedToolCall { tool_id: "comm.send_email".into(), arguments: None };
         let act = crate::InterceptedAction {
-            id: 1, instance_id: 1, step_id: "s1".into(),
-            kind: "tool_call".into(), timestamp_ms: 0,
+            id: 1,
+            instance_id: 1,
+            step_id: "s1".into(),
+            kind: "tool_call".into(),
+            timestamp_ms: 0,
             details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com"}}),
         };
         assert!(expected_matches_actual(&exp, &act));
@@ -533,8 +512,11 @@ mod tests {
             arguments: Some(json!({"to": "a@b.com"})),
         };
         let act = crate::InterceptedAction {
-            id: 1, instance_id: 1, step_id: "s1".into(),
-            kind: "tool_call".into(), timestamp_ms: 0,
+            id: 1,
+            instance_id: 1,
+            step_id: "s1".into(),
+            kind: "tool_call".into(),
+            timestamp_ms: 0,
             details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com", "subject": "Hi", "body": "..."}}),
         };
         assert!(expected_matches_actual(&exp, &act));
@@ -544,8 +526,11 @@ mod tests {
     fn expected_rejects_wrong_tool_id() {
         let exp = ExpectedToolCall { tool_id: "comm.send_email".into(), arguments: None };
         let act = crate::InterceptedAction {
-            id: 1, instance_id: 1, step_id: "s1".into(),
-            kind: "tool_call".into(), timestamp_ms: 0,
+            id: 1,
+            instance_id: 1,
+            step_id: "s1".into(),
+            kind: "tool_call".into(),
+            timestamp_ms: 0,
             details: json!({"tool_id": "http.request", "arguments": {}}),
         };
         assert!(!expected_matches_actual(&exp, &act));
@@ -558,8 +543,11 @@ mod tests {
             arguments: Some(json!({"to": "wrong@addr.com"})),
         };
         let act = crate::InterceptedAction {
-            id: 1, instance_id: 1, step_id: "s1".into(),
-            kind: "tool_call".into(), timestamp_ms: 0,
+            id: 1,
+            instance_id: 1,
+            step_id: "s1".into(),
+            kind: "tool_call".into(),
+            timestamp_ms: 0,
             details: json!({"tool_id": "comm.send_email", "arguments": {"to": "a@b.com"}}),
         };
         assert!(!expected_matches_actual(&exp, &act));
