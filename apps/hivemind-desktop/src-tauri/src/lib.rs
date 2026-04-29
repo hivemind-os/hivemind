@@ -5491,7 +5491,7 @@ async fn plugin_set_enabled(plugin_id: String, enabled: bool) -> Result<(), Stri
         blocking_post_json_no_content(
             &base_url,
             &format!("/api/v1/plugins/{}/enabled", encode_query(&plugin_id)),
-            &serde_json::json!({ "enabled": enabled }),
+            serde_json::json!({ "enabled": enabled }),
         )
     })
     .await
@@ -5508,7 +5508,7 @@ async fn plugin_set_personas(
         blocking_post_json_no_content(
             &base_url,
             &format!("/api/v1/plugins/{}/personas", encode_query(&plugin_id)),
-            &serde_json::json!({ "allowed_personas": allowed_personas }),
+            serde_json::json!({ "allowed_personas": allowed_personas }),
         )
     })
     .await
