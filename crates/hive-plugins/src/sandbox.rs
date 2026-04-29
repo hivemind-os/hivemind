@@ -150,27 +150,27 @@ impl PluginSandbox {
         use crate::protocol::host_methods::*;
 
         match method {
-            SECRET_GET | SECRET_HAS => {
-                if !self.has_permission_kind(|p| matches!(p, Permission::SecretsRead)) {
-                    return PermissionCheckResult {
-                        allowed: false,
-                        reason: Some(format!(
-                            "Plugin '{}' missing permission: secrets:read",
-                            self.plugin_id
-                        )),
-                    };
-                }
+            SECRET_GET | SECRET_HAS
+                if !self.has_permission_kind(|p| matches!(p, Permission::SecretsRead)) =>
+            {
+                return PermissionCheckResult {
+                    allowed: false,
+                    reason: Some(format!(
+                        "Plugin '{}' missing permission: secrets:read",
+                        self.plugin_id
+                    )),
+                };
             }
-            SECRET_SET | SECRET_DELETE => {
-                if !self.has_permission_kind(|p| matches!(p, Permission::SecretsWrite)) {
-                    return PermissionCheckResult {
-                        allowed: false,
-                        reason: Some(format!(
-                            "Plugin '{}' missing permission: secrets:write",
-                            self.plugin_id
-                        )),
-                    };
-                }
+            SECRET_SET | SECRET_DELETE
+                if !self.has_permission_kind(|p| matches!(p, Permission::SecretsWrite)) =>
+            {
+                return PermissionCheckResult {
+                    allowed: false,
+                    reason: Some(format!(
+                        "Plugin '{}' missing permission: secrets:write",
+                        self.plugin_id
+                    )),
+                };
             }
             _ => {}
         }
