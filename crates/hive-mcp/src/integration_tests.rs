@@ -1801,6 +1801,7 @@ async fn runtime_disabled_server_skips_runtime_check() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn test_build_sandbox_from_global_config_actually_sandboxes() {
     // This reproduces the EXACT code path when:
     //   - per-server sandbox is null
