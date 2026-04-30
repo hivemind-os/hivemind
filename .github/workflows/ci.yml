@@ -50,6 +50,8 @@ jobs:
           cache-dependency-path: |
             apps/hivemind-desktop/package-lock.json
             tools/mock-mcp-server/package-lock.json
+            packages/plugin-sdk/package-lock.json
+            packages/test-plugin/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
@@ -63,6 +65,14 @@ jobs:
           test -f dist/index.js || { echo "ERROR: dist/index.js not found after compile"; exit 1; }
           echo "Mock MCP server built: $(pwd)/dist/index.js"
         working-directory: tools/mock-mcp-server
+
+      - name: Build plugin SDK
+        run: npm ci && npm run build
+        working-directory: packages/plugin-sdk
+
+      - name: Build test plugin
+        run: npm ci && npm run build
+        working-directory: packages/test-plugin
 
       - name: Stage Python WASM runtime
         shell: bash
@@ -104,20 +114,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --target ${{ matrix.target }} -- -D warnings
 
-      - name: Verify mock MCP server
-        shell: bash
-        run: |
-          if [ -f tools/mock-mcp-server/dist/index.js ]; then
-            echo "✓ mock-mcp-server/dist/index.js exists"
-          else
-            echo "✗ mock-mcp-server/dist/index.js MISSING"
-            ls -la tools/mock-mcp-server/ || true
-            ls -la tools/mock-mcp-server/dist/ || true
-            exit 1
-          fi
-
       - name: Tests
         run: cargo test --workspace --target ${{ matrix.target }}
+        env:
+          HIVEMIND_TEST_PLUGIN_PATH: packages/test-plugin
 
       - name: Build frontend
         run: npm run build
