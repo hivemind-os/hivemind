@@ -74,6 +74,8 @@ jobs:
           tar xzf "$TARBALL" -C "$EXTRACT"
           cp "$EXTRACT/bin/"python*.wasm "$STAGING/bin/python.wasm"
           cp -r "$EXTRACT/usr/local/lib/python3.12" "$STAGING/lib/python3.12"
+          # python312.zip is required by CPython WASI for the encodings module
+          cp "$EXTRACT/usr/local/lib/python312.zip" "$STAGING/lib/python312.zip" 2>/dev/null || true
           if command -v cygpath > /dev/null 2>&1; then
             echo "PYTHON_WASM_PATH=$(cygpath -w "$STAGING/bin/python.wasm")" >> "$GITHUB_ENV"
             echo "PYTHON_WASM_STDLIB=$(cygpath -w "$STAGING/lib/python3.12")" >> "$GITHUB_ENV"
