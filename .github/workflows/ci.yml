@@ -54,7 +54,12 @@ jobs:
         working-directory: apps/hivemind-desktop
 
       - name: Build mock MCP server
-        run: npm ci && npm run compile
+        shell: bash
+        run: |
+          npm ci
+          npm run compile
+          test -f dist/index.js || { echo "ERROR: dist/index.js not found after compile"; exit 1; }
+          echo "Mock MCP server built: $(pwd)/dist/index.js"
         working-directory: tools/mock-mcp-server
 
       - name: Stage Python WASM runtime
@@ -96,6 +101,18 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --target ${{ matrix.target }} -- -D warnings
+
+      - name: Verify mock MCP server
+        shell: bash
+        run: |
+          if [ -f tools/mock-mcp-server/dist/index.js ]; then
+            echo "✓ mock-mcp-server/dist/index.js exists"
+          else
+            echo "✗ mock-mcp-server/dist/index.js MISSING"
+            ls -la tools/mock-mcp-server/ || true
+            ls -la tools/mock-mcp-server/dist/ || true
+            exit 1
+          fi
 
       - name: Tests
         run: cargo test --workspace --target ${{ matrix.target }}
