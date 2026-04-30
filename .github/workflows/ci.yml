@@ -53,6 +53,10 @@ jobs:
         run: npm ci
         working-directory: apps/hivemind-desktop
 
+      - name: Build mock MCP server
+        run: npm ci && npm run compile
+        working-directory: tools/mock-mcp-server
+
       - name: Stage Python WASM runtime
         shell: bash
         run: |
