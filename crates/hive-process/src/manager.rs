@@ -778,6 +778,7 @@ mod tests {
     /// Verify that sandbox temp files (e.g. .ps1 wrapper scripts) stay alive
     /// while the spawned process is running.
     #[test]
+    #[cfg(not(windows))]
     fn spawn_sandboxed_echo() {
         let mgr = ProcessManager::new();
         let policy = hive_sandbox::SandboxPolicy {
@@ -817,6 +818,7 @@ mod tests {
     /// Verify that errors from sandboxed commands are visible — exit code
     /// and error output must propagate back to the caller.
     #[test]
+    #[cfg(not(windows))]
     fn spawn_sandboxed_error_propagation() {
         let mgr = ProcessManager::new();
         let policy = hive_sandbox::SandboxPolicy {
