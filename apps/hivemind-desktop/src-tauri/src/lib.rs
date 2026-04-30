@@ -5540,7 +5540,7 @@ async fn plugin_link_local(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn plugin_install_npm(package_name: String) -> Result<String, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
