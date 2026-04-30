@@ -2728,7 +2728,7 @@ mod tests {
             .expect("event bus recv failed");
 
         assert_eq!(envelope.topic, "mcp.notification");
-        assert_eq!(envelope.payload.get("serverId").and_then(|v| v.as_str()), Some("test-server"));
+        assert_eq!(envelope.payload.get("server_id").and_then(|v| v.as_str()), Some("test-server"));
         assert!(envelope.payload.get("kind").is_some());
     }
 
