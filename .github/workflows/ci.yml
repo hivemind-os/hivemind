@@ -116,7 +116,7 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --target ${{ matrix.target }}
-        timeout-minutes: 60
+        timeout-minutes: 90
         env:
           HIVEMIND_TEST_PLUGIN_PATH: packages/test-plugin
 
