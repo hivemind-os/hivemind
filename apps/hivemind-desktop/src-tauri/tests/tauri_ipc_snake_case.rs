@@ -8,6 +8,11 @@
 //! Also scans frontend TypeScript source to ensure all `invoke()` call
 //! parameter keys are snake_case, catching the exact class of bug where the
 //! backend expects `session_id` but the frontend sends `sessionId`.
+//!
+//! Skipped on Windows CI: the Tauri runtime tests require WebView2 DLLs
+//! which are not available on headless Windows runners (STATUS_ENTRYPOINT_NOT_FOUND).
+//! macOS CI validates these tests.
+#![cfg(not(windows))]
 
 use std::fs;
 
