@@ -583,6 +583,10 @@ impl TriggerManager {
         // We also check persistent trigger dedup for ALL trigger types here
         // (previously only IncomingMessage had this check). This prevents
         // duplicate launches across daemon restarts and event replays.
+        //
+        // Safety: evaluate_event is called sequentially from a single task
+        // (the event listener loop), so no concurrent-access race exists
+        // between is_trigger_seen / mark_trigger_seen.
         let mut launch_dedup: HashSet<(String, String)> = HashSet::new();
         for (_definition_id, name, version, inputs, mark_info) in to_launch {
             // Cross-bucket dedup: skip if we've already queued a launch for
@@ -637,9 +641,10 @@ impl TriggerManager {
                     }
                 }
             } else {
-                // Launch failed after retries — remove the dedup entry so the
-                // trigger is not permanently suppressed and can fire again on
-                // the next event delivery.
+                // Launch failed — remove the trigger dedup entry so the
+                // workflow is not permanently suppressed. Note: connector-level
+                // poll dedup (`try_mark_poll_published`) still blocks re-publish
+                // from future polls, but event replay at startup will retry.
                 if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
                     if let Err(e) = self.store.remove_trigger_seen(&name, ext_id) {
                         warn!(error = %e, "failed to remove trigger dedup after failed launch");
