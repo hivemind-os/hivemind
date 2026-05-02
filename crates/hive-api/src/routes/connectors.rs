@@ -499,12 +499,22 @@ pub(crate) async fn api_channel_oauth_start(
                                         );
                                     }
 
+                                    // Auto-fetch the user's email from Google
+                                    // if the frontend didn't provide one.
+                                    let resolved_email = if email.is_empty() {
+                                        let http = shared_api_client();
+                                        crate::provider_auth::google_fetch_userinfo_email(http, at)
+                                            .await
+                                    } else {
+                                        email.clone()
+                                    };
+
                                     save_oauth_channel(
                                         &state_clone,
                                         &channel_id_clone,
                                         ConnectorProvider::Gmail,
                                         &client_id_clone,
-                                        &email,
+                                        &resolved_email,
                                     );
                                 } else {
                                     tracing::error!(
@@ -870,12 +880,23 @@ pub(crate) async fn api_channel_oauth_poll(
                     }
                 }
 
+                // Auto-fetch the user's email from Google if the frontend
+                // didn't provide one, so that from_address is populated.
+                let resolved_email = if meta.email.is_empty()
+                    && meta.provider == ConnectorProvider::Gmail
+                {
+                    crate::provider_auth::google_fetch_userinfo_email(client, new_access_token)
+                        .await
+                } else {
+                    meta.email.clone()
+                };
+
                 save_oauth_channel(
                     &state,
                     &channel_id,
                     meta.provider,
                     &meta.client_id,
-                    &meta.email,
+                    &resolved_email,
                 );
 
                 state.pending_device_codes.lock().remove(&device_code);

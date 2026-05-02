@@ -225,6 +225,40 @@ pub async fn google_poll_for_token(
     })
 }
 
+/// Fetch the authenticated user's email from Google's userinfo endpoint.
+///
+/// Requires the `email` scope (already included in our default Google scopes).
+/// Returns an empty string if the email cannot be determined (best-effort).
+pub async fn google_fetch_userinfo_email(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> String {
+    let resp = client
+        .get("https://www.googleapis.com/oauth2/v2/userinfo")
+        .bearer_auth(access_token)
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            if let Ok(body) = r.json::<serde_json::Value>().await {
+                return body["email"].as_str().unwrap_or_default().to_string();
+            }
+            String::new()
+        }
+        Ok(r) => {
+            tracing::warn!(
+                status = %r.status(),
+                "Google userinfo request returned non-success status"
+            );
+            String::new()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to fetch Google userinfo");
+            String::new()
+        }
+    }
+}
+
 /// Refresh a Google access token using a refresh token.
 pub async fn google_refresh_token(
     client: &reqwest::Client,

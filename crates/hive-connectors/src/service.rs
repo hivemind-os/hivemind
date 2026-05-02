@@ -394,23 +394,22 @@ impl ConnectorService {
         let mut enabled_services = Vec::new();
 
         let communication =
-            config.services.communication.as_ref().filter(|c| c.enabled).and_then(|c| {
+            config.services.communication.as_ref().filter(|c| c.enabled).map(|c| {
                 let from_address = c.from_address.as_deref().unwrap_or_default();
                 if from_address.is_empty() {
                     tracing::warn!(
                         connector = %config.id,
-                        "Gmail communication enabled but no from_address configured"
+                        "Gmail communication enabled but no from_address configured; \
+                         sending will be unavailable but polling for incoming mail will work"
                     );
-                    None
-                } else {
-                    enabled_services.push(ServiceType::Communication);
-                    Some(GmailCommunication::new(
-                        Arc::clone(&google),
-                        &config.id,
-                        from_address,
-                        &c.folder,
-                    ))
                 }
+                enabled_services.push(ServiceType::Communication);
+                GmailCommunication::new(
+                    Arc::clone(&google),
+                    &config.id,
+                    from_address,
+                    &c.folder,
+                )
             });
 
         let calendar = config.services.calendar.as_ref().filter(|c| c.enabled).map(|c| {
