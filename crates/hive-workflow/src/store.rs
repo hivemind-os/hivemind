@@ -159,6 +159,14 @@ pub trait WorkflowPersistence: Send + Sync {
         external_id: &str,
     ) -> Result<(), WorkflowError>;
 
+    /// Remove a specific trigger dedup entry (e.g. after a failed launch so the
+    /// trigger is not permanently suppressed).
+    fn remove_trigger_seen(
+        &self,
+        definition_id: &str,
+        external_id: &str,
+    ) -> Result<(), WorkflowError>;
+
     /// Prune dedup entries older than `max_age_ms`.
     fn prune_trigger_dedup(&self, max_age_ms: u64) -> Result<usize, WorkflowError>;
 
@@ -1608,6 +1616,19 @@ impl WorkflowPersistence for SqliteWorkflowStore {
         Ok(())
     }
 
+    fn remove_trigger_seen(
+        &self,
+        definition_id: &str,
+        external_id: &str,
+    ) -> Result<(), WorkflowError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM trigger_dedup_v2 WHERE definition_id = ?1 AND external_id = ?2",
+            params![definition_id, external_id],
+        )?;
+        Ok(())
+    }
+
     fn prune_trigger_dedup(&self, max_age_ms: u64) -> Result<usize, WorkflowError> {
         let conn = self.conn()?;
         let cutoff = now_ms().saturating_sub(max_age_ms);
@@ -2476,6 +2497,18 @@ mod tests {
             inner
                 .trigger_dedup
                 .insert((definition_id.to_string(), external_id.to_string()), now_ms());
+            Ok(())
+        }
+
+        fn remove_trigger_seen(
+            &self,
+            definition_id: &str,
+            external_id: &str,
+        ) -> Result<(), WorkflowError> {
+            let mut inner = self.inner.lock().unwrap();
+            inner
+                .trigger_dedup
+                .remove(&(definition_id.to_string(), external_id.to_string()));
             Ok(())
         }
 

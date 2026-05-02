@@ -573,19 +573,59 @@ impl TriggerManager {
             });
         }
 
-        // Launch workflows first, then persist dedup and mark_as_read only
-        // for successful launches. This prevents permanently suppressing a
-        // trigger when the launch itself fails.
+        // --- Cross-bucket dedup + pre-launch idempotency barrier ---
+        //
+        // The `to_launch` vector may contain entries from different trigger
+        // types (EventPattern, IncomingMessage, etc.) that matched the same
+        // event. Deduplicate by (definition_name, external_id) so each
+        // workflow definition launches at most once per message.
+        //
+        // We also check persistent trigger dedup for ALL trigger types here
+        // (previously only IncomingMessage had this check). This prevents
+        // duplicate launches across daemon restarts and event replays.
+        let mut launch_dedup: HashSet<(String, String)> = HashSet::new();
         for (_definition_id, name, version, inputs, mark_info) in to_launch {
+            // Cross-bucket dedup: skip if we've already queued a launch for
+            // this (definition_name, external_id) pair in this evaluation.
+            if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
+                if !launch_dedup.insert((name.clone(), ext_id.to_string())) {
+                    info!(
+                        definition = %name,
+                        external_id = ext_id,
+                        "skipping duplicate launch (cross-bucket dedup)"
+                    );
+                    continue;
+                }
+
+                // Persistent pre-launch dedup: applies to ALL trigger types
+                // (EventPattern, IncomingMessage, etc.), not just IncomingMessage.
+                match self.store.is_trigger_seen(&name, ext_id) {
+                    Ok(true) => {
+                        info!(
+                            definition = %name,
+                            external_id = ext_id,
+                            "skipping duplicate launch (persistent dedup, pre-launch check)"
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "pre-launch trigger dedup check failed, proceeding");
+                    }
+                    _ => {}
+                }
+
+                // Record dedup BEFORE launch so that crashes between launch
+                // and completion don't leave a gap that event replay can
+                // exploit. If the launch fails, we remove the entry so the
+                // trigger is not permanently suppressed.
+                if let Err(e) = self.store.mark_trigger_seen(&name, ext_id) {
+                    warn!(error = %e, "failed to pre-record trigger dedup");
+                }
+            }
+
             let launched = self.auto_launch(&name, Some(&version), inputs.clone()).await;
 
             if launched {
-                if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
-                    // Use definition_name for dedup (stable across saves).
-                    if let Err(e) = self.store.mark_trigger_seen(&name, ext_id) {
-                        warn!(error = %e, "failed to record trigger dedup");
-                    }
-                }
                 if let Some((channel_id, external_id)) = mark_info {
                     let connector_svc = self.connector_service.lock().await.clone();
                     if let Some(ref connector_svc) = connector_svc {
@@ -594,6 +634,15 @@ impl TriggerManager {
                         {
                             warn!(error = %e, channel_id, external_id, "failed to mark message as read");
                         }
+                    }
+                }
+            } else {
+                // Launch failed after retries — remove the dedup entry so the
+                // trigger is not permanently suppressed and can fire again on
+                // the next event delivery.
+                if let Some(ext_id) = inputs.get("external_id").and_then(|v| v.as_str()) {
+                    if let Err(e) = self.store.remove_trigger_seen(&name, ext_id) {
+                        warn!(error = %e, "failed to remove trigger dedup after failed launch");
                     }
                 }
             }
