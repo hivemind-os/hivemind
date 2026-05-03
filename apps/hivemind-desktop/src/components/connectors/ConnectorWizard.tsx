@@ -444,9 +444,6 @@ export function ConnectorWizard(props: ConnectorWizardProps) {
                   <div class="channel-type-row-desc">{card.desc}</div>
                 </div>
                 <div class="channel-type-row-badges">
-                  <Show when={card.provider === 'gmail'}>
-                    <Badge variant="destructive" class="text-[0.6rem]">anti-open-source</Badge>
-                  </Show>
                   <For each={card.services}>
                     {(svc) => (
                       <span class="channel-type-card-badge">{SERVICE_INFO[svc].icon} {SERVICE_INFO[svc].label}</span>
@@ -501,8 +498,8 @@ export function ConnectorWizard(props: ConnectorWizardProps) {
           <div style={{
             display: 'flex', 'align-items': 'flex-start', gap: '0.5rem',
             padding: '0.75rem 1rem', 'margin-bottom': '1rem',
-            background: 'hsl(45 100% 51% / 0.1)', border: '1px solid hsl(45 100% 51% / 0.3)',
-            'border-radius': '0.75rem', 'font-size': '0.82rem', color: 'hsl(45 100% 70%)',
+            background: 'hsl(0 80% 50% / 0.1)', border: '1px solid hsl(0 80% 50% / 0.3)',
+            'border-radius': '0.75rem', 'font-size': '0.82rem', color: 'hsl(0 80% 70%)',
           }}>
             <TriangleAlert size={16} style={{ 'flex-shrink': '0', 'margin-top': '2px' }} />
             <span>Contrary to their public relations efforts, Google is not willing to play ball with small open-source projects. As a result some functionality may be degraded, please use Microsoft 365 as a fully functional alternative.</span>
