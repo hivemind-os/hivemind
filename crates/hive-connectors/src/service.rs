@@ -152,7 +152,7 @@ impl ConnectorService {
             // have secrets stripped via #[serde(skip_serializing)].
             cfg.restore_secrets();
 
-            let connector = match Self::create_connector(&cfg, &self.connectors_dir) {
+            let connector = match Self::create_connector(&cfg, &self.connectors_dir, Some(&self.audit_log)) {
                 Ok(c) => c,
                 Err(e) => {
                     warn!(
@@ -201,7 +201,7 @@ impl ConnectorService {
     /// Load a single connector temporarily (e.g. for testing during wizard).
     /// If a connector with this ID already exists, it is replaced.
     pub fn load_single_temp(&self, cfg: &ConnectorConfig) -> Result<()> {
-        let connector = Self::create_connector(cfg, &self.connectors_dir)?;
+        let connector = Self::create_connector(cfg, &self.connectors_dir, Some(&self.audit_log))?;
         let (rules, default_input, default_output) = match &cfg.services.communication {
             Some(comm) if comm.enabled => (
                 comm.destination_rules.clone(),
@@ -222,12 +222,13 @@ impl ConnectorService {
     fn create_connector(
         config: &ConnectorConfig,
         connectors_dir: &Path,
+        audit_log: Option<&Arc<ConnectorAuditLog>>,
     ) -> Result<Arc<dyn Connector>> {
         match config.provider {
             ConnectorProvider::Microsoft => Self::create_microsoft_connector(config),
             ConnectorProvider::Discord => Self::create_discord_connector(config),
             ConnectorProvider::Slack => Self::create_slack_connector(config),
-            ConnectorProvider::Gmail => Self::create_gmail_connector(config, connectors_dir),
+            ConnectorProvider::Gmail => Self::create_gmail_connector(config, connectors_dir, audit_log),
             ConnectorProvider::Imap => Self::create_imap_connector(config, connectors_dir),
             ConnectorProvider::Coinbase => Self::create_coinbase_connector(config),
             ConnectorProvider::Apple => Self::create_apple_connector(config),
@@ -360,6 +361,7 @@ impl ConnectorService {
     fn create_gmail_connector(
         config: &ConnectorConfig,
         _connectors_dir: &Path,
+        audit_log: Option<&Arc<ConnectorAuditLog>>,
     ) -> Result<Arc<dyn Connector>> {
         use crate::providers::gmail::calendar::GoogleCalendar;
         use crate::providers::gmail::communication::GmailCommunication;
@@ -404,12 +406,19 @@ impl ConnectorService {
                     );
                 }
                 enabled_services.push(ServiceType::Communication);
-                GmailCommunication::new(
+                let comm = GmailCommunication::new(
                     Arc::clone(&google),
                     &config.id,
                     from_address,
                     &c.folder,
-                )
+                );
+                // Give Gmail access to the persistent poll-dedup table so it can
+                // skip per-message GET calls for already-processed messages.
+                if let Some(al) = audit_log {
+                    comm.with_audit_log(Arc::clone(al))
+                } else {
+                    comm
+                }
             });
 
         let calendar = config.services.calendar.as_ref().filter(|c| c.enabled).map(|c| {
@@ -1188,7 +1197,7 @@ impl ConnectorService {
     /// Directly invoke `create_connector` for testability.
     #[cfg(test)]
     fn try_create_connector(config: &ConnectorConfig) -> Result<Arc<dyn Connector>> {
-        Self::create_connector(config, Path::new("/tmp"))
+        Self::create_connector(config, Path::new("/tmp"), None)
     }
 
     async fn poll_connector_once(

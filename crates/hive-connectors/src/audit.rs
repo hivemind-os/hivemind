@@ -246,6 +246,48 @@ impl SqliteAuditStore {
             .context("pruning poll dedup")?;
         Ok(deleted)
     }
+
+    /// Check which of the given `external_ids` already exist in `poll_dedup`
+    /// for the given connector.  Returns the subset that are already known.
+    pub fn check_published_batch(
+        &self,
+        connector_id: &str,
+        external_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>> {
+        if external_ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+        let conn = self.conn.lock();
+        // Build a dynamic IN clause for up to ~50 IDs (safe for SQLite).
+        let placeholders: Vec<&str> =
+            external_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "SELECT external_id FROM poll_dedup WHERE connector_id = ?1 AND external_id IN ({})",
+            placeholders.join(",")
+        );
+        let mut stmt = conn.prepare(&sql).context("preparing check_published_batch")?;
+
+        // Bind connector_id as ?1, then each external_id as ?2, ?3, ...
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        param_values.push(Box::new(connector_id.to_string()));
+        for eid in external_ids {
+            param_values.push(Box::new(eid.clone()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+            .context("querying check_published_batch")?;
+
+        let mut known = std::collections::HashSet::new();
+        for row in rows {
+            if let Ok(id) = row {
+                known.insert(id);
+            }
+        }
+        Ok(known)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -542,5 +584,39 @@ mod tests {
 
         // Still a duplicate
         assert!(!log.try_mark_poll_published("conn-1", "ext-recent").unwrap());
+    }
+
+    #[test]
+    fn check_published_batch_returns_known_ids() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        // Publish some IDs for conn-1
+        log.try_mark_poll_published("conn-1", "conn-1:gmail:aaa").unwrap();
+        log.try_mark_poll_published("conn-1", "conn-1:gmail:bbb").unwrap();
+        // Different connector
+        log.try_mark_poll_published("conn-2", "conn-2:gmail:ccc").unwrap();
+
+        // Batch-check: aaa is known, ccc belongs to different connector, ddd is new
+        let candidates = vec![
+            "conn-1:gmail:aaa".to_string(),
+            "conn-1:gmail:ccc".to_string(), // not published for conn-1
+            "conn-1:gmail:ddd".to_string(), // never published
+        ];
+        let known = log.check_published_batch("conn-1", &candidates).unwrap();
+
+        assert_eq!(known.len(), 1);
+        assert!(known.contains("conn-1:gmail:aaa"));
+        assert!(!known.contains("conn-1:gmail:ccc"));
+        assert!(!known.contains("conn-1:gmail:ddd"));
+    }
+
+    #[test]
+    fn check_published_batch_empty_input() {
+        let dir = tempdir().unwrap();
+        let log = ConnectorAuditLog::open(dir.path().join("audit.db")).unwrap();
+
+        let known = log.check_published_batch("conn-1", &[]).unwrap();
+        assert!(known.is_empty());
     }
 }
