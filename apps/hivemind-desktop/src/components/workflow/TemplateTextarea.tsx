@@ -2,11 +2,10 @@ import { Component, createMemo, type JSX } from 'solid-js';
 
 /**
  * A textarea with a backdrop overlay that highlights `{{handlebars}}`
- * template tags.  The backdrop renders the visible coloured text while
- * the textarea on top is fully transparent (only the caret is visible).
- * This avoids double-rendering artefacts and keeps layout pixel-perfect
- * because no layout-affecting styles (padding, margin, border-width)
- * are applied to highlight spans.
+ * template tags.  The textarea renders the visible text normally; the
+ * backdrop behind it provides coloured background rectangles behind
+ * template tags (its own text is invisible).  Because the textarea's
+ * background is transparent, the tag highlights show through.
  */
 
 export interface TemplateTextareaProps {
@@ -38,11 +37,9 @@ function tokenize(text: string): { text: string; isTag: boolean }[] {
   return tokens;
 }
 
-// Only background colour — NO padding, margin, or border that would
-// shift glyph positions relative to the textarea layer.
+// Visible background behind tags — no layout-affecting properties.
 const TAG_STYLE: JSX.CSSProperties = {
-  color: 'hsl(207 90% 68%)',
-  background: 'hsl(207 90% 68% / 0.12)',
+  background: 'hsl(207 80% 55% / 0.25)',
   'border-radius': '3px',
 };
 
@@ -61,7 +58,7 @@ const TemplateTextarea: Component<TemplateTextareaProps> = (props) => {
 
   // Shared typographic styles that MUST match between backdrop and
   // textarea so highlighted tokens stay pixel-aligned.
-  const sharedTypography: JSX.CSSProperties = {
+  const sharedTypography = (): JSX.CSSProperties => ({
     'font-family': 'inherit',
     'font-size': props.style?.['font-size'] ?? '0.85em',
     'line-height': '1.45',
@@ -70,30 +67,26 @@ const TemplateTextarea: Component<TemplateTextareaProps> = (props) => {
     'word-wrap': 'break-word',
     'overflow-wrap': 'break-word',
     padding: props.style?.padding ?? '4px 8px',
-  };
+  });
 
   return (
     <div style={{
       position: 'relative',
       width: props.style?.width ?? '100%',
-      background: props.style?.background ?? 'hsl(var(--background))',
-      'border-radius': props.style?.['border-radius'] ?? '4px',
-      border: props.style?.border ?? '1px solid hsl(var(--border))',
     }}>
-      {/* Backdrop: renders the visible text with highlighted tags.
-          Overflow is hidden and scroll position is synced from the
-          textarea so both layers show the same content region. */}
+      {/* Backdrop: invisible text with visible background highlights on
+          {{tags}}.  Sits behind the transparent-background textarea. */}
       <div
-        ref={backdropRef}
+        ref={(el) => { backdropRef = el; }}
         aria-hidden="true"
         style={{
-          ...sharedTypography,
+          ...sharedTypography(),
           position: 'absolute',
           inset: '0',
           overflow: 'hidden',
           'pointer-events': 'none',
-          color: 'hsl(var(--foreground))',
-          border: '1px solid transparent',
+          color: 'transparent',
+          border: props.style?.border ?? '1px solid transparent',
           'border-radius': props.style?.['border-radius'] ?? '4px',
           'box-sizing': 'border-box',
         }}
@@ -105,10 +98,8 @@ const TemplateTextarea: Component<TemplateTextareaProps> = (props) => {
         )}
       </div>
 
-      {/* Actual textarea — text is fully transparent so the backdrop
-          provides all visible text rendering.  Only the caret is
-          visible from this layer.  Placeholder text stays visible via
-          a separate pseudo-element colour. */}
+      {/* Actual textarea — normal visible text, transparent background
+          so tag highlights from the backdrop show through. */}
       <textarea
         ref={(el) => {
           textareaRef = el;
@@ -116,11 +107,8 @@ const TemplateTextarea: Component<TemplateTextareaProps> = (props) => {
         }}
         style={{
           ...props.style,
-          ...sharedTypography,
+          ...sharedTypography(),
           background: 'transparent',
-          border: '1px solid transparent',
-          color: 'transparent',
-          'caret-color': 'hsl(var(--foreground))',
           position: 'relative',
           'z-index': 1,
         }}
