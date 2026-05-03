@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
-use tracing::debug;
+use std::time::{Duration, Instant};
+use tracing::{debug, warn};
 
 const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 
@@ -21,6 +22,9 @@ pub struct GoogleClient {
     refresh_token: RwLock<String>,
     access_token: RwLock<Option<String>>,
     scopes: String,
+    /// Circuit breaker: if set, all API calls fail immediately until this
+    /// instant passes.  Set when a 429 response is received.
+    rate_limit_until: RwLock<Option<Instant>>,
 }
 
 impl GoogleClient {
@@ -44,6 +48,7 @@ impl GoogleClient {
             refresh_token: RwLock::new(refresh_token.to_string()),
             access_token: RwLock::new(access_token.map(|s| s.to_string())),
             scopes: scopes.to_string(),
+            rate_limit_until: RwLock::new(None),
         }
     }
 
@@ -131,8 +136,63 @@ impl GoogleClient {
         }
     }
 
+    /// Check the circuit breaker; bail if we're still in a rate-limit cooldown.
+    fn check_rate_limit(&self) -> Result<()> {
+        if let Some(until) = *self.rate_limit_until.read() {
+            if Instant::now() < until {
+                let remaining = until.duration_since(Instant::now());
+                bail!(
+                    "Google API rate-limited for connector '{}', retry in {}s",
+                    self.connector_id,
+                    remaining.as_secs()
+                );
+            }
+            // Cooldown expired — clear it.
+            *self.rate_limit_until.write() = None;
+        }
+        Ok(())
+    }
+
+    /// Record a 429 from the response body text (after headers are consumed).
+    /// Parses the ISO-8601 timestamp from Google's JSON error body.
+    /// Defaults to 15 min if parsing fails.
+    fn record_rate_limit_from_body(&self, body_text: &str) {
+        let wait = self.parse_retry_after_body(body_text).unwrap_or(Duration::from_secs(900));
+        self.set_rate_limit(wait);
+    }
+
+    fn set_rate_limit(&self, wait: Duration) {
+        let until = Instant::now() + wait;
+        *self.rate_limit_until.write() = Some(until);
+        warn!(
+            connector = %self.connector_id,
+            wait_secs = wait.as_secs(),
+            "Google API 429 — circuit breaker engaged"
+        );
+    }
+
+    /// Parse "Retry after <ISO-8601>" from Google's JSON error body.
+    fn parse_retry_after_body(&self, body_text: &str) -> Option<Duration> {
+        if let Some(idx) = body_text.find("Retry after ") {
+            let ts_start = idx + "Retry after ".len();
+            // Take up to 30 chars to cover "2026-05-03T15:46:59.905Z"
+            let ts_str: String =
+                body_text[ts_start..].chars().take(30).take_while(|c| !c.is_whitespace() && *c != '"').collect();
+            if let Ok(retry_at) = chrono::DateTime::parse_from_rfc3339(&ts_str) {
+                let now = chrono::Utc::now();
+                let diff = retry_at.signed_duration_since(now);
+                if diff.num_seconds() > 0 {
+                    return Some(Duration::from_secs(diff.num_seconds() as u64));
+                }
+            }
+        }
+
+        None
+    }
+
     /// GET request to a full URL. Auto-retries once on 401 with a token refresh.
     pub async fn get(&self, url: &str) -> Result<serde_json::Value> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -155,6 +215,9 @@ impl GoogleClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    self.record_rate_limit_from_body(&body);
+                }
                 bail!("Google API GET {url} failed ({status}): {body}");
             }
             return resp.json().await.context("parsing Google API response");
@@ -163,6 +226,9 @@ impl GoogleClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.record_rate_limit_from_body(&body);
+            }
             bail!("Google API GET {url} failed ({status}): {body}");
         }
         resp.json().await.context("parsing Google API response")
@@ -170,6 +236,7 @@ impl GoogleClient {
 
     /// POST with JSON body. Auto-retries once on 401.
     pub async fn post(&self, url: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -191,13 +258,24 @@ impl GoogleClient {
                 .send()
                 .await
                 .context("Google API POST retry failed")?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let body_text = resp.text().await.unwrap_or_default();
+                self.record_rate_limit_from_body(&body_text);
+                bail!("Google API POST {url} failed (429 Too Many Requests): {body_text}");
+            }
             return Ok(resp);
+        }
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body_text = resp.text().await.unwrap_or_default();
+            self.record_rate_limit_from_body(&body_text);
+            bail!("Google API POST {url} failed (429 Too Many Requests): {body_text}");
         }
         Ok(resp)
     }
 
     /// PATCH with JSON body. Auto-retries once on 401.
     pub async fn patch(&self, url: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -219,13 +297,24 @@ impl GoogleClient {
                 .send()
                 .await
                 .context("Google API PATCH retry failed")?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let body_text = resp.text().await.unwrap_or_default();
+                self.record_rate_limit_from_body(&body_text);
+                bail!("Google API PATCH {url} failed (429 Too Many Requests): {body_text}");
+            }
             return Ok(resp);
+        }
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body_text = resp.text().await.unwrap_or_default();
+            self.record_rate_limit_from_body(&body_text);
+            bail!("Google API PATCH {url} failed (429 Too Many Requests): {body_text}");
         }
         Ok(resp)
     }
 
     /// DELETE request. Auto-retries once on 401.
     pub async fn delete(&self, url: &str) -> Result<reqwest::Response> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -245,7 +334,17 @@ impl GoogleClient {
                 .send()
                 .await
                 .context("Google API DELETE retry failed")?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let body_text = resp.text().await.unwrap_or_default();
+                self.record_rate_limit_from_body(&body_text);
+                bail!("Google API DELETE {url} failed (429 Too Many Requests): {body_text}");
+            }
             return Ok(resp);
+        }
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body_text = resp.text().await.unwrap_or_default();
+            self.record_rate_limit_from_body(&body_text);
+            bail!("Google API DELETE {url} failed (429 Too Many Requests): {body_text}");
         }
         Ok(resp)
     }
@@ -257,6 +356,7 @@ impl GoogleClient {
         content: &[u8],
         content_type: &str,
     ) -> Result<reqwest::Response> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -280,7 +380,17 @@ impl GoogleClient {
                 .send()
                 .await
                 .context("Google API PUT retry failed")?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let body_text = resp.text().await.unwrap_or_default();
+                self.record_rate_limit_from_body(&body_text);
+                bail!("Google API PUT {url} failed (429 Too Many Requests): {body_text}");
+            }
             return Ok(resp);
+        }
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body_text = resp.text().await.unwrap_or_default();
+            self.record_rate_limit_from_body(&body_text);
+            bail!("Google API PUT {url} failed (429 Too Many Requests): {body_text}");
         }
         Ok(resp)
     }
@@ -295,6 +405,7 @@ impl GoogleClient {
         url: &str,
         form: reqwest::multipart::Form,
     ) -> Result<reqwest::Response> {
+        self.check_rate_limit()?;
         // Proactively refresh to avoid a 401 we can't retry.
         let token = self.refresh().await.or_else(|_| {
             // Fall back to cached token if refresh fails (e.g. no refresh_token).
@@ -314,12 +425,18 @@ impl GoogleClient {
             .await
             .context("Google API multipart POST request failed")?;
 
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body_text = resp.text().await.unwrap_or_default();
+            self.record_rate_limit_from_body(&body_text);
+            bail!("Google API POST {url} failed (429 Too Many Requests): {body_text}");
+        }
         Ok(resp)
     }
 
     /// GET request that returns raw bytes (for file downloads).
     /// Auto-retries once on 401 with a token refresh.
     pub async fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        self.check_rate_limit()?;
         let token = self.get_token().await?;
 
         let resp = self
@@ -342,6 +459,9 @@ impl GoogleClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    self.record_rate_limit_from_body(&body);
+                }
                 bail!("Google API GET {url} failed ({status}): {body}");
             }
             return Ok(resp.bytes().await.context("reading bytes")?.to_vec());
@@ -350,6 +470,9 @@ impl GoogleClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.record_rate_limit_from_body(&body);
+            }
             bail!("Google API GET {url} failed ({status}): {body}");
         }
         Ok(resp.bytes().await.context("reading bytes")?.to_vec())
