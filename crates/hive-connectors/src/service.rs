@@ -1055,7 +1055,7 @@ impl ConnectorService {
                 // lifetime to avoid re-publishing the same unread message
                 // on every poll cycle.
                 let mut published_ids: HashSet<String> = HashSet::new();
-                const MAX_BACKOFF_SECS: u64 = 300; // 5 min cap
+                const MAX_BACKOFF_SECS: u64 = 900; // 15 min cap (matches Gmail rate-limit windows)
                 // Log a heartbeat every ~10 cycles so operators can verify
                 // the loop is alive even when no new messages arrive.
                 const HEARTBEAT_CYCLES: u64 = 10;
@@ -1105,11 +1105,12 @@ impl ConnectorService {
                         }
                     }
 
-                    // Back off on consecutive failures
+                    // Back off on consecutive failures (exponential)
                     if consecutive_failures > 0 {
-                        let backoff = (poll_interval
-                            .max(std::time::Duration::from_secs(30))
-                            * consecutive_failures.min(6))
+                        let base = poll_interval.max(std::time::Duration::from_secs(30));
+                        let exp = consecutive_failures.saturating_sub(1).min(4);
+                        let multiplier = 1u32 << exp;
+                        let backoff = (base * multiplier)
                             .min(std::time::Duration::from_secs(MAX_BACKOFF_SECS));
                         debug!(
                             connector_id = %cid,
