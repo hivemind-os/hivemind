@@ -345,22 +345,22 @@ fn validate_trigger_expressions(def: &WorkflowDefinition) -> Result<(), Workflow
                         });
                     }
                 }
-                TriggerType::EventPattern { topic, .. } => {
-                    if topic.trim().is_empty() {
-                        return Err(WorkflowError::InvalidDefinition {
-                            reason: format!(
-                                "Trigger step '{}' has an empty event pattern topic",
-                                step.id,
-                            ),
-                        });
-                    }
+                TriggerType::EventPattern { topic, .. }
+                    if topic.trim().is_empty() =>
+                {
+                    return Err(WorkflowError::InvalidDefinition {
+                        reason: format!(
+                            "Trigger step '{}' has an empty event pattern topic",
+                            step.id,
+                        ),
+                    });
                 }
-                TriggerType::IncomingMessage { channel_id, .. } => {
-                    if channel_id.trim().is_empty() {
-                        return Err(WorkflowError::InvalidDefinition {
-                            reason: format!("Trigger step '{}' has an empty channel_id", step.id,),
-                        });
-                    }
+                TriggerType::IncomingMessage { channel_id, .. }
+                    if channel_id.trim().is_empty() =>
+                {
+                    return Err(WorkflowError::InvalidDefinition {
+                        reason: format!("Trigger step '{}' has an empty channel_id", step.id,),
+                    });
                 }
                 _ => {}
             }

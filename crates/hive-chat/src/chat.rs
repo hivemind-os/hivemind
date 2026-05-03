@@ -2387,7 +2387,7 @@ impl ChatService {
         // numbers for the counters, but we only insert the newest ones
         // into the in-memory map.
         let mut restored_sessions = restored_sessions;
-        restored_sessions.sort_by(|a, b| b.snapshot.updated_at_ms.cmp(&a.snapshot.updated_at_ms));
+        restored_sessions.sort_by_key(|s| std::cmp::Reverse(s.snapshot.updated_at_ms));
         restored_sessions.truncate(MAX_SESSIONS);
 
         // ── Build session records OUTSIDE the write lock ─────────────
@@ -2685,7 +2685,7 @@ impl ChatService {
             })
             .collect::<Vec<_>>();
 
-        sessions.sort_by(|left, right| right.updated_at_ms.cmp(&left.updated_at_ms));
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at_ms));
         sessions
     }
 
@@ -5586,6 +5586,7 @@ impl ChatService {
     /// through the same path as every other message (snapshot + SSE).
     /// The message is linked to the interaction gate via `interaction_request_id`
     /// so the frontend can render it as an interactive question form.
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_question_message(
         &self,
         session_id: &str,
@@ -7165,7 +7166,7 @@ impl ChatService {
             merge_rrf(fts_results, vector_results, self.runtime.recall_limit, &session_node_ids)
         };
 
-        memories.sort_by(|left, right| right.id.cmp(&left.id));
+        memories.sort_by_key(|m| std::cmp::Reverse(m.id));
         self.set_recalled_memories(session_id, memories.clone()).await?;
         Ok(memories)
     }

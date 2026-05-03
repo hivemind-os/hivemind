@@ -47,11 +47,32 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: apps/hivemind-desktop/package-lock.json
+          cache-dependency-path: |
+            apps/hivemind-desktop/package-lock.json
+            tools/mock-mcp-server/package-lock.json
+            packages/plugin-sdk/package-lock.json
+            packages/test-plugin/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: apps/hivemind-desktop
+
+      - name: Build mock MCP server
+        shell: bash
+        run: |
+          npm ci
+          npm run compile
+          test -f dist/index.js || { echo "ERROR: dist/index.js not found after compile"; exit 1; }
+          echo "Mock MCP server built: $(pwd)/dist/index.js"
+        working-directory: tools/mock-mcp-server
+
+      - name: Build plugin SDK
+        run: npm ci && npm run build
+        working-directory: packages/plugin-sdk
+
+      - name: Build test plugin
+        run: npm ci && npm run build
+        working-directory: packages/test-plugin
 
       - name: Stage Python WASM runtime
         shell: bash
@@ -74,6 +95,8 @@ jobs:
           tar xzf "$TARBALL" -C "$EXTRACT"
           cp "$EXTRACT/bin/"python*.wasm "$STAGING/bin/python.wasm"
           cp -r "$EXTRACT/usr/local/lib/python3.12" "$STAGING/lib/python3.12"
+          # python312.zip is required by CPython WASI for the encodings module
+          cp "$EXTRACT/usr/local/lib/python312.zip" "$STAGING/lib/python312.zip" 2>/dev/null || true
           if command -v cygpath > /dev/null 2>&1; then
             echo "PYTHON_WASM_PATH=$(cygpath -w "$STAGING/bin/python.wasm")" >> "$GITHUB_ENV"
             echo "PYTHON_WASM_STDLIB=$(cygpath -w "$STAGING/lib/python3.12")" >> "$GITHUB_ENV"
@@ -93,6 +116,9 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --target ${{ matrix.target }}
+        timeout-minutes: 90
+        env:
+          HIVEMIND_TEST_PLUGIN_PATH: packages/test-plugin
 
       - name: Build frontend
         run: npm run build

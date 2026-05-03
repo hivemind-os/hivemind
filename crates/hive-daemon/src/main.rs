@@ -6,7 +6,6 @@ use hive_api::{build_router, AppState};
 use hive_classification::DataClass;
 use hive_core::{discover_paths, ensure_paths, load_config, AuditLogger, EventBus, NewAuditEntry};
 use std::fs::{self, OpenOptions};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;

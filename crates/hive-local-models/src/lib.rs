@@ -297,8 +297,8 @@ impl LocalModelService {
                                         }
                                     }
 
-                                    for (_seq, (idx, shard_name)) in
-                                        pending_shards.iter().enumerate()
+                                    for (idx, shard_name) in
+                                        &pending_shards
                                     {
                                         // Update progress so frontend shows shard status.
                                         {

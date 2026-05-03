@@ -296,20 +296,20 @@ impl BotService {
                             }
                         }
                         match &event {
-                            SupervisorEvent::AgentStatusChanged { agent_id, status } => {
-                                if *status == AgentStatus::Done || *status == AgentStatus::Error {
-                                    let to_persist = {
-                                        let mut configs = bot_svc.bot_configs.write().await;
-                                        if let Some(config) = configs.get_mut(agent_id) {
-                                            config.active = false;
-                                            Some(config.clone())
-                                        } else {
-                                            None
-                                        }
-                                    };
-                                    if let Some(config) = to_persist {
-                                        let _ = bot_svc.persist_bot_config(&config, false).await;
+                            SupervisorEvent::AgentStatusChanged { agent_id, status }
+                                if *status == AgentStatus::Done || *status == AgentStatus::Error =>
+                            {
+                                let to_persist = {
+                                    let mut configs = bot_svc.bot_configs.write().await;
+                                    if let Some(config) = configs.get_mut(agent_id) {
+                                        config.active = false;
+                                        Some(config.clone())
+                                    } else {
+                                        None
                                     }
+                                };
+                                if let Some(config) = to_persist {
+                                    let _ = bot_svc.persist_bot_config(&config, false).await;
                                 }
                             }
                             SupervisorEvent::AgentOutput {
@@ -508,30 +508,28 @@ impl BotService {
                     ctx.push('\n');
                     // Include channel details for communication-capable connectors
                     if let Some(comm) = c.communication() {
-                        if let Ok(channels) = tokio::time::timeout(
+                        if let Ok(Ok(channels)) = tokio::time::timeout(
                             std::time::Duration::from_secs(5),
                             comm.list_channels(),
                         )
                         .await
                         {
-                            if let Ok(channels) = channels {
-                                for ch in channels.iter().take(20) {
-                                    let _ = write!(ctx, "  - Channel: `{}` ({})", ch.id, ch.name);
-                                    if let Some(ref t) = ch.channel_type {
-                                        let _ = write!(ctx, " [{}]", t);
-                                    }
-                                    if let Some(ref g) = ch.group_name {
-                                        let _ = write!(ctx, " in {}", g);
-                                    }
-                                    ctx.push('\n');
+                            for ch in channels.iter().take(20) {
+                                let _ = write!(ctx, "  - Channel: `{}` ({})", ch.id, ch.name);
+                                if let Some(ref t) = ch.channel_type {
+                                    let _ = write!(ctx, " [{}]", t);
                                 }
-                                if channels.len() > 20 {
-                                    let _ = writeln!(
-                                        ctx,
-                                        "  - ... and {} more channels",
-                                        channels.len() - 20
-                                    );
+                                if let Some(ref g) = ch.group_name {
+                                    let _ = write!(ctx, " in {}", g);
                                 }
+                                ctx.push('\n');
+                            }
+                            if channels.len() > 20 {
+                                let _ = writeln!(
+                                    ctx,
+                                    "  - ... and {} more channels",
+                                    channels.len() - 20
+                                );
                             }
                         }
                     }

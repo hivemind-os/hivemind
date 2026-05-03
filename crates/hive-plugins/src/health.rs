@@ -4,7 +4,6 @@
 //! if they crash unexpectedly, with exponential backoff.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 

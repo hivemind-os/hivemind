@@ -287,7 +287,8 @@ async fn bt14_multiple_cron_tasks_coexist() {
     let s = svc();
     let t1 = s.create_task(cron_req("bt14a", "0 */5 * * * *")).unwrap();
     let _t2 = s.create_task(cron_req("bt14b", "0 */10 * * * *")).unwrap();
-    let t3 = s.create_task(cron_req("bt14c", "0 0 * * * *")).unwrap();
+    // Use minute 3 so next_run never coincides with t1's 5-minute boundaries
+    let t3 = s.create_task(cron_req("bt14c", "0 3 * * * *")).unwrap();
     assert_ne!(t1.next_run_ms, t3.next_run_ms);
     assert_eq!(s.list_tasks().len(), 3);
     for t in s.list_tasks() {

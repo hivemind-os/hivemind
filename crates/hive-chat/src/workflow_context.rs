@@ -5,10 +5,10 @@
 
 use hive_agents::types::{AgentStatus, AgentSummary};
 use hive_workflow_service::hive_workflow::types::{
-    ExecutionMode, StepStatus, StepType, TaskDef, WorkflowStatus,
+    StepStatus, StepType, TaskDef, WorkflowStatus,
 };
 use hive_workflow_service::WorkflowService;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Write;
 
 /// Find the largest byte index ≤ `max` that is on a UTF-8 char boundary.
