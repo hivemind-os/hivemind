@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Button } from '~/ui/button';
 import { invoke } from '@tauri-apps/api/core';
+import TemplateTextarea from './TemplateTextarea';
 import {
   type DesignerNode,
   type DesignerEdge,
@@ -585,7 +586,7 @@ export function StepConfigFields(props: StepConfigFieldsProps) {
             disabled={ro()}
           />
           {exprLabel('Task', 'task', { required: true })}
-          <textarea ref={captureFieldRef('task')} style={{ ...inputStyle, 'min-height': '60px', resize: 'both', 'overflow-x': 'auto', 'white-space': 'pre', border: fieldBorder('task') }} value={props.getCfg().task ?? ''} onInput={(e) => doUpdate('task', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
+          <TemplateTextarea ref={captureFieldRef('task')} style={{ ...inputStyle, 'min-height': '150px', resize: 'vertical', border: fieldBorder('task') }} value={props.getCfg().task ?? ''} onInput={(e) => doUpdate('task', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
           <Switch
             checked={props.getCfg().async_exec ?? false}
             onChange={(checked: boolean) => { doUpdate('async_exec', checked); doPush(); }}
@@ -1026,7 +1027,7 @@ export function StepConfigFields(props: StepConfigFieldsProps) {
       case 'feedback_gate':
         return (<>
           {exprLabel('Prompt', 'prompt', { required: true })}
-          <textarea ref={captureFieldRef('prompt')} style={{ ...inputStyle, 'min-height': '80px', resize: 'vertical', border: fieldBorder('prompt') }} value={props.getCfg().prompt ?? ''} onInput={(e) => doUpdate('prompt', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
+          <TemplateTextarea ref={captureFieldRef('prompt')} style={{ ...inputStyle, 'min-height': '80px', resize: 'vertical', border: fieldBorder('prompt') }} value={props.getCfg().prompt ?? ''} onInput={(e) => doUpdate('prompt', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
           <div style={{ 'font-size': '0.85em', color: 'hsl(var(--muted-foreground))', 'margin-top': '2px', 'margin-bottom': '4px' }}>
             Use <code style={{ background: 'hsl(var(--primary) / 0.15)', padding: '1px 3px', 'border-radius': '2px' }}>{'{{variable_name}}'}</code> to reference workflow variables
           </div>
@@ -1244,7 +1245,7 @@ export function StepConfigFields(props: StepConfigFieldsProps) {
           <div style={labelStyle}>Target ID</div>
           <input style={inputStyle} value={props.getCfg().target_id ?? ''} onInput={(e) => doUpdate('target_id', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
           {exprLabel('Content', 'content', { required: true })}
-          <textarea ref={captureFieldRef('content')} style={{ ...inputStyle, 'min-height': '60px', resize: 'vertical', border: fieldBorder('content') }} value={props.getCfg().content ?? ''} onInput={(e) => doUpdate('content', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
+          <TemplateTextarea ref={captureFieldRef('content')} style={{ ...inputStyle, 'min-height': '60px', resize: 'vertical', border: fieldBorder('content') }} value={props.getCfg().content ?? ''} onInput={(e) => doUpdate('content', e.currentTarget.value)} onBlur={() => doPush()} disabled={ro()} />
         </>);
 
       case 'launch_workflow':
