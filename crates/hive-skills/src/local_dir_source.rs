@@ -3,7 +3,9 @@
 use crate::parser;
 use crate::scan;
 use hive_contracts::{DiscoveredSkill, SkillSourceConfig};
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// A local directory skill source that scans a folder on disk.
 pub struct LocalDirSource {

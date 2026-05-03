@@ -106,7 +106,7 @@ function PluginInstallSection(props: { onInstalled: () => void }) {
     setInstalling(npmPackage);
     setError(null);
     try {
-      await invoke('plugin_install_npm', { packageName: npmPackage });
+      await invoke('plugin_install_npm', { package_name: npmPackage });
       setInstalled((prev) => new Set([...prev, npmPackage]));
       props.onInstalled();
     } catch (e: any) {

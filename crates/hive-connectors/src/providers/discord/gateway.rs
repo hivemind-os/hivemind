@@ -101,7 +101,7 @@ async fn gateway_loop(
     loop {
         // Expire old entries and enforce rate limit
         let now = Instant::now();
-        while reconnect_times.front().map_or(false, |t| now.duration_since(*t) > RATE_WINDOW) {
+        while reconnect_times.front().is_some_and(|t| now.duration_since(*t) > RATE_WINDOW) {
             reconnect_times.pop_front();
         }
         if reconnect_times.len() >= MAX_RECONNECTS {
@@ -164,7 +164,7 @@ async fn gateway_loop(
                 let is_auth_failure = e.chain().any(|cause| {
                     cause
                         .downcast_ref::<DiscordApiError>()
-                        .map_or(false, |de| matches!(de, DiscordApiError::AuthFailed(_)))
+                        .is_some_and(|de| matches!(de, DiscordApiError::AuthFailed(_)))
                 });
 
                 if is_auth_failure {

@@ -52,6 +52,7 @@ pub struct AppToolProxy {
 }
 
 impl AppToolProxy {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tool_id: String,
         app_tool_name: String,
@@ -66,7 +67,7 @@ impl AppToolProxy {
             id: tool_id.clone(),
             name: tool_id,
             description,
-            input_schema: input_schema,
+            input_schema,
             output_schema: None,
             channel_class: hive_classification::ChannelClass::Internal,
             side_effects: false,

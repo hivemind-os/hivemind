@@ -417,6 +417,7 @@ pub(crate) struct SamplingCreateMessageRequest {
     #[serde(default)]
     pub system_prompt: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub model_preferences: Option<serde_json::Value>,

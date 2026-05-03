@@ -1281,7 +1281,7 @@ impl WorkflowService {
         let cases: Vec<&hive_workflow::WorkflowTestCase> = def
             .tests
             .iter()
-            .filter(|tc| test_names.map_or(true, |filter| filter.iter().any(|n| n == &tc.name)))
+            .filter(|tc| test_names.is_none_or(|filter| filter.iter().any(|n| n == &tc.name)))
             .collect();
         let total = cases.len();
 

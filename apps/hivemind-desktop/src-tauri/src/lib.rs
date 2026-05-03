@@ -5491,7 +5491,7 @@ async fn plugin_set_enabled(plugin_id: String, enabled: bool) -> Result<(), Stri
         blocking_post_json_no_content(
             &base_url,
             &format!("/api/v1/plugins/{}/enabled", encode_query(&plugin_id)),
-            &serde_json::json!({ "enabled": enabled }),
+            serde_json::json!({ "enabled": enabled }),
         )
     })
     .await
@@ -5508,7 +5508,7 @@ async fn plugin_set_personas(
         blocking_post_json_no_content(
             &base_url,
             &format!("/api/v1/plugins/{}/personas", encode_query(&plugin_id)),
-            &serde_json::json!({ "allowed_personas": allowed_personas }),
+            serde_json::json!({ "allowed_personas": allowed_personas }),
         )
     })
     .await
@@ -5540,7 +5540,7 @@ async fn plugin_link_local(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn plugin_install_npm(package_name: String) -> Result<String, String> {
     let base_url = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {

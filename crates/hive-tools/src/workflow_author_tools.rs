@@ -163,7 +163,7 @@ impl Tool for WfAuthorListToolsTool {
 
             // Sort by relevance (highest first) when filtering
             if filter.is_some() {
-                scored_tools.sort_by(|a, b| b.0.cmp(&a.0));
+                scored_tools.sort_by_key(|b| std::cmp::Reverse(b.0));
             }
 
             let total = scored_tools.len();
@@ -1360,7 +1360,7 @@ impl Tool for WfAuthorSuggestToolsTool {
                 })
                 .collect();
 
-            scored_tools.sort_by(|a, b| b.0.cmp(&a.0));
+            scored_tools.sort_by_key(|b| std::cmp::Reverse(b.0));
             let suggestions: Vec<Value> =
                 scored_tools.into_iter().take(10).map(|(_, v)| v).collect();
 
@@ -1650,32 +1650,27 @@ impl Tool for WfAuthorLintWorkflowTool {
                 if let hive_workflow_service::hive_workflow::StepType::Task { task } = step_type {
                     match task {
                         hive_workflow_service::hive_workflow::TaskDef::InvokeAgent {
-                            timeout_secs,
+                            timeout_secs: None,
                             ..
                         } => {
-                            if timeout_secs.is_none() {
-                                warnings.push(json!({
-                                    "step_id": step_id,
-                                    "severity": "warning",
-                                    "message": "invoke_agent step has no timeout_secs",
-                                    "suggestion": "Add timeout_secs (e.g., 300) to prevent the agent from running indefinitely."
-                                }));
-                            }
+                            warnings.push(json!({
+                                "step_id": step_id,
+                                "severity": "warning",
+                                "message": "invoke_agent step has no timeout_secs",
+                                "suggestion": "Add timeout_secs (e.g., 300) to prevent the agent from running indefinitely."
+                            }));
                         }
                         hive_workflow_service::hive_workflow::TaskDef::InvokePrompt {
-                            timeout_secs,
+                            timeout_secs: None,
                             ..
                         } => {
-                            if timeout_secs.is_none() {
-                                warnings.push(json!({
-                                    "step_id": step_id,
-                                    "severity": "warning",
-                                    "message": "invoke_prompt step has no timeout_secs",
-                                    "suggestion": "Add timeout_secs (e.g., 300) to prevent the agent from running indefinitely."
-                                }));
-                            }
+                            warnings.push(json!({
+                                "step_id": step_id,
+                                "severity": "warning",
+                                "message": "invoke_prompt step has no timeout_secs",
+                                "suggestion": "Add timeout_secs (e.g., 300) to prevent the agent from running indefinitely."
+                            }));
                         }
-                        hive_workflow_service::hive_workflow::TaskDef::CallTool { .. } => {}
                         _ => {}
                     }
                 }

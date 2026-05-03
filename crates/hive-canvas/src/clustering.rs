@@ -175,7 +175,7 @@ pub fn agglomerative_cluster(
         .collect();
 
     // Sort by member count descending
-    clusters.sort_by(|a, b| b.member_ids.len().cmp(&a.member_ids.len()));
+    clusters.sort_by_key(|b| std::cmp::Reverse(b.member_ids.len()));
     clusters.truncate(max_clusters);
     clusters
 }

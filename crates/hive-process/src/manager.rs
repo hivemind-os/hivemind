@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+#[cfg(windows)]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -776,6 +778,7 @@ mod tests {
     /// Verify that sandbox temp files (e.g. .ps1 wrapper scripts) stay alive
     /// while the spawned process is running.
     #[test]
+    #[cfg(not(windows))]
     fn spawn_sandboxed_echo() {
         let mgr = ProcessManager::new();
         let policy = hive_sandbox::SandboxPolicy {
@@ -815,6 +818,7 @@ mod tests {
     /// Verify that errors from sandboxed commands are visible — exit code
     /// and error output must propagate back to the caller.
     #[test]
+    #[cfg(not(windows))]
     fn spawn_sandboxed_error_propagation() {
         let mgr = ProcessManager::new();
         let policy = hive_sandbox::SandboxPolicy {

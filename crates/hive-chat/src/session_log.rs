@@ -373,7 +373,7 @@ fn format_reasoning_event(event: &ReasoningEvent) -> String {
         }
         ReasoningEvent::ToolCallArgDelta { .. } => {
             // High-frequency streaming event — not logged to session summary.
-            return String::new();
+            String::new()
         }
         ReasoningEvent::ToolCallIntercepted { tool_id, input } => {
             let input_str = serde_json::to_string(input).unwrap_or_default();

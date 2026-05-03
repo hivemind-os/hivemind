@@ -313,11 +313,7 @@ impl ConnectorConfig {
                 // Restore access_token from the in-memory cache if the
                 // config field is empty.  Also handles the `Some("")`
                 // edge case from frontends that send empty-string values.
-                let needs_restore = match access_token.as_deref() {
-                    None => true,
-                    Some("") => true,
-                    _ => false,
-                };
+                let needs_restore = matches!(access_token.as_deref(), None | Some(""));
                 if needs_restore {
                     *access_token = crate::secrets::load(&self.id, "access_token");
                 }

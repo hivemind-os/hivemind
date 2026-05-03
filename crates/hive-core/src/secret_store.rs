@@ -400,11 +400,13 @@ mod tests {
     // avoid races when running in parallel (they share the global STORE).
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn load_missing_returns_none() {
         assert!(load("test:ss:missing-key-xyz").is_none());
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn save_and_load_roundtrip() {
         save("test:ss:roundtrip", "hello");
         assert_eq!(load("test:ss:roundtrip"), Some("hello".to_string()));
@@ -412,6 +414,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn delete_removes_key() {
         save("test:ss:delete-me", "val");
         delete("test:ss:delete-me");
@@ -419,11 +422,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn delete_nonexistent_is_noop() {
         delete("test:ss:never-existed"); // should not panic
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn delete_by_prefix_removes_matching() {
         save("test:ss:pfx:email:password", "pw");
         save("test:ss:pfx:email:token", "tk");
@@ -437,6 +442,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn save_bulk_inserts_all() {
         let mut entries = HashMap::new();
         entries.insert("test:ss:bulk:a".to_string(), "1".to_string());
@@ -449,6 +455,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires a live OS keyring (hangs on headless CI)
     fn load_all_contains_saved_entries() {
         save("test:ss:snap:x", "1");
         save("test:ss:snap:y", "2");

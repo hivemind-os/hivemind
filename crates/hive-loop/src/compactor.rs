@@ -20,9 +20,10 @@ use hive_model::{
 };
 use tracing::{debug, info, warn};
 
+use crate::legacy::{simple_model_error, LoopContext, LoopError, LoopMiddleware};
+#[cfg(test)]
 use crate::legacy::{
-    simple_model_error, AgentContext, ConversationContext, LoopContext, LoopError, LoopMiddleware,
-    RoutingConfig, SecurityContext, ToolsContext,
+    AgentContext, ConversationContext, RoutingConfig, SecurityContext, ToolsContext,
 };
 use crate::token_budget::estimate_request_tokens;
 
