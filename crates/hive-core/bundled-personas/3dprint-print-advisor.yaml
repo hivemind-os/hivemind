@@ -35,6 +35,12 @@ mcp_servers:
     transport: stdio
     command: npx
     args: ["-y", "mcp-3d-printer-server"]
+    env:
+      # The package falls back to '/temp' when TEMP is unset, which doesn't
+      # exist on macOS.  Provide a valid temp path explicitly.
+      TMPDIR: "/tmp"
+      TEMP: "/tmp"
+      TMP: "/tmp"
 avatar: "🖨️"
 color: "#a6e3a1"
 bundled: true
