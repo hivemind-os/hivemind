@@ -5,10 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use base64::Engine;
-use parking_lot::Mutex;
 use tracing::{debug, info};
 
 use super::google_client::GoogleClient;
+use crate::audit::ConnectorAuditLog;
 use crate::services::communication::{
     ChannelInfo, CommAttachment, CommunicationService, InboundMessage, RichMessageBody,
 };
@@ -24,10 +24,7 @@ pub struct GmailCommunication {
     from_address: String,
     folder: String,
     connector_id: String,
-    /// Gmail message IDs already fetched in this process lifetime.
-    /// Prevents redundant per-message GET calls for unread messages
-    /// that were already returned to the polling layer.
-    fetched_ids: Mutex<HashSet<String>>,
+    audit_log: Option<Arc<ConnectorAuditLog>>,
 }
 
 impl GmailCommunication {
@@ -42,8 +39,14 @@ impl GmailCommunication {
             from_address: from_address.to_string(),
             folder: folder.to_string(),
             connector_id: connector_id.to_string(),
-            fetched_ids: Mutex::new(HashSet::new()),
+            audit_log: None,
         }
+    }
+
+    /// Set the audit log for poll-dedup awareness (avoids redundant per-message GETs).
+    pub fn with_audit_log(mut self, audit_log: Arc<ConnectorAuditLog>) -> Self {
+        self.audit_log = Some(audit_log);
+        self
     }
 }
 
@@ -403,43 +406,49 @@ impl CommunicationService for GmailCommunication {
             return Ok(Vec::new());
         }
 
-        // Filter out gmail IDs we've already fetched in this process lifetime.
-        // This prevents redundant per-message GET calls for unread messages
-        // that stay in the inbox because mark_as_read is disabled.
-        let new_items: Vec<&serde_json::Value> = {
-            let seen = self.fetched_ids.lock();
-            items
+        // Build candidate external_ids and check which are already in the
+        // persistent poll_dedup table.  This avoids making N individual GET
+        // calls for messages the poll loop has already processed.
+        let known_ids = if let Some(ref audit) = self.audit_log {
+            let candidate_ids: Vec<String> = items
                 .iter()
-                .filter(|item| {
-                    item["id"].as_str().map_or(true, |id| !seen.contains(id))
-                })
-                .collect()
+                .filter_map(|item| item["id"].as_str())
+                .map(|gid| format!("{}:gmail:{}", self.connector_id, gid))
+                .collect();
+            match audit.check_published_batch(&self.connector_id, &candidate_ids) {
+                Ok(known) => {
+                    if !known.is_empty() {
+                        debug!(
+                            connector = %self.connector_id,
+                            skipped = known.len(),
+                            total = items.len(),
+                            "skipping already-published messages (persistent dedup)"
+                        );
+                    }
+                    known
+                }
+                Err(e) => {
+                    debug!(error = %e, "poll dedup check failed, fetching all messages");
+                    HashSet::new()
+                }
+            }
+        } else {
+            HashSet::new()
         };
-
-        if new_items.is_empty() {
-            debug!(
-                connector = %self.connector_id,
-                total_unread = items.len(),
-                "all listed messages already fetched, skipping per-message GETs"
-            );
-            return Ok(Vec::new());
-        }
-
-        debug!(
-            connector = %self.connector_id,
-            total_unread = items.len(),
-            new = new_items.len(),
-            skipped = items.len() - new_items.len(),
-            "fetching only unseen messages"
-        );
 
         let mut messages = Vec::new();
 
-        for item in &new_items {
+        for item in &items {
             let gmail_id = match item["id"].as_str() {
                 Some(id) => id,
                 None => continue,
             };
+
+            // Skip per-message GET for messages already in the persistent dedup table.
+            let external_id = format!("{}:gmail:{}", self.connector_id, gmail_id);
+            if known_ids.contains(&external_id) {
+                continue;
+            }
 
             // Fetch the full message.
             let msg_url = format!("{GMAIL_API}/messages/{gmail_id}?format=full");
@@ -517,29 +526,6 @@ impl CommunicationService for GmailCommunication {
                 metadata,
                 attachments,
             });
-        }
-
-        // Record successfully fetched gmail IDs so future poll cycles skip
-        // the per-message GET for these messages (they stay unread when
-        // mark_as_read is disabled).
-        {
-            let mut seen = self.fetched_ids.lock();
-            for msg in &messages {
-                if let Some(gid) = msg.metadata.get("gmail_message_id") {
-                    seen.insert(gid.clone());
-                }
-            }
-            // Safety valve: cap the set to prevent unbounded memory growth
-            // in very long-running processes with huge unread backlogs.
-            const MAX_FETCHED_IDS: usize = 50_000;
-            if seen.len() > MAX_FETCHED_IDS {
-                debug!(
-                    connector = %self.connector_id,
-                    count = seen.len(),
-                    "fetched_ids exceeded cap, clearing oldest entries"
-                );
-                seen.clear();
-            }
         }
 
         debug!(
