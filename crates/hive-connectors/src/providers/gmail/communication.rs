@@ -211,6 +211,22 @@ fn header_value(headers: &[serde_json::Value], name: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Extract just the email address from an RFC 2822 mailbox string.
+///
+/// Handles formats like:
+///   `"Display Name <user@example.com>"` → `"user@example.com"`
+///   `"user@example.com"`                → `"user@example.com"`
+///   `"<user@example.com>"`              → `"user@example.com"`
+fn extract_email_address(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(start) = trimmed.rfind('<') {
+        if let Some(end) = trimmed[start..].find('>') {
+            return trimmed[start + 1..start + end].trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 /// Recursively extract body text from a Gmail `payload` object.
 ///
 /// Gmail returns `payload.body.data` for single-part messages, or nests the
@@ -468,11 +484,13 @@ impl CommunicationService for GmailCommunication {
             let payload = &msg["payload"];
             let headers = payload["headers"].as_array().cloned().unwrap_or_default();
 
-            let from = header_value(&headers, "From").unwrap_or_else(|| "unknown".to_string());
+            let from = header_value(&headers, "From")
+                .map(|raw| extract_email_address(&raw))
+                .unwrap_or_else(|| "unknown".to_string());
             let to_header = header_value(&headers, "To").unwrap_or_default();
             let to_addrs: Vec<String> = to_header
                 .split(',')
-                .map(|s| s.trim().to_string())
+                .map(|s| extract_email_address(s))
                 .filter(|s| !s.is_empty())
                 .collect();
 
@@ -726,5 +744,45 @@ mod tests {
         let attachments = extract_attachment_metadata(&payload);
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].filename, "attachment");
+    }
+
+    #[test]
+    fn test_extract_email_address_with_display_name() {
+        assert_eq!(
+            extract_email_address("Daniel Gerlag <danielgerlag@microsoft.com>"),
+            "danielgerlag@microsoft.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_email_address_bare() {
+        assert_eq!(
+            extract_email_address("user@example.com"),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_email_address_angle_brackets_only() {
+        assert_eq!(
+            extract_email_address("<user@example.com>"),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_email_address_with_quotes() {
+        assert_eq!(
+            extract_email_address("\"Doe, John\" <john@example.com>"),
+            "john@example.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_email_address_whitespace() {
+        assert_eq!(
+            extract_email_address("  user@example.com  "),
+            "user@example.com"
+        );
     }
 }
