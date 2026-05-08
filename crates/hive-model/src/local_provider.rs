@@ -190,6 +190,7 @@ fn do_complete(
         model: model_id.to_string(),
         content: output.text,
         tool_calls: vec![],
+        usage: None,
     })
 }
 
@@ -224,6 +225,7 @@ impl ModelProvider for LocalModelProvider {
                 finish_reason: Some(FinishReason::Stop),
                 tool_calls: response.tool_calls,
                 tool_call_arg_deltas: vec![],
+                usage: response.usage,
             };
         };
 

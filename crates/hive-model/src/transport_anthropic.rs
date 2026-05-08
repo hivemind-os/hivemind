@@ -9,7 +9,7 @@ use crate::{
     anthropic_messages_from_request, build_tool_name_map, format_tools_anthropic,
     restore_tool_name_with_map, shared_async_client, shared_blocking_client, trim_trailing_slash,
     AnthropicRequest, AnthropicResponse, AnthropicStreamRequest, CompletionRequest,
-    CompletionResponse, CompletionStream, ModelSelection, ToolCallResponse,
+    CompletionResponse, CompletionStream, CompletionUsage, ModelSelection, ToolCallResponse,
 };
 
 pub(crate) struct AnthropicTransport;
@@ -79,6 +79,10 @@ impl ProviderTransport for AnthropicTransport {
             model: selection.model.clone(),
             content,
             tool_calls,
+            usage: response.usage.map(|u| CompletionUsage {
+                input_tokens: u.input_tokens.unwrap_or(0),
+                output_tokens: u.output_tokens.unwrap_or(0),
+            }),
         })
     }
 

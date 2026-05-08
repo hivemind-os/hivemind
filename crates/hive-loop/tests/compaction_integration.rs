@@ -107,6 +107,7 @@ impl ModelProvider for SummarizerProvider {
             model: selection.model.clone(),
             content,
             tool_calls: vec![],
+            usage: None,
         })
     }
 }

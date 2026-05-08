@@ -8,8 +8,8 @@ use crate::transport_utils::{apply_async_auth, send_json_blocking, sse_completio
 use crate::{
     build_tool_name_map, format_tools_openai, openai_messages_from_request,
     restore_tool_name_with_map, shared_async_client, shared_blocking_client, trim_trailing_slash,
-    CompletionRequest, CompletionResponse, CompletionStream, ModelSelection, OpenAiChatRequest,
-    OpenAiChatResponse, OpenAiChatStreamRequest, ToolCallResponse,
+    CompletionRequest, CompletionResponse, CompletionStream, CompletionUsage, ModelSelection,
+    OpenAiChatRequest, OpenAiChatResponse, OpenAiChatStreamRequest, ToolCallResponse,
 };
 
 pub(crate) struct OpenAiTransport;
@@ -83,6 +83,10 @@ impl ProviderTransport for OpenAiTransport {
             model: selection.model.clone(),
             content,
             tool_calls,
+            usage: response.usage.map(|u| CompletionUsage {
+                input_tokens: u.prompt_tokens.unwrap_or(0),
+                output_tokens: u.completion_tokens.unwrap_or(0),
+            }),
         })
     }
 
@@ -99,6 +103,7 @@ impl ProviderTransport for OpenAiTransport {
             messages: openai_messages_from_request(request),
             stream: true,
             tools: format_tools_openai(&request.tools),
+            stream_options: Some(crate::OpenAiStreamOptions { include_usage: true }),
         };
 
         tracing::debug!(

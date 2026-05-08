@@ -75,7 +75,7 @@ impl SessionLogger {
             LoopEvent::ModelLoading { provider_id, model, .. } => {
                 self.log_loop(&format!("MODEL_LOADING provider={provider_id} model={model}"));
             }
-            LoopEvent::ModelDone { content, provider_id, model } => {
+            LoopEvent::ModelDone { content, provider_id, model, .. } => {
                 let preview = truncate(content, 200);
                 self.log_loop(&format!(
                     "MODEL_DONE provider={provider_id} model={model} content={preview}"

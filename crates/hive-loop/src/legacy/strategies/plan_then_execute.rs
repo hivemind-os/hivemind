@@ -181,6 +181,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                 model: String::new(),
                 content: String::new(),
                 tool_calls: Vec::new(),
+                usage: None,
             };
 
             // Shared adaptive budget across all plan steps.

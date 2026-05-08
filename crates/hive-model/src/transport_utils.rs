@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{get_copilot_token_blocking, read_env, read_keyring, ProviderAuth, ProviderKind};
 use crate::{
-    parse_sse_data, restore_tool_name_with_map, CompletionChunk, CompletionStream, FinishReason,
-    ToolCallArgDelta, ToolCallDelta, ToolCallResponse,
+    parse_sse_data, restore_tool_name_with_map, CompletionChunk, CompletionStream, CompletionUsage,
+    FinishReason, ToolCallArgDelta, ToolCallDelta, ToolCallResponse,
 };
 
 use tokio_stream::StreamExt as _;
@@ -168,6 +168,10 @@ pub(crate) fn sse_completion_stream(
         let mut pending_tool_calls: Vec<(String, String, String)> = vec![];
         const MAX_TOOL_CALL_INDEX: usize = 1000;
 
+        // Accumulate token usage across SSE events (Anthropic splits input/output
+        // across message_start and message_delta; OpenAI sends it on the final chunk).
+        let mut accumulated_usage: Option<CompletionUsage> = None;
+
         while let Some(chunk_result) = byte_stream.next().await {
             let bytes = chunk_result
                 .with_context(|| format!("provider {provider_id} stream read error"))?;
@@ -194,10 +198,32 @@ pub(crate) fn sse_completion_stream(
 
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data.trim() == "[DONE]" {
+                        // Emit a usage-only chunk if we accumulated usage but
+                        // haven't attached it to a chunk yet.
+                        if let Some(usage) = accumulated_usage.take() {
+                            yield CompletionChunk {
+                                delta: String::new(),
+                                finish_reason: None,
+                                tool_calls: vec![],
+                                tool_call_arg_deltas: vec![],
+                                usage: Some(usage),
+                            };
+                        }
                         return;
                     }
 
                     let result = parse_sse_data(data, &kind, &provider_id)?;
+
+                    // Merge usage from this SSE event into accumulated usage.
+                    if let Some(event_usage) = result.usage {
+                        let acc = accumulated_usage.get_or_insert(CompletionUsage::default());
+                        if event_usage.input_tokens > 0 {
+                            acc.input_tokens = event_usage.input_tokens;
+                        }
+                        if event_usage.output_tokens > 0 {
+                            acc.output_tokens = event_usage.output_tokens;
+                        }
+                    }
 
                     // Accumulate tool call deltas and build snapshot entries
                     let mut arg_deltas = Vec::new();
@@ -275,6 +301,10 @@ pub(crate) fn sse_completion_stream(
                                 })
                                 .collect();
                         }
+                        // Attach accumulated usage to finish-reason chunks.
+                        if chunk.finish_reason.is_some() {
+                            chunk.usage = accumulated_usage.take();
+                        }
                         yield chunk;
                     } else if !arg_deltas.is_empty() {
                         // No text/finish chunk but we have arg deltas — emit
@@ -284,10 +314,22 @@ pub(crate) fn sse_completion_stream(
                             finish_reason: None,
                             tool_calls: vec![],
                             tool_call_arg_deltas: arg_deltas,
+                            usage: None,
                         };
                     }
                 }
             }
+        }
+
+        // Stream ended without [DONE]: emit remaining usage if any.
+        if let Some(usage) = accumulated_usage.take() {
+            yield CompletionChunk {
+                delta: String::new(),
+                finish_reason: None,
+                tool_calls: vec![],
+                tool_call_arg_deltas: vec![],
+                usage: Some(usage),
+            };
         }
     };
 

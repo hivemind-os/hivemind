@@ -330,7 +330,15 @@ pub enum LoopEvent {
     /// A token chunk from the model
     Token { delta: String },
     /// Model finished generating (may include tool call)
-    ModelDone { content: String, provider_id: String, model: String },
+    ModelDone {
+        content: String,
+        provider_id: String,
+        model: String,
+        /// Provider-reported input token count, if available.
+        input_tokens: Option<u32>,
+        /// Provider-reported output token count, if available.
+        output_tokens: Option<u32>,
+    },
     /// A tool call is starting
     ToolCallStart { tool_id: String, input: String },
     /// A tool call completed

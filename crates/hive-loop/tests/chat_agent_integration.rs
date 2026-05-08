@@ -77,6 +77,7 @@ impl ScriptProvider {
             model: "test-model".to_string(),
             content: content.to_string(),
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -94,6 +95,7 @@ impl ScriptProvider {
                 name: name.to_string(),
                 arguments: args,
             }],
+            usage: None,
         }
     }
 
@@ -111,6 +113,7 @@ impl ScriptProvider {
                     arguments: args,
                 })
                 .collect(),
+            usage: None,
         }
     }
 }
@@ -147,6 +150,7 @@ impl ModelProvider for ScriptProvider {
             finish_reason: Some(FinishReason::Stop),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }
@@ -795,6 +799,7 @@ async fn t18_tool_call_from_xml_format() {
         model: "test-model".to_string(),
         content: xml_text,
         tool_calls: vec![],
+        usage: None,
     };
 
     let provider = ScriptProvider::new(vec![xml_response, ScriptProvider::text("xml done")]);
@@ -825,6 +830,7 @@ async fn t19_native_tool_calls_take_precedence_over_text() {
             name: "mock.echo".to_string(),
             arguments: json!({"from": "native"}),
         }],
+        usage: None,
     };
 
     let provider = ScriptProvider::new(vec![mixed_response, ScriptProvider::text("done")]);

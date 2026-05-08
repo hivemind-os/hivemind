@@ -816,9 +816,9 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
             estimated_tokens,
         },
         LoopEvent::Token { delta } => ReasoningEvent::TokenDelta { token: delta },
-        LoopEvent::ModelDone { content, provider_id, model } => {
+        LoopEvent::ModelDone { content, provider_id, model, output_tokens, .. } => {
             ReasoningEvent::ModelCallCompleted {
-                token_count: content.split_whitespace().count() as u32,
+                token_count: output_tokens.unwrap_or_else(|| content.split_whitespace().count() as u32),
                 model: format!("{provider_id}:{model}"),
                 content,
             }

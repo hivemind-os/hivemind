@@ -9342,8 +9342,8 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
             estimated_tokens: *estimated_tokens,
         },
         LoopEvent::Token { delta } => ReasoningEvent::TokenDelta { token: delta.clone() },
-        LoopEvent::ModelDone { content, model, .. } => ReasoningEvent::ModelCallCompleted {
-            token_count: content.split_whitespace().count() as u32,
+        LoopEvent::ModelDone { content, model, output_tokens, .. } => ReasoningEvent::ModelCallCompleted {
+            token_count: output_tokens.unwrap_or_else(|| content.split_whitespace().count() as u32),
             content: content.clone(),
             model: model.clone(),
         },

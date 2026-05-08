@@ -118,6 +118,7 @@ impl ScriptedProvider {
             model: model.to_string(),
             content: content.to_string(),
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -138,6 +139,7 @@ impl ScriptedProvider {
                 name: tool_name.to_string(),
                 arguments,
             }],
+            usage: None,
         }
     }
 
@@ -155,6 +157,7 @@ impl ScriptedProvider {
                 .into_iter()
                 .map(|(id, name, args)| ToolCallResponse { id, name, arguments: args })
                 .collect(),
+            usage: None,
         }
     }
 }
@@ -218,6 +221,7 @@ impl ModelProvider for ScriptedProvider {
             model: selection.model.clone(),
             content: "Task complete.".to_string(),
             tool_calls: vec![],
+            usage: None,
         })
     }
 
@@ -237,6 +241,7 @@ impl ModelProvider for ScriptedProvider {
             finish_reason: Some(finish_reason),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }

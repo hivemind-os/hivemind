@@ -64,6 +64,7 @@ impl ScriptProvider {
             model: "test-model".to_string(),
             content: content.to_string(),
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -84,6 +85,7 @@ impl ScriptProvider {
                     "content": message,
                 }),
             }],
+            usage: None,
         }
     }
 }
@@ -104,6 +106,7 @@ impl ModelProvider for ScriptProvider {
             model: selection.model.clone(),
             content: "Task complete.".to_string(),
             tool_calls: vec![],
+            usage: None,
         });
         resp.provider_id = self.descriptor.id.clone();
         resp.model = selection.model.clone();
@@ -126,6 +129,7 @@ impl ModelProvider for ScriptProvider {
             finish_reason: Some(finish_reason),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }
@@ -651,6 +655,7 @@ async fn test_07_parallel_fan_out() {
                         arguments: json!({"agent_id": "c", "content": "Task for C"}),
                     },
                 ],
+                usage: None,
             },
             // A: after tool results
             ScriptProvider::make_response("A dispatched to both"),
@@ -880,6 +885,7 @@ async fn test_12_diamond_pattern() {
                         arguments: json!({"agent_id": "c", "content": "C's part"}),
                     },
                 ],
+                usage: None,
             },
             ScriptProvider::make_response("A dispatched"),
             // B: forward to D
@@ -1249,6 +1255,7 @@ async fn test_20_stress_fan_out_10_agents() {
         model: "test-model".to_string(),
         content: String::new(),
         tool_calls,
+        usage: None,
     });
     // Coordinator after tool results
     responses.push(ScriptProvider::make_response("Coordinator dispatched all"));

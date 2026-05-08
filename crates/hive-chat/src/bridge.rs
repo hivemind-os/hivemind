@@ -195,6 +195,8 @@ impl WorkflowEventSink for BroadcastEventSink {
                     content: content_preview,
                     provider_id: String::new(),
                     model: String::new(),
+                    input_tokens: None,
+                    output_tokens: None,
                 })
             }
             WorkflowEvent::ToolCallStarted { tool_name, .. } => {

@@ -156,6 +156,7 @@ impl ModelProvider for TestProvider {
             model: selection.model.clone(),
             content: response,
             tool_calls: vec![],
+            usage: None,
         })
     }
 }

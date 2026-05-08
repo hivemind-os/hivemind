@@ -112,6 +112,7 @@ impl ScriptProvider {
             model: "test-model".to_string(),
             content: content.to_string(),
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -123,6 +124,7 @@ impl ScriptProvider {
             model: "test-model".to_string(),
             content,
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -138,6 +140,7 @@ impl ScriptProvider {
                 name: tool_name.to_string(),
                 arguments: tool_args,
             }],
+            usage: None,
         }
     }
 
@@ -151,6 +154,7 @@ impl ScriptProvider {
                 name: name.to_string(),
                 arguments: args,
             }],
+            usage: None,
         }
     }
 }
@@ -190,6 +194,7 @@ impl ModelProvider for ScriptProvider {
             finish_reason: Some(finish_reason),
             tool_calls: response.tool_calls,
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }

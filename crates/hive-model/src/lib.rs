@@ -225,6 +225,15 @@ pub struct CompletionRequest {
     pub tools: Vec<ToolDefinition>,
 }
 
+/// Token usage reported by the LLM provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletionUsage {
+    /// Number of tokens in the prompt / input.
+    pub input_tokens: u32,
+    /// Number of tokens in the completion / output.
+    pub output_tokens: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionResponse {
     pub provider_id: String,
@@ -232,6 +241,9 @@ pub struct CompletionResponse {
     pub content: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallResponse>,
+    /// Token usage reported by the provider, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<CompletionUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +269,9 @@ pub struct CompletionChunk {
     /// latest fragment), so dropped messages are self-healing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_call_arg_deltas: Vec<ToolCallArgDelta>,
+    /// Token usage reported by the provider on the final chunk, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<CompletionUsage>,
 }
 
 /// A snapshot of partially-streamed tool-call arguments.
@@ -316,6 +331,7 @@ pub trait ModelProvider: Send + Sync {
             finish_reason: Some(FinishReason::Stop),
             tool_calls: vec![],
             tool_call_arg_deltas: vec![],
+            usage: response.usage,
         };
         Ok(Box::pin(tokio_stream::once(Ok(chunk))))
     }
@@ -380,6 +396,7 @@ impl ModelProvider for EchoProvider {
                 self.prefix, selection.model, capability_summary, excerpt
             ),
             tool_calls: vec![],
+            usage: None,
         })
     }
 }
@@ -1856,6 +1873,13 @@ struct OpenAiImageUrl {
 #[derive(Debug, Deserialize)]
 struct OpenAiChatResponse {
     choices: Vec<OpenAiChoice>,
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiUsage {
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1940,6 +1964,13 @@ struct AnthropicImageSource {
 #[derive(Debug, Deserialize)]
 struct AnthropicResponse {
     content: Vec<AnthropicBlock>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1963,6 +1994,13 @@ struct OpenAiChatStreamRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<OpenAiStreamOptions>,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAiStreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1981,6 +2019,7 @@ struct AnthropicStreamRequest {
 #[derive(Debug, Deserialize)]
 struct OpenAiStreamChunk {
     choices: Vec<OpenAiStreamChoice>,
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2052,6 +2091,8 @@ pub(crate) enum ToolCallDelta {
 pub(crate) struct SseParseResult {
     pub(crate) chunk: Option<CompletionChunk>,
     pub(crate) tool_call_deltas: Vec<ToolCallDelta>,
+    /// Token usage reported in this SSE event (may appear in final chunk).
+    pub(crate) usage: Option<CompletionUsage>,
 }
 
 fn parse_sse_data(data: &str, kind: &ProviderKind, provider_id: &str) -> Result<SseParseResult> {
@@ -2066,9 +2107,22 @@ fn parse_sse_data(data: &str, kind: &ProviderKind, provider_id: &str) -> Result<
 fn parse_openai_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult> {
     let chunk: OpenAiStreamChunk = serde_json::from_str(data)
         .with_context(|| format!("provider {provider_id} returned malformed streaming json"))?;
+
+    // Extract usage from this chunk (OpenAI sends it on the final chunk).
+    let usage = chunk.usage.and_then(|u| {
+        let input = u.prompt_tokens.unwrap_or(0);
+        let output = u.completion_tokens.unwrap_or(0);
+        if input > 0 || output > 0 {
+            Some(CompletionUsage { input_tokens: input, output_tokens: output })
+        } else {
+            None
+        }
+    });
+
     let choice = match chunk.choices.into_iter().next() {
         Some(c) => c,
-        None => return Ok(SseParseResult { chunk: None, tool_call_deltas: vec![] }),
+        // OpenAI may send a usage-only chunk with empty choices at the end.
+        None => return Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage }),
     };
 
     let mut tool_call_deltas = Vec::new();
@@ -2105,10 +2159,11 @@ fn parse_openai_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult
             finish_reason,
             tool_calls: vec![],
             tool_call_arg_deltas: vec![],
+            usage: None,
         })
     };
 
-    Ok(SseParseResult { chunk, tool_call_deltas })
+    Ok(SseParseResult { chunk, tool_call_deltas, usage })
 }
 
 fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult> {
@@ -2118,6 +2173,21 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
     let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match event_type {
+        "message_start" => {
+            // Anthropic sends input_tokens in the message_start event.
+            let usage = value
+                .get("message")
+                .and_then(|m| m.get("usage"))
+                .and_then(|u| {
+                    let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    if input > 0 {
+                        Some(CompletionUsage { input_tokens: input, output_tokens: 0 })
+                    } else {
+                        None
+                    }
+                });
+            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage })
+        }
         "content_block_start" => {
             let block = value.get("content_block");
             let block_type = block.and_then(|b| b.get("type")).and_then(|t| t.as_str());
@@ -2135,9 +2205,10 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                 return Ok(SseParseResult {
                     chunk: None,
                     tool_call_deltas: vec![ToolCallDelta::AnthropicStart { id, name }],
+                    usage: None,
                 });
             }
-            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![] })
+            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage: None })
         }
         "content_block_delta" => {
             let delta = value.get("delta");
@@ -2154,6 +2225,7 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                     tool_call_deltas: vec![ToolCallDelta::AnthropicArgsDelta {
                         partial_json: partial,
                     }],
+                    usage: None,
                 });
             }
 
@@ -2161,7 +2233,7 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
             let delta_text =
                 delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()).unwrap_or("");
             if delta_text.is_empty() {
-                return Ok(SseParseResult { chunk: None, tool_call_deltas: vec![] });
+                return Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage: None });
             }
             Ok(SseParseResult {
                 chunk: Some(CompletionChunk {
@@ -2169,12 +2241,14 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                     finish_reason: None,
                     tool_calls: vec![],
                     tool_call_arg_deltas: vec![],
+                    usage: None,
                 }),
                 tool_call_deltas: vec![],
+                usage: None,
             })
         }
         "content_block_stop" => {
-            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![ToolCallDelta::AnthropicStop] })
+            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![ToolCallDelta::AnthropicStop], usage: None })
         }
         "message_delta" => {
             let stop_reason =
@@ -2185,21 +2259,36 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                 "tool_use" => Some(FinishReason::ToolCalls),
                 _ => None,
             });
-            if finish_reason.is_some() {
+            // Anthropic sends output_tokens in the message_delta usage.
+            let usage = value.get("usage").and_then(|u| {
+                let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                if output > 0 {
+                    Some(CompletionUsage { input_tokens: 0, output_tokens: output })
+                } else {
+                    None
+                }
+            });
+            if finish_reason.is_some() || usage.is_some() {
                 Ok(SseParseResult {
-                    chunk: Some(CompletionChunk {
-                        delta: String::new(),
-                        finish_reason,
-                        tool_calls: vec![],
-                        tool_call_arg_deltas: vec![],
-                    }),
+                    chunk: if finish_reason.is_some() {
+                        Some(CompletionChunk {
+                            delta: String::new(),
+                            finish_reason,
+                            tool_calls: vec![],
+                            tool_call_arg_deltas: vec![],
+                            usage: None,
+                        })
+                    } else {
+                        None
+                    },
                     tool_call_deltas: vec![],
+                    usage,
                 })
             } else {
-                Ok(SseParseResult { chunk: None, tool_call_deltas: vec![] })
+                Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage: None })
             }
         }
-        _ => Ok(SseParseResult { chunk: None, tool_call_deltas: vec![] }),
+        _ => Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage: None }),
     }
 }
 
@@ -2302,6 +2391,7 @@ mod tests {
                 model: selection.model.clone(),
                 content: self.content.clone(),
                 tool_calls: vec![],
+                usage: None,
             })
         }
     }
@@ -3437,6 +3527,7 @@ mod tests {
                 model: selection.model.clone(),
                 content: "ok".to_string(),
                 tool_calls: vec![],
+                usage: None,
             })
         }
     }
@@ -3835,6 +3926,7 @@ mod tests {
             finish_reason: None,
             tool_calls: vec![],
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         let json = serde_json::to_string(&chunk).unwrap();
         assert!(!json.contains("tool_calls"), "empty tool_calls should be skipped");
@@ -3853,11 +3945,108 @@ mod tests {
                 arguments: serde_json::json!({"city": "London"}),
             }],
             tool_call_arg_deltas: vec![],
+            usage: None,
         };
         let json = serde_json::to_string(&chunk).unwrap();
         let parsed: CompletionChunk = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.tool_calls.len(), 1);
         assert_eq!(parsed.tool_calls[0].name, "get_weather");
         assert_eq!(parsed.finish_reason, Some(FinishReason::ToolCalls));
+    }
+
+    // ── Usage extraction from SSE data ──────────────────────────────
+
+    #[test]
+    fn openai_usage_in_final_chunk() {
+        let data = r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":42}}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert!(result.chunk.is_none());
+        let usage = result.usage.unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 42);
+    }
+
+    #[test]
+    fn openai_usage_with_content_chunk() {
+        let data = r#"{"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":50,"completion_tokens":10}}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.delta, "Hi");
+        assert_eq!(chunk.finish_reason, Some(FinishReason::Stop));
+        let usage = result.usage.unwrap();
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.output_tokens, 10);
+    }
+
+    #[test]
+    fn openai_no_usage_field_yields_none() {
+        let data = r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let result = parse_sse_data(data, &ProviderKind::OpenAiCompatible, "test").unwrap();
+        assert!(result.usage.is_none());
+    }
+
+    #[test]
+    fn anthropic_message_start_input_tokens() {
+        let data = r#"{"type":"message_start","message":{"usage":{"input_tokens":150}}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.chunk.is_none());
+        let usage = result.usage.unwrap();
+        assert_eq!(usage.input_tokens, 150);
+        assert_eq!(usage.output_tokens, 0);
+    }
+
+    #[test]
+    fn anthropic_message_delta_output_tokens() {
+        let data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":75}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        let chunk = result.chunk.unwrap();
+        assert_eq!(chunk.finish_reason, Some(FinishReason::Stop));
+        let usage = result.usage.unwrap();
+        assert_eq!(usage.output_tokens, 75);
+        assert_eq!(usage.input_tokens, 0);
+    }
+
+    #[test]
+    fn anthropic_message_delta_without_usage() {
+        let data = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#;
+        let result = parse_sse_data(data, &ProviderKind::Anthropic, "test").unwrap();
+        assert!(result.usage.is_none());
+    }
+
+    #[test]
+    fn completion_usage_serde_roundtrip() {
+        let usage = CompletionUsage { input_tokens: 100, output_tokens: 50 };
+        let json = serde_json::to_string(&usage).unwrap();
+        let parsed: CompletionUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.input_tokens, 100);
+        assert_eq!(parsed.output_tokens, 50);
+    }
+
+    #[test]
+    fn completion_response_usage_serde_roundtrip() {
+        let response = CompletionResponse {
+            provider_id: "test".to_string(),
+            model: "gpt-4".to_string(),
+            content: "Hello".to_string(),
+            tool_calls: vec![],
+            usage: Some(CompletionUsage { input_tokens: 100, output_tokens: 50 }),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        let parsed: CompletionResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.usage.as_ref().unwrap().input_tokens, 100);
+        assert_eq!(parsed.usage.as_ref().unwrap().output_tokens, 50);
+    }
+
+    #[test]
+    fn completion_response_no_usage_skipped_in_json() {
+        let response = CompletionResponse {
+            provider_id: "test".to_string(),
+            model: "gpt-4".to_string(),
+            content: "Hello".to_string(),
+            tool_calls: vec![],
+            usage: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(!json.contains("usage"), "None usage should be skipped");
     }
 }

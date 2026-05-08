@@ -260,6 +260,7 @@ impl LoopStrategy for ReActStrategy {
                     let model = actual_selection.model.clone();
                     let mut streamed_tool_calls = Vec::new();
                     let mut token_filter = StreamingToolCallFilter::new();
+                    let mut streamed_usage: Option<hive_model::CompletionUsage> = None;
 
                     tokio::pin!(stream);
                     let stream_cancelled;
@@ -287,6 +288,10 @@ impl LoopStrategy for ReActStrategy {
                                     if !visible.is_empty() {
                                         let _ = tx.try_send(LoopEvent::Token { delta: visible });
                                     }
+                                }
+                                // Capture provider-reported usage from final chunk.
+                                if let Some(usage) = chunk.usage {
+                                    streamed_usage = Some(usage);
                                 }
                                 // Emit partial tool-call argument snapshots
                                 // only for MCP server tools (id pattern: mcp.{server}.{tool},
@@ -335,6 +340,8 @@ impl LoopStrategy for ReActStrategy {
                         content: content.clone(),
                         provider_id: provider_id.clone(),
                         model: model.clone(),
+                        input_tokens: streamed_usage.as_ref().map(|u| u.input_tokens).filter(|&t| t > 0),
+                        output_tokens: streamed_usage.as_ref().map(|u| u.output_tokens).filter(|&t| t > 0),
                     });
 
                     CompletionResponse {
@@ -342,6 +349,7 @@ impl LoopStrategy for ReActStrategy {
                         model,
                         content,
                         tool_calls: streamed_tool_calls,
+                        usage: streamed_usage,
                     }
                 } else {
                     let router = Arc::clone(&model_router);

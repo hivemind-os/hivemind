@@ -66,6 +66,7 @@ impl ScriptProvider {
             model: "test-model".into(),
             content: content.into(),
             tool_calls: vec![],
+            usage: None,
         }
     }
 
@@ -84,6 +85,7 @@ impl ScriptProvider {
                 name: name.into(),
                 arguments: args,
             }],
+            usage: None,
         }
     }
 
@@ -101,6 +103,7 @@ impl ScriptProvider {
                     arguments: args,
                 })
                 .collect(),
+            usage: None,
         }
     }
 
@@ -126,6 +129,7 @@ impl ModelProvider for ScriptProvider {
             model: "test-model".into(),
             content: "done".into(),
             tool_calls: vec![],
+            usage: None,
         });
         resp.provider_id = self.descriptor.id.clone();
         resp.model = selection.model.clone();
