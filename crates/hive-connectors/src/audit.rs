@@ -281,10 +281,8 @@ impl SqliteAuditStore {
             .context("querying check_published_batch")?;
 
         let mut known = std::collections::HashSet::new();
-        for row in rows {
-            if let Ok(id) = row {
-                known.insert(id);
-            }
+        for id in rows.flatten() {
+            known.insert(id);
         }
         Ok(known)
     }

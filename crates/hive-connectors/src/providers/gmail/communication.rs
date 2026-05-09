@@ -490,7 +490,7 @@ impl CommunicationService for GmailCommunication {
             let to_header = header_value(&headers, "To").unwrap_or_default();
             let to_addrs: Vec<String> = to_header
                 .split(',')
-                .map(|s| extract_email_address(s))
+                .map(extract_email_address)
                 .filter(|s| !s.is_empty())
                 .collect();
 
