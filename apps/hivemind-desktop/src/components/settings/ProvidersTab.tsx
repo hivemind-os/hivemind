@@ -394,7 +394,7 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                 };
 
                 const handleSave = async () => {
-                  if (needsApiKey()) {
+                  if (needsApiKey() && provider().auth !== 'azure-default') {
                     await saveApiKey();
                     updateProvider(idx(), 'auth', 'api-key');
                   }
@@ -527,11 +527,13 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                               try {
                                 const key = apiKey();
                                 if (!key) { setFetchError('Enter an API key first'); setFetchingModels(false); return; }
-                                const baseUrl = (provider().base_url ?? 'https://api.anthropic.com').replace(/\/+$/, '');
+                                // Save key to keyring so the daemon can use it for the request
+                                await invoke('save_secret', { key: `provider:${provider().id}:api-key`, value: key });
                                 const models = await invoke('fetch_provider_models', {
-                                  base_url: baseUrl,
-                                  api_key: key,
+                                  provider_id: provider().id,
                                   provider_kind: 'anthropic',
+                                  auth_kind: provider().auth || 'api-key',
+                                  base_url: (provider().base_url ?? 'https://api.anthropic.com').replace(/\/+$/, ''),
                                 }) as string[];
                                 if (models.length > 0) {
                                   setAvailableAnthropicModels(models);
@@ -578,11 +580,13 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                               try {
                                 const key = apiKey();
                                 if (!key) { setFetchError('Enter an API key first'); setFetchingModels(false); return; }
-                                const baseUrl = (provider().base_url ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+                                // Save key to keyring so the daemon can use it for the request
+                                await invoke('save_secret', { key: `provider:${provider().id}:api-key`, value: key });
                                 const models = await invoke('fetch_provider_models', {
-                                  base_url: baseUrl,
-                                  api_key: key,
+                                  provider_id: provider().id,
                                   provider_kind: 'open-ai-compatible',
+                                  auth_kind: provider().auth || 'api-key',
+                                  base_url: (provider().base_url ?? 'https://api.openai.com/v1').replace(/\/+$/, ''),
                                 }) as string[];
                                 if (models.length > 0) {
                                   setAvailableOpenAiModels(models);
@@ -611,13 +615,27 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                         {/* === Microsoft Foundry === */}
                         <Show when={provider().kind === 'microsoft-foundry'}>
                           <p class="muted" style="font-size: 0.85em; margin: 0.5rem 0;">
-                            Enter your Microsoft Foundry endpoint and API key.
+                            Enter your Microsoft Foundry endpoint and choose an authentication method.
                           </p>
                           <label>
                             <span>Endpoint URL</span>
-                            <input type="text" placeholder="https://your-resource.openai.azure.com" value={provider().base_url ?? ''} onChange={(e) => updateProvider(idx(), 'base_url', e.currentTarget.value || null)} />
+                            <input type="text" placeholder="https://your-resource.services.ai.azure.com/api/projects/your-project" value={provider().base_url ?? ''} onChange={(e) => updateProvider(idx(), 'base_url', e.currentTarget.value || null)} />
                           </label>
-                          <ApiKeyField />
+                          <label>
+                            <span>Authentication</span>
+                            <select value={provider().auth} onChange={(e) => updateProvider(idx(), 'auth', e.currentTarget.value)}>
+                              <option value="api-key">API Key</option>
+                              <option value="azure-default">Azure Identity (Managed Identity / CLI)</option>
+                            </select>
+                          </label>
+                          <Show when={provider().auth === 'api-key'}>
+                            <ApiKeyField />
+                          </Show>
+                          <Show when={provider().auth === 'azure-default'}>
+                            <p class="muted" style="font-size: 0.8em; margin: 0.25rem 0;">
+                              Uses the Azure credential chain: Managed Identity on Azure-hosted compute, or Azure CLI / Azure Developer CLI for local development.
+                            </p>
+                          </Show>
                           <label>
                             <span>API Version</span>
                             <input type="text" value={provider().options?.default_api_version ?? '2024-10-21'} onChange={(e) => updateProvider(idx(), 'options', { ...provider().options, default_api_version: e.currentTarget.value || null })} />
@@ -630,15 +648,20 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                               setFetchingModels(true);
                               setFetchError('');
                               try {
-                                const key = apiKey();
-                                if (!key) { setFetchError('Enter an API key first'); setFetchingModels(false); return; }
+                                const authKind = provider().auth;
+                                if (authKind === 'api-key') {
+                                  const key = apiKey();
+                                  if (!key) { setFetchError('Enter an API key first'); setFetchingModels(false); return; }
+                                  // Save key to keyring so the daemon can use it for the request
+                                  await invoke('save_secret', { key: `provider:${provider().id}:api-key`, value: key });
+                                }
                                 const baseUrl = (provider().base_url ?? '').replace(/\/+$/, '');
                                 if (!baseUrl) { setFetchError('Enter an endpoint URL first'); setFetchingModels(false); return; }
                                 const models = await invoke('fetch_provider_models', {
-                                  base_url: baseUrl,
-                                  api_key: key,
+                                  provider_id: provider().id,
                                   provider_kind: 'microsoft-foundry',
-                                  api_version: provider().options?.default_api_version || '2024-05-01-preview',
+                                  auth_kind: authKind,
+                                  base_url: baseUrl,
                                 }) as string[];
                                 if (models.length > 0) {
                                   setAvailableFoundryModels(models);

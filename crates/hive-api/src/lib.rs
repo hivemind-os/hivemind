@@ -2097,6 +2097,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/config", put(config::update_config))
         .route("/api/v1/config/validate", get(config::validate_config))
+        .route("/api/v1/config/providers/discover-models", post(config::discover_provider_models))
         .route("/api/v1/model/router", get(config::get_model_router))
         // ── Secrets (OS keyring) ─────────────────────────────────
         .route(

@@ -406,6 +406,7 @@ pub enum ProviderAuthConfig {
     Env(String),
     GitHubOAuth,
     ApiKey,
+    AzureDefault,
 }
 
 impl ProviderAuthConfig {
@@ -419,10 +420,11 @@ impl ProviderAuthConfig {
             "none" => Ok(Self::None),
             "github-oauth" => Ok(Self::GitHubOAuth),
             "api-key" => Ok(Self::ApiKey),
+            "azure-default" => Ok(Self::AzureDefault),
             _ => {
                 let Some(env_name) = trimmed.strip_prefix("env:") else {
                     return Err(format!(
-                        "unsupported provider auth `{trimmed}` (expected `none`, `github-oauth`, `api-key`, or `env:VAR`)"
+                        "unsupported provider auth `{trimmed}` (expected `none`, `github-oauth`, `api-key`, `azure-default`, or `env:VAR`)"
                     ));
                 };
 
@@ -449,6 +451,7 @@ impl ProviderAuthConfig {
             Self::Env(env_name) => format!("env:{env_name}"),
             Self::GitHubOAuth => "github-oauth".to_string(),
             Self::ApiKey => "api-key".to_string(),
+            Self::AzureDefault => "azure-default".to_string(),
         }
     }
 }

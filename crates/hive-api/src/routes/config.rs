@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{AppState, ValidationResponse};
-use hive_contracts::config::Persona;
+use hive_contracts::config::{Persona, ProviderKindConfig};
 use hive_core::{
     archive_persona, find_prompt_template, is_bundled_persona, load_personas,
     render_prompt_template, save_config, save_persona, validate_config as validate_hivemind_config,
@@ -272,4 +272,43 @@ pub(crate) async fn api_render_prompt_template(
     let rendered = render_prompt_template(template, &body.params)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(json!({ "rendered": rendered })))
+}
+
+// ── Provider model discovery ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub(crate) struct DiscoverModelsRequest {
+    /// Provider ID — used to resolve keyring-based auth.
+    pub id: String,
+    pub kind: ProviderKindConfig,
+    pub auth: hive_contracts::config::ProviderAuthConfig,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+pub(crate) async fn discover_provider_models(
+    Json(req): Json<DiscoverModelsRequest>,
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let base_url = req
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| req.kind.default_base_url())
+        .ok_or_else(|| {
+            (StatusCode::BAD_REQUEST, "base_url is required for this provider kind".to_string())
+        })?
+        .to_string();
+
+    let kind = req.kind.clone();
+    let auth = hive_model::ProviderAuth::from_config(&req.kind, &req.auth, &req.id);
+
+    let models = tokio::task::spawn_blocking(move || {
+        hive_model::discover_provider_models(&kind, &auth, &base_url)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("task join error: {e}")))?
+    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("{e:#}")))?;
+
+    Ok(Json(models))
 }

@@ -3717,107 +3717,23 @@ async fn delete_secret(app: tauri::AppHandle, key: String) -> Result<(), String>
 
 #[tauri::command(rename_all = "snake_case")]
 async fn fetch_provider_models(
-    base_url: String,
-    api_key: String,
+    provider_id: String,
     provider_kind: String,
-    _api_version: Option<String>,
+    auth_kind: String,
+    base_url: Option<String>,
 ) -> Result<Vec<String>, String> {
+    let daemon = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
-        match provider_kind.as_str() {
-            "anthropic" => {
-                let mut all_models = Vec::new();
-                let mut after_id: Option<String> = None;
-                for _ in 0..10 {
-                    let mut url = format!("{}/v1/models?limit=100", base_url.trim_end_matches('/'));
-                    if let Some(ref aid) = after_id {
-                        url.push_str(&format!("&after_id={aid}"));
-                    }
-                    let resp = client
-                        .get(&url)
-                        .header("x-api-key", &api_key)
-                        .header("anthropic-version", "2023-06-01")
-                        .send()
-                        .map_err(|e| format!("request failed: {e}"))?;
-                    if !resp.status().is_success() {
-                        let status = resp.status();
-                        let body = resp.text().unwrap_or_default();
-                        return Err(format!("{status}: {}", &body[..body.len().min(300)]));
-                    }
-                    let data: serde_json::Value =
-                        resp.json().map_err(|e| format!("invalid JSON: {e}"))?;
-                    if let Some(arr) = data.get("data").and_then(|d| d.as_array()) {
-                        for m in arr {
-                            if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
-                                all_models.push(id.to_string());
-                            }
-                        }
-                    }
-                    let has_more = data.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
-                    if !has_more {
-                        break;
-                    }
-                    after_id = data.get("last_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                }
-                Ok(all_models)
-            }
-            "open-ai-compatible" => {
-                let url = format!("{}/models", base_url.trim_end_matches('/'));
-                let resp = client
-                    .get(&url)
-                    .header("Authorization", format!("Bearer {api_key}"))
-                    .send()
-                    .map_err(|e| format!("request failed: {e}"))?;
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let body = resp.text().unwrap_or_default();
-                    return Err(format!("{status}: {}", &body[..body.len().min(300)]));
-                }
-                let data: serde_json::Value =
-                    resp.json().map_err(|e| format!("invalid JSON: {e}"))?;
-                let mut all_models = Vec::new();
-                if let Some(arr) = data.get("data").and_then(|d| d.as_array()) {
-                    for m in arr {
-                        if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
-                            all_models.push(id.to_string());
-                        }
-                    }
-                }
-                all_models.sort();
-                Ok(all_models)
-            }
-            "microsoft-foundry" => {
-                // Azure AI Foundry project API uses /deployments with api-version=v1
-                let url = format!("{}/deployments?api-version=v1", base_url.trim_end_matches('/'));
-                let resp = client
-                    .get(&url)
-                    .header("api-key", &api_key)
-                    .send()
-                    .map_err(|e| format!("request failed: {e}"))?;
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let body = resp.text().unwrap_or_default();
-                    return Err(format!("{status}: {}", &body[..body.len().min(300)]));
-                }
-                let data: serde_json::Value =
-                    resp.json().map_err(|e| format!("invalid JSON: {e}"))?;
-                let mut all_models = Vec::new();
-                // Response has { "value": [ { "name": "deployment-name", "modelName": "gpt-4o", ... } ] }
-                if let Some(arr) = data.get("value").and_then(|d| d.as_array()) {
-                    for m in arr {
-                        if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
-                            all_models.push(name.to_string());
-                        }
-                    }
-                }
-                all_models.sort();
-                Ok(all_models)
-            }
-            _ => Err(format!("model discovery not supported for provider kind: {provider_kind}")),
-        }
+        blocking_post_json::<serde_json::Value, Vec<String>>(
+            &daemon,
+            "/api/v1/config/providers/discover-models",
+            serde_json::json!({
+                "id": provider_id,
+                "kind": provider_kind,
+                "auth": auth_kind,
+                "base_url": base_url,
+            }),
+        )
     })
     .await
     .map_err(|e| e.to_string())?

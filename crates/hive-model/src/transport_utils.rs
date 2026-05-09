@@ -58,6 +58,10 @@ pub(crate) fn apply_blocking_auth(
                 .header("Editor-Plugin-Version", "copilot/0.1.0")
                 .header("Copilot-Integration-Id", "vscode-chat"))
         }
+        ProviderAuth::AzureDefaultCredential => {
+            let token = crate::get_azure_token_blocking(crate::AZURE_COGNITIVE_SCOPE)?;
+            Ok(request.bearer_auth(token))
+        }
     }
 }
 
@@ -127,6 +131,11 @@ pub(crate) fn apply_async_auth(
                 .header("Editor-Version", "HiveMind OS/0.1.0")
                 .header("Editor-Plugin-Version", "copilot/0.1.0")
                 .header("Copilot-Integration-Id", "vscode-chat"))
+        }
+        ProviderAuth::AzureDefaultCredential => {
+            let token = crate::get_azure_token_blocking(crate::AZURE_COGNITIVE_SCOPE)
+                .context("failed to get Azure token for provider")?;
+            Ok(request.bearer_auth(token))
         }
     }
 }

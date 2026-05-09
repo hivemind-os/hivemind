@@ -20,8 +20,7 @@ pub use hive_contracts::{
 };
 use hive_core::{
     AuditLogger, CapabilityConfig, EventBus, HiveMindConfig, ModelLimitsRegistry,
-    ModelProviderConfig, NewAuditEntry, PromptInjectionConfig, ProviderAuthConfig,
-    ProviderKindConfig,
+    ModelProviderConfig, NewAuditEntry, PromptInjectionConfig, ProviderKindConfig,
 };
 use hive_inference::{LocalModelRegistry, ModelRegistryStore, RuntimeManager};
 use hive_knowledge::{KgPool, KnowledgeGraph, NewNode, Node, SearchResult};
@@ -8610,38 +8609,7 @@ fn map_capabilities(capabilities: &BTreeSet<CapabilityConfig>) -> BTreeSet<Capab
 }
 
 fn map_provider_auth(provider: &ModelProviderConfig) -> ProviderAuth {
-    match (&provider.kind, &provider.auth) {
-        (_, ProviderAuthConfig::None) => ProviderAuth::None,
-        (ProviderKindConfig::Anthropic, ProviderAuthConfig::Env(env_var)) => {
-            ProviderAuth::HeaderEnv {
-                env_var: env_var.clone(),
-                header_name: "x-api-key".to_string(),
-            }
-        }
-        (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::Env(env_var)) => {
-            ProviderAuth::HeaderEnv { env_var: env_var.clone(), header_name: "api-key".to_string() }
-        }
-        (ProviderKindConfig::GitHubCopilot, ProviderAuthConfig::GitHubOAuth) => {
-            ProviderAuth::GitHubCopilotToken
-        }
-        (_, ProviderAuthConfig::Env(env_var)) => ProviderAuth::BearerEnv(env_var.clone()),
-        (_, ProviderAuthConfig::GitHubOAuth) => ProviderAuth::GitHubToken,
-        (ProviderKindConfig::Anthropic, ProviderAuthConfig::ApiKey) => {
-            ProviderAuth::HeaderKeyring {
-                key: format!("provider:{}:api-key", provider.id),
-                header_name: "x-api-key".to_string(),
-            }
-        }
-        (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::ApiKey) => {
-            ProviderAuth::HeaderKeyring {
-                key: format!("provider:{}:api-key", provider.id),
-                header_name: "api-key".to_string(),
-            }
-        }
-        (_, ProviderAuthConfig::ApiKey) => {
-            ProviderAuth::BearerKeyring { key: format!("provider:{}:api-key", provider.id) }
-        }
-    }
+    ProviderAuth::from_config(&provider.kind, &provider.auth, &provider.id)
 }
 
 fn now_ms() -> u64 {
@@ -9622,7 +9590,7 @@ mod tests {
     use hive_agents::AgentRole;
     use hive_classification::ChannelClass;
     use hive_contracts::{InferenceParams, InstalledModel, ModelCapabilities, ModelStatus};
-    use hive_core::{EventBus, InferenceRuntimeKind, ProviderOptionsConfig};
+    use hive_core::{EventBus, InferenceRuntimeKind, ProviderAuthConfig, ProviderOptionsConfig};
     use tempfile::tempdir;
 
     fn sample_installed_model(id: &str) -> InstalledModel {

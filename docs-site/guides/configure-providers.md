@@ -94,18 +94,52 @@ This also works with Azure OpenAI (use the alias `azure-open-ai` for `kind` if y
 
 ## Microsoft Foundry
 
+### With API Key
+
 ```yaml
 models:
   providers:
     - id: azure-foundry
       kind: microsoft-foundry
       name: Azure Foundry
-      base_url: https://my-foundry.azure.com/v1
+      base_url: https://my-resource.services.ai.azure.com/api/projects/my-project
       auth: env:AZURE_API_KEY
       channel_class: private
       models:
         - gpt-4o
 ```
+
+### With Azure Identity (Managed Identity / CLI)
+
+```yaml
+models:
+  providers:
+    - id: azure-foundry
+      kind: microsoft-foundry
+      name: Azure Foundry
+      base_url: https://my-resource.services.ai.azure.com/api/projects/my-project
+      auth: azure-default
+      channel_class: private
+      models:
+        - gpt-4o
+```
+
+The `azure-default` auth method uses the Azure credential chain — no API key required. It tries the following sources in order:
+
+1. **Managed Identity** — automatically available on Azure VMs, App Service, Azure Functions, AKS, and other Azure-hosted compute
+2. **Azure CLI** — for local development, authenticate with `az login`
+3. **Azure Developer CLI** — authenticate with `azd auth login`
+
+::: tip Prerequisites for Azure Identity
+Your identity (managed identity or user account) must have the appropriate role assignment on the Azure AI resource, such as `Cognitive Services User` or `Cognitive Services Contributor`.
+:::
+
+::: info Base URL Format
+The `base_url` for Microsoft Foundry must include the project path:
+`https://{resource-name}.services.ai.azure.com/api/projects/{project-name}`
+
+You can find your project name in the [Azure AI Foundry portal](https://ai.azure.com). The "Fetch Models from API" button will list only your deployed models (not the entire catalog).
+:::
 
 ## Multiple Providers & Fallback Chains
 
@@ -155,6 +189,7 @@ auth: env:OPENAI_API_KEY         # ✅ reads from environment
 auth: none                       # ✅ no auth needed (e.g. local models)
 auth: github-oauth               # ✅ GitHub device flow
 auth: api-key                    # ✅ API key from OS keychain
+auth: azure-default              # ✅ Azure Managed Identity / CLI (Microsoft Foundry only)
 ```
 
 ::: warning Never hardcode API keys
