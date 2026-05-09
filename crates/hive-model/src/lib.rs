@@ -421,6 +421,51 @@ pub enum ProviderAuth {
     GitHubToken,
     /// GitHub Copilot auth: exchanges the OAuth token for a short-lived Copilot session token.
     GitHubCopilotToken,
+    /// Azure Default Credential: uses `DefaultAzureCredential` to acquire an OAuth2 bearer token.
+    AzureDefaultCredential,
+}
+
+impl ProviderAuth {
+    /// Map a provider config (kind + auth + id) to a runtime `ProviderAuth`.
+    pub fn from_config(
+        kind: &hive_contracts::config::ProviderKindConfig,
+        auth: &hive_contracts::config::ProviderAuthConfig,
+        provider_id: &str,
+    ) -> Self {
+        use hive_contracts::config::{ProviderAuthConfig, ProviderKindConfig};
+        match (kind, auth) {
+            (_, ProviderAuthConfig::None) => Self::None,
+            (ProviderKindConfig::Anthropic, ProviderAuthConfig::Env(env_var)) => Self::HeaderEnv {
+                env_var: env_var.clone(),
+                header_name: "x-api-key".to_string(),
+            },
+            (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::Env(env_var)) => {
+                Self::HeaderEnv { env_var: env_var.clone(), header_name: "api-key".to_string() }
+            }
+            (ProviderKindConfig::GitHubCopilot, ProviderAuthConfig::GitHubOAuth) => {
+                Self::GitHubCopilotToken
+            }
+            (_, ProviderAuthConfig::Env(env_var)) => Self::BearerEnv(env_var.clone()),
+            (_, ProviderAuthConfig::GitHubOAuth) => Self::GitHubToken,
+            (ProviderKindConfig::Anthropic, ProviderAuthConfig::ApiKey) => Self::HeaderKeyring {
+                key: format!("provider:{provider_id}:api-key"),
+                header_name: "x-api-key".to_string(),
+            },
+            (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::ApiKey) => {
+                Self::HeaderKeyring {
+                    key: format!("provider:{provider_id}:api-key"),
+                    header_name: "api-key".to_string(),
+                }
+            }
+            (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::AzureDefault) => {
+                Self::AzureDefaultCredential
+            }
+            (_, ProviderAuthConfig::ApiKey) => {
+                Self::BearerKeyring { key: format!("provider:{provider_id}:api-key") }
+            }
+            (_, ProviderAuthConfig::AzureDefault) => Self::None,
+        }
+    }
 }
 
 /// Cached Copilot session token with expiry.
@@ -564,6 +609,182 @@ async fn _get_copilot_token_async() -> Result<String> {
     let token = new_token.token.clone();
     *COPILOT_TOKEN_CACHE.lock() = Some(new_token);
     Ok(token)
+}
+
+// ---------------------------------------------------------------------------
+// Azure Default Credential token caching
+// ---------------------------------------------------------------------------
+
+/// Scope required for Azure AI / Cognitive Services inference endpoints.
+pub(crate) const AZURE_COGNITIVE_SCOPE: &str = "https://cognitiveservices.azure.com/.default";
+
+/// Scope required for Azure AI Foundry Projects API (deployment listing, etc.).
+const AZURE_AI_SCOPE: &str = "https://ai.azure.com/.default";
+
+/// Cached Azure AD bearer token with expiry.
+#[derive(Clone, Debug)]
+struct AzureTokenCache {
+    token: String,
+    /// Unix timestamp (seconds) when this token expires.
+    expires_at: u64,
+}
+
+/// Thread-safe cache for Azure AD tokens, keyed by scope.
+static AZURE_TOKEN_CACHE: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<String, AzureTokenCache>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// Lazily-initialised Azure credential chain: tries ManagedIdentity, then
+/// Azure CLI, then Azure Developer CLI.
+static AZURE_CREDENTIAL: std::sync::LazyLock<
+    Result<Arc<dyn azure_core::credentials::TokenCredential>>,
+> = std::sync::LazyLock::new(|| {
+    use azure_core::credentials::TokenCredential;
+
+    // Build the list of credential sources individually.
+    // Each may succeed at construction but fail at token-acquisition time,
+    // so all are included and tried in sequence during get_token().
+    let mut sources: Vec<Arc<dyn TokenCredential>> = Vec::new();
+
+    if let Ok(c) = azure_identity::ManagedIdentityCredential::new(None) {
+        tracing::debug!("Azure credential chain: ManagedIdentityCredential available");
+        sources.push(c as Arc<dyn TokenCredential>);
+    }
+    if let Ok(c) = azure_identity::AzureCliCredential::new(None) {
+        tracing::debug!("Azure credential chain: AzureCliCredential available");
+        sources.push(c as Arc<dyn TokenCredential>);
+    }
+    if let Ok(c) = azure_identity::AzureDeveloperCliCredential::new(None) {
+        tracing::debug!("Azure credential chain: AzureDeveloperCliCredential available");
+        sources.push(c as Arc<dyn TokenCredential>);
+    }
+
+    if sources.is_empty() {
+        return Err(anyhow!(
+            "no Azure credential sources available (neither Managed Identity nor Azure CLI)"
+        ));
+    }
+
+    tracing::info!("Azure credential chain initialised with {} source(s)", sources.len());
+    Ok(Arc::new(AzureCredentialChain { sources }) as Arc<dyn TokenCredential>)
+});
+
+/// A simple credential chain that tries each source in order until one succeeds.
+struct AzureCredentialChain {
+    sources: Vec<Arc<dyn azure_core::credentials::TokenCredential>>,
+}
+
+impl std::fmt::Debug for AzureCredentialChain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AzureCredentialChain")
+            .field("sources_count", &self.sources.len())
+            .finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl azure_core::credentials::TokenCredential for AzureCredentialChain {
+    async fn get_token(
+        &self,
+        scopes: &[&str],
+        options: Option<azure_core::credentials::TokenRequestOptions<'_>>,
+    ) -> azure_core::Result<azure_core::credentials::AccessToken> {
+        let mut last_error = None;
+        for source in &self.sources {
+            match source.get_token(scopes, options.clone()).await {
+                Ok(token) => return Ok(token),
+                Err(e) => {
+                    tracing::debug!("Azure credential source failed: {e}");
+                    last_error = Some(e);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            azure_core::Error::with_message(
+                azure_core::error::ErrorKind::Credential,
+                "no credential sources available".to_string(),
+            )
+        }))
+    }
+}
+
+/// Acquire an Azure AD bearer token for the given scope, using a cached value
+/// when possible.
+///
+/// Tokens are refreshed when within 5 minutes of expiry.
+pub(crate) fn get_azure_token_blocking(scope: &str) -> Result<String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    {
+        let cache = AZURE_TOKEN_CACHE.lock();
+        if let Some(cached) = cache.get(scope) {
+            if cached.expires_at > now + 300 {
+                return Ok(cached.token.clone());
+            }
+        }
+    }
+
+    // Acquire a fresh token. get_token is async, so handle both
+    // inside-tokio and outside-tokio scenarios.
+    let access_token = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| {
+            handle.block_on(acquire_azure_token_async(scope))
+        })?,
+        Err(_) => {
+            let rt = tokio::runtime::Runtime::new()
+                .context("failed to create tokio runtime for Azure credential")?;
+            rt.block_on(acquire_azure_token_async(scope))?
+        }
+    };
+
+    let token = access_token.token.clone();
+    AZURE_TOKEN_CACHE.lock().insert(scope.to_string(), access_token);
+    Ok(token)
+}
+
+/// Acquire an Azure AD bearer token asynchronously for the given scope.
+#[allow(dead_code)]
+pub(crate) async fn get_azure_token_async(scope: &str) -> Result<String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    {
+        let cache = AZURE_TOKEN_CACHE.lock();
+        if let Some(cached) = cache.get(scope) {
+            if cached.expires_at > now + 300 {
+                return Ok(cached.token.clone());
+            }
+        }
+    }
+
+    let access_token = acquire_azure_token_async(scope).await?;
+    let token = access_token.token.clone();
+    AZURE_TOKEN_CACHE.lock().insert(scope.to_string(), access_token);
+    Ok(token)
+}
+
+/// Internal helper: call the credential chain and convert to our cache struct.
+async fn acquire_azure_token_async(scope: &str) -> Result<AzureTokenCache> {
+    let credential = AZURE_CREDENTIAL
+        .as_ref()
+        .map_err(|e| anyhow!("{e}"))
+        .context("Azure credential chain not available")?;
+
+    let response = credential
+        .get_token(&[scope], None)
+        .await
+        .map_err(|e| anyhow!("Azure token acquisition failed: {e}"))
+        .context("failed to acquire Azure token via credential chain")?;
+
+    let token = response.token.secret().to_string();
+    let expires_at = response.expires_on.unix_timestamp() as u64;
+
+    Ok(AzureTokenCache { token, expires_at })
 }
 
 /// Select the appropriate `ProviderTransport` for the given provider kind.
@@ -2071,6 +2292,156 @@ pub fn invalidate_keyring_cache() {
 
 fn trim_trailing_slash(base_url: &str) -> &str {
     base_url.trim_end_matches('/')
+}
+
+// ---------------------------------------------------------------------------
+// Provider model discovery
+// ---------------------------------------------------------------------------
+
+/// Discover available models from a provider's API.
+///
+/// This handles the provider-specific HTTP calls and auth, returning a sorted
+/// list of model/deployment names.
+pub fn discover_provider_models(
+    kind: &hive_contracts::config::ProviderKindConfig,
+    auth: &ProviderAuth,
+    base_url: &str,
+) -> Result<Vec<String>> {
+    use hive_contracts::config::ProviderKindConfig;
+    let client = shared_blocking_client();
+    let base = trim_trailing_slash(base_url);
+
+    match kind {
+        ProviderKindConfig::Anthropic => discover_anthropic_models(client, base, auth),
+        ProviderKindConfig::OpenAiCompatible => discover_openai_models(client, base, auth),
+        ProviderKindConfig::MicrosoftFoundry => discover_foundry_models(client, base, auth),
+        other => bail!("model discovery not supported for provider kind: {other:?}"),
+    }
+}
+
+fn discover_anthropic_models(client: &Client, base: &str, auth: &ProviderAuth) -> Result<Vec<String>> {
+    let mut all_models = Vec::new();
+    let mut after_id: Option<String> = None;
+    for _ in 0..10 {
+        let mut url = format!("{base}/v1/models?limit=100");
+        if let Some(ref aid) = after_id {
+            url.push_str(&format!("&after_id={aid}"));
+        }
+        let mut req = client.get(&url).header("anthropic-version", "2023-06-01");
+        req = apply_model_discovery_auth(req, auth)?;
+        let resp = req.send().context("Anthropic model list request failed")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            bail!("{status}: {}", &body[..body.len().min(300)]);
+        }
+        let data: serde_json::Value = resp.json().context("invalid JSON from Anthropic")?;
+        if let Some(arr) = data.get("data").and_then(|d| d.as_array()) {
+            for m in arr {
+                if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+                    all_models.push(id.to_string());
+                }
+            }
+        }
+        let has_more = data.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !has_more {
+            break;
+        }
+        after_id = data.get("last_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    }
+    Ok(all_models)
+}
+
+fn discover_openai_models(client: &Client, base: &str, auth: &ProviderAuth) -> Result<Vec<String>> {
+    let url = format!("{base}/models");
+    let mut req = client.get(&url);
+    req = apply_model_discovery_auth(req, auth)?;
+    let resp = req.send().context("OpenAI model list request failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!("{status}: {}", &body[..body.len().min(300)]);
+    }
+    let data: serde_json::Value = resp.json().context("invalid JSON from OpenAI")?;
+    let mut all_models = Vec::new();
+    if let Some(arr) = data.get("data").and_then(|d| d.as_array()) {
+        for m in arr {
+            if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+                all_models.push(id.to_string());
+            }
+        }
+    }
+    all_models.sort();
+    Ok(all_models)
+}
+
+fn discover_foundry_models(client: &Client, base: &str, auth: &ProviderAuth) -> Result<Vec<String>> {
+    // The Foundry Projects API lists only user-deployed models.
+    // The base URL must include the project path, e.g.:
+    //   https://{resource}.services.ai.azure.com/api/projects/{project}
+    let url = format!("{base}/deployments?api-version=v1");
+    let mut req = client.get(&url);
+
+    // The Projects API requires the ai.azure.com scope (different from
+    // the cognitiveservices.azure.com scope used for inference).
+    if matches!(auth, ProviderAuth::AzureDefaultCredential) {
+        let token = get_azure_token_blocking(AZURE_AI_SCOPE)?;
+        req = req.bearer_auth(token);
+    } else {
+        req = apply_model_discovery_auth(req, auth)?;
+    }
+
+    let resp = req.send().context("Foundry deployment list request failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!("{status}: {}", &body[..body.len().min(300)]);
+    }
+    let data: serde_json::Value = resp.json().context("invalid JSON from Foundry")?;
+    let mut all_models = Vec::new();
+    if let Some(arr) = data.get("value").and_then(|d| d.as_array()) {
+        for m in arr {
+            if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
+                all_models.push(name.to_string());
+            }
+        }
+    }
+    all_models.sort();
+    Ok(all_models)
+}
+
+/// Apply auth to a model-discovery request. Reuses the same auth resolution as
+/// inference requests but only needs the blocking path.
+fn apply_model_discovery_auth(
+    request: reqwest::blocking::RequestBuilder,
+    auth: &ProviderAuth,
+) -> Result<reqwest::blocking::RequestBuilder> {
+    match auth {
+        ProviderAuth::None => Ok(request),
+        ProviderAuth::BearerEnv(env_var) => {
+            let token = read_env(env_var)?;
+            Ok(request.bearer_auth(token))
+        }
+        ProviderAuth::BearerKeyring { key } => {
+            let token = read_keyring(key)?;
+            Ok(request.bearer_auth(token))
+        }
+        ProviderAuth::HeaderEnv { env_var, header_name } => {
+            let token = read_env(env_var)?;
+            Ok(request.header(header_name.as_str(), token))
+        }
+        ProviderAuth::HeaderKeyring { key, header_name } => {
+            let token = read_keyring(key)?;
+            Ok(request.header(header_name.as_str(), token))
+        }
+        ProviderAuth::AzureDefaultCredential => {
+            let token = get_azure_token_blocking(AZURE_COGNITIVE_SCOPE)?;
+            Ok(request.bearer_auth(token))
+        }
+        ProviderAuth::GitHubToken | ProviderAuth::GitHubCopilotToken => {
+            bail!("model discovery is not supported for GitHub OAuth providers")
+        }
+    }
 }
 
 /// Partial tool call data extracted from a single SSE chunk.

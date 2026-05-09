@@ -7,6 +7,8 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+azure_core.workspace = true
+azure_identity.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true
 hive-classification = { path = "../hive-classification" }
