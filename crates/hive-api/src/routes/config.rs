@@ -300,7 +300,7 @@ pub(crate) async fn discover_provider_models(
         })?
         .to_string();
 
-    let kind = req.kind.clone();
+    let kind = req.kind;
     let auth = hive_model::ProviderAuth::from_config(&req.kind, &req.auth, &req.id);
 
     let models = tokio::task::spawn_blocking(move || {
