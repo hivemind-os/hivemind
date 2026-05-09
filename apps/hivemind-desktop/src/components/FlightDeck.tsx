@@ -59,6 +59,7 @@ import { Button } from '~/ui/button';
 import { DataTable } from './flight-deck/data-table';
 import { createAgentColumns, type AgentRow, type AgentColumnCallbacks } from './flight-deck/agents-columns';
 import { createWorkflowColumns, type WorkflowRow, type WorkflowColumnCallbacks } from './flight-deck/workflows-columns';
+import { createSessionColumns, type SessionRow } from './flight-deck/sessions-columns';
 import AgentsPanel from './flight-deck/AgentsPanel';
 import WorkflowsPanel from './flight-deck/WorkflowsPanel';
 const KnowledgeExplorer = lazy(() => import('./KnowledgeExplorer'));
@@ -74,6 +75,9 @@ interface ReasoningEvent {
   prompt_preview?: string;
   content?: string;
   token_count?: number;
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_write_tokens?: number;
   tool_id?: string;
   input?: any;
   output?: any;
@@ -197,12 +201,17 @@ const renderEvent = (ev: SupervisorEvent) => {
       switch (re.type) {
         case 'model_call_started':
           return <span class="fd-ev-model"><Brain size={14} /> Model call → {re.model}</span>;
-        case 'model_call_completed':
+        case 'model_call_completed': {
+          const parts: string[] = [];
+          if (re.input_tokens) parts.push(`${re.input_tokens}↑`);
+          parts.push(`${re.token_count ?? 0}↓`);
+          if ((re.cached_input_tokens ?? 0) > 0) parts.push(`${re.cached_input_tokens} cached`);
           return (
             <span class="fd-ev-model-done">
-              <MessageSquare size={14} /> Response ({re.token_count} tokens): {truncate(re.content ?? '', 300)}
+              <MessageSquare size={14} /> Response ({parts.join(', ')}): {truncate(re.content ?? '', 300)}
             </span>
           );
+        }
         case 'tool_call_started':
           return (
             <span class="fd-ev-tool">
@@ -1667,71 +1676,20 @@ const FlightDeck = (props: FlightDeckProps) => {
                     Tab 4: Chat Sessions
                     ============================================================ */}
                 <TabsContent value="sessions" class="flight-deck-tab-panel">
-                  <Show
-                    when={sessions().length > 0}
-                    fallback={
-                      <div class="flight-deck-empty">No active sessions</div>
-                    }
-                  >
-                    <div class="flight-deck-list">
-                      <For each={sessions()}>
-                        {(session) => {
-                          const tel = () => telemetryFor(session.id);
-                          return (
-                            <div class="flight-deck-item">
-                              <div class="flight-deck-item-header">
-                                <span class="flight-deck-item-modality">
-                                  {session.modality === 'spatial' ? <MapIcon size={14} /> : <ClipboardList size={14} />}
-                                </span>
-                                <span class="flight-deck-item-name">
-                                  {session.title || 'Untitled'}
-                                </span>
-                                <span
-                                  class={`flight-deck-status ${chatStateClass(session.state)}`}
-                                >
-                                  {session.state}
-                                </span>
-                              </div>
-                              <div class="flight-deck-item-body">
-                                <Show when={session.queued_count > 0}>
-                                  <div>
-                                    <strong>Queued:</strong> {session.queued_count}
-                                  </div>
-                                </Show>
-                                <Show when={session.last_message_preview}>
-                                  <div class="flight-deck-last-message">
-                                    {session.last_message_preview}
-                                  </div>
-                                </Show>
-                                <Show when={tel()}>
-                                  <div class="flight-deck-session-stats">
-                                    <span>
-                                      Model calls:{' '}
-                                      {formatNumber(tel()!.telemetry.total.model_calls)}
-                                    </span>
-                                    <span>
-                                      Tool calls:{' '}
-                                      {formatNumber(tel()!.telemetry.total.tool_calls)}
-                                    </span>
-                                    <span>
-                                      Tokens:{' '}
-                                      {formatNumber(
-                                        tel()!.telemetry.total.input_tokens +
-                                          tel()!.telemetry.total.output_tokens,
-                                      )}
-                                      {(tel()!.telemetry.total.cached_input_tokens ?? 0) > 0 && (
-                                        <> ({formatNumber(tel()!.telemetry.total.cached_input_tokens!)} cached)</>
-                                      )}
-                                    </span>
-                                  </div>
-                                </Show>
-                              </div>
-                            </div>
-                          );
-                        }}
-                      </For>
-                    </div>
-                  </Show>
+                  {(() => {
+                    const sessionColumns = createSessionColumns();
+                    const sessionRows = createMemo<SessionRow[]>(() =>
+                      sessionTelemetry().map((entry) => ({ entry })),
+                    );
+                    return (
+                      <DataTable
+                        columns={sessionColumns}
+                        data={sessionRows()}
+                        getRowId={(row) => row.entry.session_id}
+                        emptyMessage="No active sessions"
+                      />
+                    );
+                  })()}
                 </TabsContent>
 
                 {/* ============================================================

@@ -492,6 +492,7 @@ mod tests {
             content: "Hello! I can help.".into(),
             token_count: 42,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });
@@ -518,6 +519,7 @@ mod tests {
             content: "orphan".into(),
             token_count: 0,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });
@@ -781,6 +783,7 @@ mod tests {
             content: "Rust is great".into(),
             token_count: 3,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });
@@ -819,6 +822,7 @@ mod tests {
             content: "Final summary".into(),
             token_count: 10,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });
@@ -866,6 +870,7 @@ mod tests {
             content: "done".into(),
             token_count: 1,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });
@@ -977,6 +982,7 @@ mod tests {
             content: "done".into(),
             token_count: 1,
             model: String::new(),
+            input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
         });

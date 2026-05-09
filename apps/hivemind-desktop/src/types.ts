@@ -172,6 +172,7 @@ export type ChatSessionSummary = {
   workspace_path: string;
   workspace_linked: boolean;
   bot_id?: string | null;
+  persona_id?: string | null;
 };
 
 export type ChatSessionSnapshot = {
@@ -1357,6 +1358,7 @@ export interface SessionTelemetryEntry {
   session_id: string;
   title: string;
   state: ChatRunState;
+  persona_id?: string | null;
   telemetry: TelemetrySnapshot;
 }
 

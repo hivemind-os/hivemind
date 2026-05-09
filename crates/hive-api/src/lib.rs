@@ -2064,6 +2064,8 @@ pub struct SessionTelemetryEntry {
     pub session_id: String,
     pub title: String,
     pub state: hive_contracts::ChatRunState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_id: Option<String>,
     pub telemetry: TelemetrySnapshot,
 }
 

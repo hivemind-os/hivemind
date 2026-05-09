@@ -243,7 +243,7 @@ pub(crate) async fn api_all_sessions_telemetry(
                 per_agent: Vec::new(),
                 total: Default::default(),
             });
-            SessionTelemetryEntry { session_id: s.id, title: s.title, state: s.state, telemetry }
+            SessionTelemetryEntry { session_id: s.id, title: s.title, state: s.state, persona_id: s.persona_id, telemetry }
         })
         .collect();
 

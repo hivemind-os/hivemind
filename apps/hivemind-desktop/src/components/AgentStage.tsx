@@ -50,6 +50,9 @@ interface ReasoningEvent {
   prompt_preview?: string;
   content?: string;
   token_count?: number;
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_write_tokens?: number;
   tool_id?: string;
   input?: any;
   output?: any;
@@ -126,12 +129,17 @@ const renderEvent = (ev: SupervisorEvent) => {
       switch (re.type) {
         case 'model_call_started':
           return <span class="ev-model"><Brain size={14} /> Model call → {re.model}</span>;
-        case 'model_call_completed':
+        case 'model_call_completed': {
+          const parts: string[] = [];
+          if (re.input_tokens) parts.push(`${re.input_tokens}↑`);
+          parts.push(`${re.token_count ?? 0}↓`);
+          if ((re.cached_input_tokens ?? 0) > 0) parts.push(`${re.cached_input_tokens} cached`);
           return (
             <span class="ev-model-done">
-              <MessageSquare size={14} /> Response ({re.token_count} tokens): {truncate(re.content ?? '', 300)}
+              <MessageSquare size={14} /> Response ({parts.join(', ')}): {truncate(re.content ?? '', 300)}
             </span>
           );
+        }
         case 'tool_call_started':
           return (
             <span class="ev-tool">

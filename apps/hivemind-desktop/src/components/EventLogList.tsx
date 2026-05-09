@@ -11,6 +11,9 @@ interface ReasoningEvent {
   prompt_preview?: string;
   content?: string;
   token_count?: number;
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_write_tokens?: number;
   tool_id?: string;
   input?: any;
   output?: any;
@@ -152,8 +155,14 @@ function loopEventSummary(ev: SessionEvent): { icon: JSX.Element; label: string;
       const suffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
       return { icon: <Brain size={14} />, label: `Model call → ${data.model || ''}${suffix}`, cls: 'evl-model' };
     }
-    case 'ModelDone':
-      return { icon: <MessageSquare size={14} />, label: `Response from ${data.model || ''}`, cls: 'evl-model-done' };
+    case 'ModelDone': {
+      const parts: string[] = [];
+      if (data.input_tokens) parts.push(`${formatTokenCount(data.input_tokens)}↑`);
+      if (data.output_tokens) parts.push(`${formatTokenCount(data.output_tokens)}↓`);
+      if (data.cached_input_tokens) parts.push(`${formatTokenCount(data.cached_input_tokens)} cached`);
+      const tokenSuffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+      return { icon: <MessageSquare size={14} />, label: `Response from ${data.model || ''}${tokenSuffix}`, cls: 'evl-model-done' };
+    }
     case 'ToolCallStart':
       return { icon: <Wrench size={14} />, label: `Tool: ${data.tool_id || ''}`, cls: 'evl-tool' };
     case 'ToolCallResult':
@@ -222,8 +231,13 @@ function eventSummary(ev: SessionEvent): { icon: JSX.Element; label: string; cls
           const suffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
           return { icon: <Brain size={14} />, label: `Model call → ${re.model || ''}${suffix}`, cls: 'evl-model' };
         }
-        case 'model_call_completed':
-          return { icon: <MessageSquare size={14} />, label: `Response (${re.token_count ?? 0} tokens)`, cls: 'evl-model-done' };
+        case 'model_call_completed': {
+          const parts: string[] = [];
+          if (re.input_tokens) parts.push(`${formatTokenCount(re.input_tokens)}↑`);
+          parts.push(`${formatTokenCount(re.token_count ?? 0)}↓`);
+          if ((re.cached_input_tokens ?? 0) > 0) parts.push(`${formatTokenCount(re.cached_input_tokens!)} cached`);
+          return { icon: <MessageSquare size={14} />, label: `Response (${parts.join(', ')})`, cls: 'evl-model-done' };
+        }
         case 'tool_call_started':
           return { icon: <Wrench size={14} />, label: `Tool: ${re.tool_id || ''}`, cls: 'evl-tool' };
         case 'tool_call_completed':
@@ -273,7 +287,7 @@ function loopEventDetail(ev: SessionEvent): { title: JSX.Element; sections: { la
       sections.push({ label: 'Provider', content: data.provider_id ?? '' });
       sections.push({ label: 'Model', content: data.model ?? '' });
       if (data.estimated_tokens) {
-        sections.push({ label: 'Estimated Tokens', content: `~${formatTokenCount(data.estimated_tokens)}` });
+        sections.push({ label: 'Estimated Input Tokens', content: `~${formatTokenCount(data.estimated_tokens)}` });
       }
       if (data.tool_result_counts && Object.keys(data.tool_result_counts).length > 0) {
         const lines = Object.entries(data.tool_result_counts)
@@ -284,11 +298,21 @@ function loopEventDetail(ev: SessionEvent): { title: JSX.Element; sections: { la
       }
       return { title: <><Brain size={14} /> Model Call → {data.model ?? ''}</>, sections };
 
-    case 'ModelDone':
+    case 'ModelDone': {
       sections.push({ label: 'Provider', content: data.provider_id ?? '' });
       sections.push({ label: 'Model', content: data.model ?? '' });
+      if (data.input_tokens) sections.push({ label: 'Input Tokens', content: formatTokenCount(data.input_tokens) });
+      if (data.output_tokens) sections.push({ label: 'Output Tokens', content: formatTokenCount(data.output_tokens) });
+      if (data.cached_input_tokens) sections.push({ label: 'Cached Input Tokens', content: formatTokenCount(data.cached_input_tokens) });
+      if (data.cache_write_tokens) sections.push({ label: 'Cache Write Tokens', content: formatTokenCount(data.cache_write_tokens) });
       sections.push({ label: 'Content', content: data.content ?? '' });
-      return { title: <><MessageSquare size={14} /> Model Response — {data.model ?? ''}</>, sections };
+      const parts: string[] = [];
+      if (data.input_tokens) parts.push(`${formatTokenCount(data.input_tokens)}↑`);
+      if (data.output_tokens) parts.push(`${formatTokenCount(data.output_tokens)}↓`);
+      if (data.cached_input_tokens) parts.push(`${formatTokenCount(data.cached_input_tokens)} cached`);
+      const info = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+      return { title: <><MessageSquare size={14} /> Model Response{info} — {data.model ?? ''}</>, sections };
+    }
 
     case 'ToolCallStart':
       sections.push({ label: 'Tool', content: data.tool_id ?? '' });
@@ -384,7 +408,7 @@ function eventDetail(ev: SessionEvent): { title: JSX.Element; sections: { label:
         case 'model_call_started':
           sections.push({ label: 'Model', content: re.model ?? '' });
           if (re.estimated_tokens) {
-            sections.push({ label: 'Estimated Tokens', content: `~${formatTokenCount(re.estimated_tokens)}` });
+            sections.push({ label: 'Estimated Input Tokens', content: `~${formatTokenCount(re.estimated_tokens)}` });
           }
           if (re.prompt_preview) sections.push({ label: 'Prompt Preview', content: re.prompt_preview });
           if (re.tool_result_counts && Object.keys(re.tool_result_counts).length > 0) {
@@ -396,11 +420,19 @@ function eventDetail(ev: SessionEvent): { title: JSX.Element; sections: { label:
           }
           return { title: <><Brain size={14} /> Model Call Started → {re.model ?? ''}</>, sections };
 
-        case 'model_call_completed':
+        case 'model_call_completed': {
           sections.push({ label: 'Model', content: re.model ?? '' });
-          sections.push({ label: 'Tokens', content: String(re.token_count ?? 0) });
+          if (re.input_tokens) sections.push({ label: 'Input Tokens', content: formatTokenCount(re.input_tokens) });
+          sections.push({ label: 'Output Tokens', content: formatTokenCount(re.token_count ?? 0) });
+          if (re.cached_input_tokens) sections.push({ label: 'Cached Input Tokens', content: formatTokenCount(re.cached_input_tokens) });
+          if (re.cache_write_tokens) sections.push({ label: 'Cache Write Tokens', content: formatTokenCount(re.cache_write_tokens) });
           sections.push({ label: 'Content', content: re.content ?? '' });
-          return { title: <><MessageSquare size={14} /> Model Response ({re.token_count ?? 0} tokens)</>, sections };
+          const parts: string[] = [];
+          if (re.input_tokens) parts.push(`${formatTokenCount(re.input_tokens)}↑`);
+          parts.push(`${formatTokenCount(re.token_count ?? 0)}↓`);
+          if (re.cached_input_tokens) parts.push(`${formatTokenCount(re.cached_input_tokens)} cached`);
+          return { title: <><MessageSquare size={14} /> Model Response ({parts.join(', ')})</>, sections };
+        }
 
         case 'tool_call_started':
           sections.push({ label: 'Tool', content: re.tool_id ?? '' });

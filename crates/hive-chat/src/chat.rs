@@ -2681,6 +2681,7 @@ impl ChatService {
                     .last()
                     .map(|message| preview(&message.content, 100)),
                 bot_id: session.snapshot.bot_id.clone(),
+                persona_id: session.snapshot.persona_id.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -6656,6 +6657,8 @@ impl ChatService {
                 let fwd_canvas_store = canvas_store.clone();
                 let fwd_prompt = pending.content.clone();
                 let fwd_approval_tx = self.approval_tx.clone();
+                // Grab telemetry accumulator so direct chat model calls are tracked
+                let fwd_telemetry = self.get_or_create_supervisor(&session_id).await.ok().map(|s| Arc::clone(&s.telemetry));
                 let forward_handle = tokio::spawn(async move {
                     let mut generating_set = false;
 
@@ -6692,7 +6695,12 @@ impl ChatService {
                         }
 
                         match &event {
-                            LoopEvent::ModelLoading { model, provider_id, .. } => {
+                            LoopEvent::ModelLoading { model, provider_id, estimated_tokens, .. } => {
+                                // Record estimated input tokens for telemetry
+                                if let (Some(tel), Some(tokens)) = (&fwd_telemetry, estimated_tokens) {
+                                    let model_key = format!("{provider_id}:{model}");
+                                    tel.record_input_tokens("chat", &model_key, *tokens as u64);
+                                }
                                 // Only show "loading model" stage for local runtime models.
                                 // Remote providers don't load models into memory.
                                 let is_local = {
@@ -6713,12 +6721,28 @@ impl ChatService {
                                     .await;
                                 }
                             }
-                            LoopEvent::ModelDone { model, .. } => {
+                            LoopEvent::ModelDone { model, provider_id, output_tokens, cached_input_tokens, cache_write_tokens, .. } => {
+                                // Record model call telemetry
+                                if let Some(tel) = &fwd_telemetry {
+                                    let model_key = format!("{provider_id}:{model}");
+                                    tel.record_model_call(
+                                        "chat",
+                                        &model_key,
+                                        output_tokens.unwrap_or(0) as u64,
+                                        cached_input_tokens.unwrap_or(0) as u64,
+                                        cache_write_tokens.unwrap_or(0) as u64,
+                                    );
+                                }
                                 let mut models = loaded_models.lock();
                                 if models.len() >= 64 {
                                     models.clear();
                                 }
                                 models.insert(model.clone());
+                            }
+                            LoopEvent::ToolCallResult { .. } => {
+                                if let Some(tel) = &fwd_telemetry {
+                                    tel.record_tool_call("chat");
+                                }
                             }
                             LoopEvent::Token { .. } if !generating_set => {
                                 generating_set = true;
@@ -9310,10 +9334,11 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
             estimated_tokens: *estimated_tokens,
         },
         LoopEvent::Token { delta } => ReasoningEvent::TokenDelta { token: delta.clone() },
-        LoopEvent::ModelDone { content, model, output_tokens, cached_input_tokens, cache_write_tokens, .. } => ReasoningEvent::ModelCallCompleted {
+        LoopEvent::ModelDone { content, model, input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, .. } => ReasoningEvent::ModelCallCompleted {
             token_count: output_tokens.unwrap_or_else(|| content.split_whitespace().count() as u32),
             content: content.clone(),
             model: model.clone(),
+            input_tokens: *input_tokens,
             cached_input_tokens: *cached_input_tokens,
             cache_write_tokens: *cache_write_tokens,
         },

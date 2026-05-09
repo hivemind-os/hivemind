@@ -51,6 +51,9 @@ pub enum ReasoningEvent {
         token_count: u32,
         #[serde(default)]
         model: String,
+        /// Provider-reported input token count, if available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u32>,
         /// Input tokens served from prompt cache, if reported by the provider.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cached_input_tokens: Option<u32>,
@@ -278,6 +281,8 @@ pub struct ChatSessionSummary {
     pub last_message_preview: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
