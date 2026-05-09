@@ -87,12 +87,16 @@ export type AgentStatus = 'spawning' | 'active' | 'waiting' | 'paused' | 'blocke
 export interface ModelUsage {
   input_tokens: number;
   output_tokens: number;
+  cached_input_tokens?: number;
+  cache_write_tokens?: number;
   calls: number;
 }
 
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
+  cached_input_tokens?: number;
+  cache_write_tokens?: number;
   model_calls: number;
   tool_calls: number;
   per_model: Record<string, ModelUsage>;

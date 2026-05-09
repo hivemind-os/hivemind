@@ -98,6 +98,8 @@ impl ProviderTransport for FoundryTransport {
             usage: response.usage.map(|u| CompletionUsage {
                 input_tokens: u.prompt_tokens.unwrap_or(0),
                 output_tokens: u.completion_tokens.unwrap_or(0),
+                cached_input_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens).unwrap_or(0),
+                ..Default::default()
             }),
         })
     }

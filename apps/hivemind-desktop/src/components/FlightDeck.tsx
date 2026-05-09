@@ -446,6 +446,8 @@ const FlightDeck = (props: FlightDeckProps) => {
         if (existing) {
           existing.input_tokens += usage.input_tokens;
           existing.output_tokens += usage.output_tokens;
+          existing.cached_input_tokens = (existing.cached_input_tokens ?? 0) + (usage.cached_input_tokens ?? 0);
+          existing.cache_write_tokens = (existing.cache_write_tokens ?? 0) + (usage.cache_write_tokens ?? 0);
           existing.model_calls += usage.model_calls;
           existing.tool_calls += usage.tool_calls;
         } else {
@@ -1716,6 +1718,9 @@ const FlightDeck = (props: FlightDeckProps) => {
                                       {formatNumber(
                                         tel()!.telemetry.total.input_tokens +
                                           tel()!.telemetry.total.output_tokens,
+                                      )}
+                                      {(tel()!.telemetry.total.cached_input_tokens ?? 0) > 0 && (
+                                        <> ({formatNumber(tel()!.telemetry.total.cached_input_tokens!)} cached)</>
                                       )}
                                     </span>
                                   </div>

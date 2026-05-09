@@ -342,6 +342,8 @@ impl LoopStrategy for ReActStrategy {
                         model: model.clone(),
                         input_tokens: streamed_usage.as_ref().map(|u| u.input_tokens).filter(|&t| t > 0),
                         output_tokens: streamed_usage.as_ref().map(|u| u.output_tokens).filter(|&t| t > 0),
+                        cached_input_tokens: streamed_usage.as_ref().map(|u| u.cached_input_tokens).filter(|&t| t > 0),
+                        cache_write_tokens: streamed_usage.as_ref().map(|u| u.cache_write_tokens).filter(|&t| t > 0),
                     });
 
                     CompletionResponse {

@@ -82,6 +82,8 @@ impl ProviderTransport for AnthropicTransport {
             usage: response.usage.map(|u| CompletionUsage {
                 input_tokens: u.input_tokens.unwrap_or(0),
                 output_tokens: u.output_tokens.unwrap_or(0),
+                cached_input_tokens: u.cache_read_input_tokens.unwrap_or(0),
+                cache_write_tokens: u.cache_creation_input_tokens.unwrap_or(0),
             }),
         })
     }

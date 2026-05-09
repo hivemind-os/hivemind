@@ -290,11 +290,19 @@ impl AgentSupervisor {
                             hive_contracts::ReasoningEvent::ModelCallCompleted {
                                 ref model,
                                 token_count,
+                                cached_input_tokens,
+                                cache_write_tokens,
                                 ..
                             },
                     } = event
                     {
-                        telemetry.record_model_call(agent_id, model, token_count as u64);
+                        telemetry.record_model_call(
+                            agent_id,
+                            model,
+                            token_count as u64,
+                            cached_input_tokens.unwrap_or(0) as u64,
+                            cache_write_tokens.unwrap_or(0) as u64,
+                        );
                     }
 
                     // Store the final result on the agent handle when it completes

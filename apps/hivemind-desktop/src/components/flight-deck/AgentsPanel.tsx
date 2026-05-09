@@ -221,7 +221,7 @@ export default function AgentsPanel(props: AgentsPanelProps) {
                     </Show>
                     <Show when={usage()}>
                       <div class="fd-telemetry-row">
-                        <span>{formatTokens(totalTokens(usage()))} tokens</span>
+                        <span>{formatTokens(totalTokens(usage()))} tokens{(usage()!.cached_input_tokens ?? 0) > 0 ? ` (${formatTokens(usage()!.cached_input_tokens!)} cached)` : ''}</span>
                         <span>{usage()!.model_calls} calls</span>
                         <span>{usage()!.tool_calls} tools</span>
                       </div>

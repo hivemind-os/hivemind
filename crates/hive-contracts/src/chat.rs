@@ -51,6 +51,12 @@ pub enum ReasoningEvent {
         token_count: u32,
         #[serde(default)]
         model: String,
+        /// Input tokens served from prompt cache, if reported by the provider.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cached_input_tokens: Option<u32>,
+        /// Input tokens written to prompt cache (Anthropic), if reported.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_write_tokens: Option<u32>,
     },
     ToolCallStarted {
         tool_id: String,

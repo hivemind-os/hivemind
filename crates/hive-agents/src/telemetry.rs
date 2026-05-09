@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 pub struct ModelUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub cached_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub cache_write_tokens: u64,
     pub calls: u32,
 }
 
@@ -15,10 +19,18 @@ pub struct ModelUsage {
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub cached_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub cache_write_tokens: u64,
     pub model_calls: u32,
     pub tool_calls: u32,
     #[serde(default)]
     pub per_model: HashMap<String, ModelUsage>,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,6 +44,8 @@ pub struct TokenAccumulator {
     per_agent: DashMap<String, TokenUsage>,
     total_input: AtomicU64,
     total_output: AtomicU64,
+    total_cached_input: AtomicU64,
+    total_cache_write: AtomicU64,
     total_model_calls: AtomicU64,
     total_tool_calls: AtomicU64,
 }
@@ -42,22 +56,37 @@ impl TokenAccumulator {
             per_agent: DashMap::new(),
             total_input: AtomicU64::new(0),
             total_output: AtomicU64::new(0),
+            total_cached_input: AtomicU64::new(0),
+            total_cache_write: AtomicU64::new(0),
             total_model_calls: AtomicU64::new(0),
             total_tool_calls: AtomicU64::new(0),
         }
     }
 
     /// Record a model call's token usage with model name.
-    pub fn record_model_call(&self, agent_id: &str, model: &str, output_tokens: u64) {
+    pub fn record_model_call(
+        &self,
+        agent_id: &str,
+        model: &str,
+        output_tokens: u64,
+        cached_input_tokens: u64,
+        cache_write_tokens: u64,
+    ) {
         let mut entry = self.per_agent.entry(agent_id.to_string()).or_default();
         entry.output_tokens += output_tokens;
+        entry.cached_input_tokens += cached_input_tokens;
+        entry.cache_write_tokens += cache_write_tokens;
         entry.model_calls += 1;
 
         let model_entry = entry.per_model.entry(model.to_string()).or_default();
         model_entry.output_tokens += output_tokens;
+        model_entry.cached_input_tokens += cached_input_tokens;
+        model_entry.cache_write_tokens += cache_write_tokens;
         model_entry.calls += 1;
 
         self.total_output.fetch_add(output_tokens, Ordering::Relaxed);
+        self.total_cached_input.fetch_add(cached_input_tokens, Ordering::Relaxed);
+        self.total_cache_write.fetch_add(cache_write_tokens, Ordering::Relaxed);
         self.total_model_calls.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -94,6 +123,8 @@ impl TokenAccumulator {
                 let entry = total_per_model.entry(model.clone()).or_default();
                 entry.input_tokens += usage.input_tokens;
                 entry.output_tokens += usage.output_tokens;
+                entry.cached_input_tokens += usage.cached_input_tokens;
+                entry.cache_write_tokens += usage.cache_write_tokens;
                 entry.calls += usage.calls;
             }
         }
@@ -103,6 +134,8 @@ impl TokenAccumulator {
             total: TokenUsage {
                 input_tokens: self.total_input.load(Ordering::Relaxed),
                 output_tokens: self.total_output.load(Ordering::Relaxed),
+                cached_input_tokens: self.total_cached_input.load(Ordering::Relaxed),
+                cache_write_tokens: self.total_cache_write.load(Ordering::Relaxed),
                 model_calls: self.total_model_calls.load(Ordering::Relaxed) as u32,
                 tool_calls: self.total_tool_calls.load(Ordering::Relaxed) as u32,
                 per_model: total_per_model,
@@ -115,6 +148,8 @@ impl TokenAccumulator {
         self.per_agent.clear();
         self.total_input.store(0, Ordering::Relaxed);
         self.total_output.store(0, Ordering::Relaxed);
+        self.total_cached_input.store(0, Ordering::Relaxed);
+        self.total_cache_write.store(0, Ordering::Relaxed);
         self.total_model_calls.store(0, Ordering::Relaxed);
         self.total_tool_calls.store(0, Ordering::Relaxed);
     }
@@ -133,7 +168,7 @@ mod tests {
     #[test]
     fn test_record_model_call_updates_totals() {
         let acc = TokenAccumulator::new(None);
-        acc.record_model_call("agent-1", "gpt-4o", 50);
+        acc.record_model_call("agent-1", "gpt-4o", 50, 0, 0);
         let snap = acc.snapshot();
         assert_eq!(snap.total.output_tokens, 50);
         assert_eq!(snap.total.model_calls, 1);
@@ -142,9 +177,9 @@ mod tests {
     #[test]
     fn test_per_agent_tracking() {
         let acc = TokenAccumulator::new(None);
-        acc.record_model_call("agent-1", "gpt-4o", 50);
-        acc.record_model_call("agent-2", "claude-sonnet", 100);
-        acc.record_model_call("agent-1", "gpt-4o", 25);
+        acc.record_model_call("agent-1", "gpt-4o", 50, 0, 0);
+        acc.record_model_call("agent-2", "claude-sonnet", 100, 0, 0);
+        acc.record_model_call("agent-1", "gpt-4o", 25, 0, 0);
         let snap = acc.snapshot();
         assert_eq!(snap.per_agent.len(), 2);
 
@@ -160,9 +195,9 @@ mod tests {
     #[test]
     fn test_per_model_tracking() {
         let acc = TokenAccumulator::new(None);
-        acc.record_model_call("agent-1", "gpt-4o", 50);
-        acc.record_model_call("agent-1", "claude-sonnet", 100);
-        acc.record_model_call("agent-1", "gpt-4o", 30);
+        acc.record_model_call("agent-1", "gpt-4o", 50, 0, 0);
+        acc.record_model_call("agent-1", "claude-sonnet", 100, 0, 0);
+        acc.record_model_call("agent-1", "gpt-4o", 30, 0, 0);
         let snap = acc.snapshot();
 
         let a1 = snap.per_agent.iter().find(|(id, _)| id == "agent-1").unwrap();
@@ -189,7 +224,7 @@ mod tests {
     #[test]
     fn test_reset_clears_all() {
         let acc = TokenAccumulator::new(None);
-        acc.record_model_call("a", "gpt-4o", 50);
+        acc.record_model_call("a", "gpt-4o", 50, 0, 0);
         acc.record_tool_call("a");
         acc.reset();
         let snap = acc.snapshot();

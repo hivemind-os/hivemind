@@ -232,6 +232,16 @@ pub struct CompletionUsage {
     pub input_tokens: u32,
     /// Number of tokens in the completion / output.
     pub output_tokens: u32,
+    /// Input tokens served from the provider's prompt cache (subset of `input_tokens`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cached_input_tokens: u32,
+    /// Input tokens written to the provider's prompt cache (Anthropic-specific).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cache_write_tokens: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1750,17 +1760,24 @@ fn format_tools_anthropic(tools: &[ToolDefinition]) -> Option<Vec<serde_json::Va
     if tools.is_empty() {
         return None;
     }
+    let last_idx = tools.len() - 1;
     // Anthropic tool names must match ^[a-zA-Z0-9_-]{1,128}$
     Some(
         tools
             .iter()
-            .map(|t| {
+            .enumerate()
+            .map(|(i, t)| {
                 let name = sanitize_tool_name(&t.id);
-                json!({
+                let mut tool = json!({
                     "name": name,
                     "description": t.description,
                     "input_schema": t.input_schema
-                })
+                });
+                // Mark the last tool with cache_control for prompt caching.
+                if i == last_idx {
+                    tool["cache_control"] = json!({"type": "ephemeral"});
+                }
+                tool
             })
             .collect(),
     )
@@ -1894,12 +1911,22 @@ fn openai_messages_from_request(request: &CompletionRequest) -> Vec<OpenAiMessag
 
 fn anthropic_messages_from_request(
     request: &CompletionRequest,
-) -> (Option<String>, Vec<AnthropicMessage>) {
+) -> (Option<AnthropicSystemContent>, Vec<AnthropicMessage>) {
     // Anthropic requires system messages as a top-level `system` parameter,
     // not as `{"role": "system"}` entries in the messages array.
+    // We use structured content blocks so we can attach cache_control.
     let system_parts: Vec<String> =
         request.messages.iter().filter(|m| m.role == "system").map(|m| m.content.clone()).collect();
-    let system = if system_parts.is_empty() { None } else { Some(system_parts.join("\n\n")) };
+    let system = if system_parts.is_empty() {
+        None
+    } else {
+        let text = system_parts.join("\n\n");
+        Some(AnthropicSystemContent::Blocks(vec![AnthropicSystemBlock {
+            block_type: "text".to_string(),
+            text,
+            cache_control: Some(CacheControl::ephemeral()),
+        }]))
+    };
 
     let mut messages: Vec<AnthropicMessage> = Vec::new();
 
@@ -1912,7 +1939,7 @@ fn anthropic_messages_from_request(
                     .iter()
                     .filter_map(|block| match block {
                         MessageBlock::Text { text } => {
-                            Some(AnthropicContentPart::Text { text: text.clone() })
+                            Some(AnthropicContentPart::Text { text: text.clone(), cache_control: None })
                         }
                         MessageBlock::ToolUse { id, name, input } => {
                             Some(AnthropicContentPart::ToolUse {
@@ -1975,7 +2002,7 @@ fn anthropic_messages_from_request(
                     .iter()
                     .map(|part| match part {
                         ContentPart::Text { text } => {
-                            AnthropicContentPart::Text { text: text.clone() }
+                            AnthropicContentPart::Text { text: text.clone(), cache_control: None }
                         }
                         ContentPart::Image { media_type, data } => AnthropicContentPart::Image {
                             source: AnthropicImageSource {
@@ -1989,6 +2016,29 @@ fn anthropic_messages_from_request(
             )
         };
         messages.push(AnthropicMessage { role: "user".to_string(), content: prompt_content });
+    }
+
+    // Mark the last text content in the last user message with cache_control
+    // for Anthropic prompt caching. This caches the conversation prefix up to
+    // and including the most recent user turn.
+    for msg in messages.iter_mut().rev() {
+        if msg.role == "user" {
+            if let AnthropicContent::Parts(ref mut parts) = msg.content {
+                for part in parts.iter_mut().rev() {
+                    if let AnthropicContentPart::Text { cache_control, .. } = part {
+                        *cache_control = Some(CacheControl::ephemeral());
+                        break;
+                    }
+                }
+            } else if let AnthropicContent::Text(text) = std::mem::replace(&mut msg.content, AnthropicContent::Text(String::new())) {
+                // Convert plain text to a structured block so we can attach cache_control.
+                msg.content = AnthropicContent::Parts(vec![AnthropicContentPart::Text {
+                    text,
+                    cache_control: Some(CacheControl::ephemeral()),
+                }]);
+            }
+            break;
+        }
     }
 
     (system, messages)
@@ -2021,7 +2071,7 @@ fn anthropic_content_from_completion(msg: &CompletionMessage) -> AnthropicConten
         msg.content_parts
             .iter()
             .map(|part| match part {
-                ContentPart::Text { text } => AnthropicContentPart::Text { text: text.clone() },
+                ContentPart::Text { text } => AnthropicContentPart::Text { text: text.clone(), cache_control: None },
                 ContentPart::Image { media_type, data } => AnthropicContentPart::Image {
                     source: AnthropicImageSource {
                         source_type: "base64".to_string(),
@@ -2101,6 +2151,13 @@ struct OpenAiChatResponse {
 struct OpenAiUsage {
     prompt_tokens: Option<u32>,
     completion_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_tokens_details: Option<OpenAiPromptTokensDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiPromptTokensDetails {
+    cached_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2132,10 +2189,39 @@ struct AnthropicRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<AnthropicSystemContent>,
     messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
+}
+
+/// Anthropic system content: structured content blocks with optional cache control.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum AnthropicSystemContent {
+    /// Array of typed system content blocks (supports cache_control).
+    Blocks(Vec<AnthropicSystemBlock>),
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicSystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self { cache_type: "ephemeral".to_string() }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -2157,6 +2243,8 @@ enum AnthropicContent {
 enum AnthropicContentPart {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     Image {
         source: AnthropicImageSource,
@@ -2192,6 +2280,10 @@ struct AnthropicResponse {
 struct AnthropicUsage {
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2229,7 +2321,7 @@ struct AnthropicStreamRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<AnthropicSystemContent>,
     messages: Vec<AnthropicMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2483,8 +2575,14 @@ fn parse_openai_sse_data(data: &str, provider_id: &str) -> Result<SseParseResult
     let usage = chunk.usage.and_then(|u| {
         let input = u.prompt_tokens.unwrap_or(0);
         let output = u.completion_tokens.unwrap_or(0);
+        let cached = u.prompt_tokens_details.and_then(|d| d.cached_tokens).unwrap_or(0);
         if input > 0 || output > 0 {
-            Some(CompletionUsage { input_tokens: input, output_tokens: output })
+            Some(CompletionUsage {
+                input_tokens: input,
+                output_tokens: output,
+                cached_input_tokens: cached,
+                ..Default::default()
+            })
         } else {
             None
         }
@@ -2545,14 +2643,21 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
 
     match event_type {
         "message_start" => {
-            // Anthropic sends input_tokens in the message_start event.
+            // Anthropic sends input_tokens and cache info in the message_start event.
             let usage = value
                 .get("message")
                 .and_then(|m| m.get("usage"))
                 .and_then(|u| {
                     let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    if input > 0 {
-                        Some(CompletionUsage { input_tokens: input, output_tokens: 0 })
+                    let cache_read = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let cache_write = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    if input > 0 || cache_read > 0 || cache_write > 0 {
+                        Some(CompletionUsage {
+                            input_tokens: input,
+                            output_tokens: 0,
+                            cached_input_tokens: cache_read,
+                            cache_write_tokens: cache_write,
+                        })
                     } else {
                         None
                     }
@@ -2634,7 +2739,7 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
             let usage = value.get("usage").and_then(|u| {
                 let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 if output > 0 {
-                    Some(CompletionUsage { input_tokens: 0, output_tokens: output })
+                    Some(CompletionUsage { input_tokens: 0, output_tokens: output, ..Default::default() })
                 } else {
                     None
                 }
@@ -4386,7 +4491,7 @@ mod tests {
 
     #[test]
     fn completion_usage_serde_roundtrip() {
-        let usage = CompletionUsage { input_tokens: 100, output_tokens: 50 };
+        let usage = CompletionUsage { input_tokens: 100, output_tokens: 50, ..Default::default() };
         let json = serde_json::to_string(&usage).unwrap();
         let parsed: CompletionUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.input_tokens, 100);
@@ -4400,7 +4505,7 @@ mod tests {
             model: "gpt-4".to_string(),
             content: "Hello".to_string(),
             tool_calls: vec![],
-            usage: Some(CompletionUsage { input_tokens: 100, output_tokens: 50 }),
+            usage: Some(CompletionUsage { input_tokens: 100, output_tokens: 50, ..Default::default() }),
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: CompletionResponse = serde_json::from_str(&json).unwrap();

@@ -492,6 +492,8 @@ mod tests {
             content: "Hello! I can help.".into(),
             token_count: 42,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
 
         assert_eq!(events.len(), 1);
@@ -516,6 +518,8 @@ mod tests {
             content: "orphan".into(),
             token_count: 0,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
         assert!(events.is_empty());
     }
@@ -777,6 +781,8 @@ mod tests {
             content: "Rust is great".into(),
             token_count: 3,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
         assert_eq!(events.len(), 1);
         total_events.extend(events);
@@ -813,6 +819,8 @@ mod tests {
             content: "Final summary".into(),
             token_count: 10,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
         assert_eq!(events.len(), 1);
         total_events.extend(events);
@@ -858,6 +866,8 @@ mod tests {
             content: "done".into(),
             token_count: 1,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
 
         // Second child (sibling)
@@ -967,6 +977,8 @@ mod tests {
             content: "done".into(),
             token_count: 1,
             model: String::new(),
+            cached_input_tokens: None,
+            cache_write_tokens: None,
         });
         assert_eq!(obs.card_stack.len(), 1); // popped back to root
     }

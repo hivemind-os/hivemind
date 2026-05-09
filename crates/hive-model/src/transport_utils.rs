@@ -232,6 +232,12 @@ pub(crate) fn sse_completion_stream(
                         if event_usage.output_tokens > 0 {
                             acc.output_tokens = event_usage.output_tokens;
                         }
+                        if event_usage.cached_input_tokens > 0 {
+                            acc.cached_input_tokens = event_usage.cached_input_tokens;
+                        }
+                        if event_usage.cache_write_tokens > 0 {
+                            acc.cache_write_tokens = event_usage.cache_write_tokens;
+                        }
                     }
 
                     // Accumulate tool call deltas and build snapshot entries

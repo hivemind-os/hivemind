@@ -338,6 +338,10 @@ pub enum LoopEvent {
         input_tokens: Option<u32>,
         /// Provider-reported output token count, if available.
         output_tokens: Option<u32>,
+        /// Input tokens served from prompt cache, if available.
+        cached_input_tokens: Option<u32>,
+        /// Input tokens written to prompt cache (Anthropic), if available.
+        cache_write_tokens: Option<u32>,
     },
     /// A tool call is starting
     ToolCallStart { tool_id: String, input: String },

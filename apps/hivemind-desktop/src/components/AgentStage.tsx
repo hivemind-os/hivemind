@@ -1161,7 +1161,7 @@ const AgentStage = (props: AgentStageProps) => {
       <div class="agent-stage-header">
         <div class="agent-stage-summary">
           <span><BarChart3 size={14} /> {agents().length} agent{agents().length === 1 ? '' : 's'}</span>
-          <span title="Input + Output tokens">{formatTokens(totalTokens(telemetry()?.total))} tokens ({formatTokens(telemetry()?.total?.input_tokens ?? 0)}↑ {formatTokens(telemetry()?.total?.output_tokens ?? 0)}↓)</span>
+          <span title="Input + Output tokens">{formatTokens(totalTokens(telemetry()?.total))} tokens ({formatTokens(telemetry()?.total?.input_tokens ?? 0)}↑{(telemetry()?.total?.cached_input_tokens ?? 0) > 0 ? ` (${formatTokens(telemetry()!.total.cached_input_tokens!)} cached)` : ''} {formatTokens(telemetry()?.total?.output_tokens ?? 0)}↓)</span>
           <span>{telemetry()?.total?.model_calls ?? 0} LLM calls</span>
           <span>{telemetry()?.total?.tool_calls ?? 0} tool calls</span>
         </div>
@@ -1386,7 +1386,7 @@ const AgentStage = (props: AgentStageProps) => {
                       </div>
 
                       <div class="agent-card-telemetry">
-                        <span title="Input ↑ / Output ↓">{formatTokens(usage()?.input_tokens ?? 0)}↑ {formatTokens(usage()?.output_tokens ?? 0)}↓</span>
+                        <span title="Input ↑ / Output ↓">{formatTokens(usage()?.input_tokens ?? 0)}↑{(usage()?.cached_input_tokens ?? 0) > 0 ? ` (${formatTokens(usage()!.cached_input_tokens!)} cached)` : ''} {formatTokens(usage()?.output_tokens ?? 0)}↓</span>
                         <span>{usage()?.model_calls ?? 0} calls</span>
                         <span>{usage()?.tool_calls ?? 0} tools</span>
                       </div>
@@ -1395,7 +1395,7 @@ const AgentStage = (props: AgentStageProps) => {
                           <For each={Object.entries(usage()?.per_model ?? {})}>
                             {([model, mu]) => (
                               <span class="model-usage-badge" title={model}>
-                                {shortModel(model)}: {mu.calls}× {formatTokens(mu.input_tokens)}↑ {formatTokens(mu.output_tokens)}↓
+                                {shortModel(model)}: {mu.calls}× {formatTokens(mu.input_tokens)}↑{(mu.cached_input_tokens ?? 0) > 0 ? ` (${formatTokens(mu.cached_input_tokens!)} cached)` : ''} {formatTokens(mu.output_tokens)}↓
                               </span>
                             )}
                           </For>
