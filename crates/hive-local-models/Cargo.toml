@@ -1,5 +1,6 @@
 [package]
 name = "hive-local-models"
+description = "Local model download management, lifecycle, and runtime coordination"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

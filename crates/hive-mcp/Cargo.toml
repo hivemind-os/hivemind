@@ -1,5 +1,6 @@
 [package]
 name = "hive-mcp"
+description = "Model Context Protocol (MCP) client for discovering and invoking external tool servers"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

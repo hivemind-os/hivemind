@@ -1,5 +1,6 @@
 [package]
 name = "hive-test-utils"
+description = "Testing utilities: mock model providers and ephemeral daemon harnesses"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

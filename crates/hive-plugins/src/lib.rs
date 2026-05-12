@@ -13,10 +13,10 @@
 //! ## Architecture
 //!
 //! ```text
-//! PluginRegistry ──── discovers/installs/uninstalls plugins
-//! PluginHost ──────── spawns & manages plugin processes
-//! PluginBridgeTool ── wraps plugin tools for the agent ToolRegistry
-//! MessageRouter ───── routes plugin messages into ConnectorService
+//! PluginRegistry ──────── discovers/installs/uninstalls plugins
+//! PluginHost ────────────  spawns & manages plugin processes
+//! PluginBridgeTool ────── wraps plugin tools for the agent ToolRegistry
+//! PluginMessageRouter ─── deduplicates/logs plugin messages for the host pipeline
 //! ```
 
 pub mod bridge;

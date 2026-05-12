@@ -1,5 +1,6 @@
 [package]
 name = "hive-runtime-worker"
+description = "Out-of-process inference worker binary for local model execution"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

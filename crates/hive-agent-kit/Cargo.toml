@@ -1,5 +1,6 @@
 [package]
 name = "hive-agent-kit"
+description = "Agent kit definitions and bundled agent-kit loading"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

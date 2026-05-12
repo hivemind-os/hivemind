@@ -1,3 +1,25 @@
+//! # hive-mcp
+//!
+//! Model Context Protocol client integration for HiveMind OS. This crate manages
+//! configured MCP servers, connects over supported transports, tracks server state,
+//! and exposes tools, resources, prompts, and notifications to the rest of the workspace.
+//!
+//! ## Key exports
+//!
+//! - [`McpService`] and [`McpServiceError`] — connect to servers and perform MCP operations.
+//! - [`McpCatalogStore`] and [`CatalogedTool`] — persist discovered tool metadata.
+//! - [`SessionMcpManager`] — build per-session MCP views for chat and agent flows.
+//! - [`runtime`] and [`streamable_http`] — runtime helpers and Streamable HTTP transport support.
+//!
+//! ## Crate relationships
+//!
+//! Uses config and secret-handling types from `hive-core` plus shared MCP contracts from
+//! `hive-contracts`; `hive-tools`, `hive-chat`, and `hive-api` use it to expose external tools.
+//!
+//! ## Usage notes
+//!
+//! This crate supports stdio, SSE, and Streamable HTTP transports, and can integrate managed Node.js or Python runtimes when available.
+
 pub use hive_contracts::{
     ChannelClass, McpAppResource, McpCallToolResult, McpCatalog, McpCatalogEntry, McpConnectedTool,
     McpConnectionStatus, McpNotificationEvent, McpNotificationKind, McpPromptArgumentInfo,

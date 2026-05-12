@@ -1,5 +1,6 @@
 [package]
 name = "hive-skills-service"
+description = "Runtime service for skill resolution, execution context, and session integration"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

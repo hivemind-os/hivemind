@@ -1,5 +1,6 @@
 [package]
 name = "hive-inference"
+description = "Local model inference runtimes (Candle, llama.cpp, ONNX) and HuggingFace Hub integration"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

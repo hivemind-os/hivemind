@@ -1,5 +1,6 @@
 [package]
 name = "hive-workflow"
+description = "Workflow engine for multi-step YAML-defined automations"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

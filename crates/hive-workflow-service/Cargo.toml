@@ -1,5 +1,6 @@
 [package]
 name = "hive-workflow-service"
+description = "High-level workflow orchestration service connecting workflow engine to chat sessions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

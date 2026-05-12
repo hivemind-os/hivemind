@@ -1,5 +1,6 @@
 [package]
 name = "hive-skills"
+description = "Skill definitions and prompt-template loading for persona capabilities"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

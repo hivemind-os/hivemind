@@ -1,5 +1,6 @@
 [package]
 name = "hive-loop"
+description = "Agentic loop engine with pluggable reasoning strategies and middleware pipeline"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

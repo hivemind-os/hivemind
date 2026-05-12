@@ -1,5 +1,6 @@
 [package]
 name = "hive-canvas"
+description = "Spatial canvas with R-tree indexing for node-based visual layouts"
 version.workspace = true
 edition.workspace = true
 

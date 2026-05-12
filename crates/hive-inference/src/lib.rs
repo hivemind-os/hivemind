@@ -1,3 +1,25 @@
+//! # hive-inference
+//!
+//! Local model inference runtime support for HiveMind OS. This crate covers
+//! hardware detection, model discovery and downloads, registry persistence, runtime
+//! execution, and worker-process coordination for on-device inference backends.
+//!
+//! ## Key exports
+//!
+//! - [`HubClient`] and [`DownloadProgress`] — discover and fetch model artifacts.
+//! - [`LocalModelRegistry`] and [`SqliteModelRegistry`] — persist installed model metadata.
+//! - [`InferenceRuntime`], [`InferenceRequest`], and [`InferenceOutput`] — backend runtime contract.
+//! - [`RuntimeManager`] and [`RuntimeWorkerProxy`] — manage loaded runtimes and worker processes.
+//!
+//! ## Crate relationships
+//!
+//! Depends on `hive-core`, `hive-contracts`, and `hive-classification`, and is used by
+//! `hive-model`, `hive-chat`, and `hive-api` to supply local-model capabilities.
+//!
+//! ## Usage notes
+//!
+//! Enable the `candle`, `llama-cpp`, or `onnx` features to compile specific local inference backends.
+
 pub mod defaults;
 pub mod embedding;
 pub mod hardware;

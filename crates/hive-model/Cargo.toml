@@ -1,5 +1,6 @@
 [package]
 name = "hive-model"
+description = "Model routing, provider adapters, and multi-provider LLM orchestration"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

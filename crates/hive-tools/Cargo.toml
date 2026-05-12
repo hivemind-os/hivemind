@@ -1,5 +1,6 @@
 [package]
 name = "hive-tools"
+description = "Tool registry, built-in tool implementations, and MCP tool bridge"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

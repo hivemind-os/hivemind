@@ -1,5 +1,6 @@
 [package]
 name = "hive-api"
+description = "Axum HTTP API server exposing daemon functionality as REST endpoints"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,3 +1,18 @@
+//! # hive-connectors
+//!
+//! Connector abstractions and provider adapters for HiveMind OS.
+//!
+//! This crate defines the [`Connector`] trait and provides concrete provider implementations
+//! for communication (email, Slack, Discord, Microsoft), calendar, contacts, and drive services.
+//! It also includes the [`ConnectorRegistry`] for managing connector instances,
+//! [`ConnectorService`] for lifecycle and polling, [`ResourceResolver`] for unified resource
+//! lookups, and [`ServiceRegistry`] for dynamically-discovered connector service tools.
+//!
+//! ## Crate relationships
+//!
+//! Depends on `hive-contracts` for shared types. Consumed by `hive-chat`, `hive-tools`,
+//! `hive-workflow-service`, and `hive-api`.
+
 pub mod adapters;
 pub mod audit;
 pub mod config;

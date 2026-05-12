@@ -1,3 +1,25 @@
+//! # hive-cli
+//!
+//! Command-line entry point for HiveMind OS. This binary provides a thin wrapper
+//! around daemon lifecycle helpers, configuration inspection, and update checks so
+//! users and scripts can control the local runtime from a terminal.
+//!
+//! ## Key commands
+//!
+//! - `hive daemon start|status|stop` — manage the background daemon process.
+//! - `hive daemon load|unload` — register or remove daemon auto-start behavior.
+//! - `hive config show|validate` — inspect and validate configuration files.
+//! - `hive update` — fetch the latest updater manifest and print download details.
+//!
+//! ## Crate relationships
+//!
+//! Delegates almost all runtime work to `hive-core` and is the primary CLI companion
+//! to the `hive-daemon` binary.
+//!
+//! ## Usage notes
+//!
+//! This crate intentionally stays thin: argument parsing happens here, while config and daemon behavior live in library crates.
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use hive_core::{

@@ -1,5 +1,6 @@
 [package]
 name = "hive-scheduler"
+description = "Cron-based task scheduling for background jobs and bot automation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

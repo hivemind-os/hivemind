@@ -1,3 +1,25 @@
+//! # hive-model
+//!
+//! Provider routing and completion orchestration for HiveMind OS. This crate
+//! turns model-selection policy into concrete provider calls, handling capability
+//! matching, fallback chains, streaming responses, and provider-specific auth.
+//!
+//! ## Key exports
+//!
+//! - [`ModelRouter`] — choose providers and models for a request.
+//! - [`ModelProvider`] and [`LocalModelProvider`] — provider interfaces and local-runtime adapter.
+//! - [`CompletionRequest`], [`CompletionResponse`], and [`CompletionChunk`] — completion I/O types.
+//! - [`RoutingRequest`] and [`RoutingDecision`] — routing inputs, outputs, and fallback reasoning.
+//!
+//! ## Crate relationships
+//!
+//! Builds on `hive-contracts`, `hive-core`, and `hive-inference`, and is used by
+//! `hive-chat` and `hive-api` whenever prompts must be routed to a model provider.
+//!
+//! ## Usage notes
+//!
+//! Call [`configure_timeouts`] before issuing the first request if the default provider timeouts need to be overridden.
+
 pub mod local_provider;
 pub(crate) mod transport;
 pub(crate) mod transport_anthropic;

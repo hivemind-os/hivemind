@@ -1,5 +1,6 @@
 [package]
 name = "hive-sandbox"
+description = "Wasmtime-based sandbox for secure code execution"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
