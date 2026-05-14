@@ -1,5 +1,6 @@
 [package]
 name = "hive-workspace-index"
+description = "Workspace file indexing and content extraction for project-aware context"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "hive-cli"
+description = "Command-line interface for daemon control and configuration management"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

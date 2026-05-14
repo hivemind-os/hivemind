@@ -1,5 +1,6 @@
 [package]
 name = "hive-python-env"
+description = "Python runtime environment provisioning for code execution"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "hive-core"
+description = "Shared infrastructure layer: configuration, audit logging, event bus, and daemon lifecycle"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

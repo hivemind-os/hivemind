@@ -1,3 +1,23 @@
+//! # hive-workflow-service
+//!
+//! Product workflow orchestration service for HiveMind OS.
+//!
+//! This crate integrates `hive-workflow::WorkflowEngine` into the daemon runtime,
+//! providing trigger management, event-bus emission, chat injection, workspace
+//! allocation, and attachment handling for workflow instances.
+//!
+//! ## Key exports
+//!
+//! - [`WorkflowService`] — top-level service managing workflow lifecycle.
+//! - [`WorkflowFeedbackItem`] — feedback/interaction payloads for running workflows.
+//! - [`EventBusEmitter`] — bridges workflow events onto the daemon event bus.
+//! - [`TriggerManager`] — evaluates and manages workflow triggers (manual, schedule, event, MCP).
+//!
+//! ## Crate relationships
+//!
+//! Depends on `hive-workflow` for engine and schema, `hive-core` for event bus and config,
+//! and `hive-connectors` for connector-backed workflow steps. Consumed by `hive-api`.
+
 mod traits;
 mod triggers;
 

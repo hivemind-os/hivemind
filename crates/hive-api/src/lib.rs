@@ -1,3 +1,25 @@
+//! # hive-api
+//!
+//! HTTP API layer for HiveMind OS. This crate assembles shared application state,
+//! wires Axum routes, and re-exports the chat, scheduler, risk, and local-model
+//! types that the daemon exposes over the local service boundary.
+//!
+//! ## Key exports
+//!
+//! - [`AppState`] — central runtime container shared across handlers and services.
+//! - [`build_router`] — constructs the Axum router served by `hive-daemon`.
+//! - [`routes`] and [`services`] — endpoint handlers plus supporting service wiring.
+//! - [`UserStatusRuntime`] — in-memory AFK and user-availability tracking.
+//!
+//! ## Crate relationships
+//!
+//! Composes `hive-chat`, `hive-core`, `hive-mcp`, `hive-model`, `hive-tools`, and
+//! other workspace crates, and is the main library dependency of `hive-daemon`.
+//!
+//! ## Usage notes
+//!
+//! Feature flags (`candle`, `llama-cpp`, `onnx`) forward to `hive-chat` to enable local inference backends.
+
 pub mod afk;
 pub mod auth_middleware;
 pub mod canvas_ws;

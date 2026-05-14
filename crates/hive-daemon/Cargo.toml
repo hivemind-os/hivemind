@@ -1,5 +1,6 @@
 [package]
 name = "hive-daemon"
+description = "Main daemon binary — bootstraps the HTTP server and system lifecycle"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

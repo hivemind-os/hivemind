@@ -1,5 +1,6 @@
 [package]
 name = "hive-node-env"
+description = "Node.js runtime environment provisioning for plugin and MCP processes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

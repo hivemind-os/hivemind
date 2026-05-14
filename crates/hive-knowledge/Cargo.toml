@@ -1,5 +1,6 @@
 [package]
 name = "hive-knowledge"
+description = "SQLite-backed property graph for long-term memory with FTS and vector search"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

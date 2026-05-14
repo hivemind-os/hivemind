@@ -1,5 +1,6 @@
 [package]
 name = "hive-web-search"
+description = "Web search providers (Brave, SearxNG, Tavily) and HTML content extraction"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

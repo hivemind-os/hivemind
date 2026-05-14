@@ -1,3 +1,24 @@
+//! # hive-core
+//!
+//! Shared runtime infrastructure for HiveMind OS, including configuration loading,
+//! audit and event logging, bundled assets, and daemon/service lifecycle helpers.
+//!
+//! ## Key exports
+//!
+//! - [`AuditLogger`] and [`NewAuditEntry`] — append tamper-evident audit records.
+//! - [`EventBus`] and [`EventLog`] — broadcast and persist runtime events.
+//! - [`discover_paths`], [`load_config`], and [`save_config`] — manage runtime paths and config.
+//! - [`daemon_start`] and [`service_load`] — control the daemon process and auto-start service.
+//!
+//! ## Crate relationships
+//!
+//! Re-exports shared config and status types from `hive-contracts` and serves as
+//! a foundation for `hive-api`, `hive-daemon`, `hive-cli`, and other workspace crates.
+//!
+//! ## Usage notes
+//!
+//! Reach for this crate for cross-cutting runtime services; chat, API, and model logic live in sibling crates.
+
 pub mod audit;
 pub mod bundled;
 pub mod config;

@@ -1,10 +1,18 @@
-//! hive-loop — A standalone YAML-driven workflow execution engine.
+//! hive-loop — Agentic loop engine and strategy framework for HiveMind chat sessions.
 //!
 //! # Overview
 //!
-//! This crate provides a generic workflow engine that loads workflow definitions
-//! from YAML, executes them step-by-step against pluggable model and tool backends,
-//! and persists execution state for crash recovery and resumability.
+//! This crate provides two subsystems:
+//!
+//! 1. **Legacy agentic loop** (`legacy/`) — the production chat loop used by `hive-chat`.
+//!    `LoopExecutor` selects a strategy (ReAct, Sequential, PlanThenExecute, or CodeAct)
+//!    from `legacy/strategies/`, and middleware layers handle compaction, token budgets,
+//!    classification, risk scanning, and stall detection.
+//!
+//! 2. **Generic workflow engine** — a standalone YAML-driven workflow engine that loads
+//!    definitions, executes them step-by-step against pluggable model and tool backends,
+//!    and persists state for crash recovery. Note: the *product* workflow path uses
+//!    `hive-workflow::WorkflowEngine`, not this engine.
 //!
 //! # Quick Start
 //!

@@ -1,3 +1,25 @@
+//! # hive-knowledge
+//!
+//! SQLite-backed knowledge graph and memory storage for HiveMind OS. This crate
+//! stores entities, edges, and embeddings, and provides lexical and vector search
+//! primitives that higher-level chat and API layers use for retrieval.
+//!
+//! ## Key exports
+//!
+//! - [`KnowledgeGraph`] — open, query, and mutate the graph database.
+//! - [`Node`], [`NewNode`], and [`Edge`] — core graph data structures.
+//! - [`SearchResult`] and [`VectorSearchResult`] — text and semantic retrieval results.
+//! - [`MemoryManager`], [`MemoryStore`], and [`KgPool`] — higher-level memory and pooling helpers.
+//!
+//! ## Crate relationships
+//!
+//! Depends on `hive-classification` for data labels and is used by `hive-chat` and
+//! `hive-api` to power memory features and knowledge-oriented endpoints.
+//!
+//! ## Usage notes
+//!
+//! Opening a graph bootstraps the SQLite schema automatically, and vector search relies on the bundled `sqlite-vec` extension.
+
 pub mod memory;
 pub mod pool;
 

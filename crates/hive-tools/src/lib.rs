@@ -1,3 +1,25 @@
+//! # hive-tools
+//!
+//! Tool abstraction layer and built-in tool catalog for HiveMind OS. This crate
+//! defines the common tool trait, approval metadata, registry machinery, and the
+//! filesystem, shell, MCP, workflow, agent, and connector tools used at runtime.
+//!
+//! ## Key exports
+//!
+//! - [`Tool`] and [`ToolRegistry`] — register, discover, and execute tools.
+//! - [`ToolResult`] and [`ToolError`] — standard output and failure contracts.
+//! - [`FileSystemReadTool`] and [`ShellCommandTool`] — core local workspace tools.
+//! - [`McpBridgeTool`] and [`WorkflowLaunchTool`] — bridge external MCP servers and workflow execution.
+//!
+//! ## Crate relationships
+//!
+//! Builds on `hive-contracts` and integrates with `hive-mcp`, `hive-workflow`,
+//! `hive-scheduler`, and connector crates; `hive-chat` and `hive-api` consume these tools.
+//!
+//! ## Usage notes
+//!
+//! Tool definitions carry approval and sandbox metadata, so register tools through this crate instead of ad hoc wrappers.
+
 pub mod regex_tool;
 pub use regex_tool::RegexTool;
 

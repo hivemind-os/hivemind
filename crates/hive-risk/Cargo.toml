@@ -1,5 +1,6 @@
 [package]
 name = "hive-risk"
+description = "Risk assessment and prompt injection detection for tool calls and model outputs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

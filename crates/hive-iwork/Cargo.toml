@@ -1,5 +1,6 @@
 [package]
 name = "hive-iwork"
+description = "Apple iWork document parsing (Pages, Numbers, Keynote)"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

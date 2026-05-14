@@ -1,5 +1,6 @@
 [package]
 name = "hive-process"
+description = "Managed child process pool with sandbox isolation"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

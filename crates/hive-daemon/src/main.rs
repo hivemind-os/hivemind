@@ -1,6 +1,27 @@
 // Hide the console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+//! # hive-daemon
+//!
+//! Thin production daemon binary for HiveMind OS. It loads configuration,
+//! initializes logging and auditing, builds the HTTP router, and runs the
+//! background service that hosts the local API.
+//!
+//! ## Key entry points
+//!
+//! - `main` — bootstraps runtime state, starts the server, and handles shutdown.
+//! - `--request-calendar-access` / `--request-contacts-access` — macOS-only helper mode for TCC prompts.
+//! - `hive_api::build_router` — HTTP routing is delegated to the `hive-api` crate.
+//!
+//! ## Crate relationships
+//!
+//! Depends on `hive-api` for request handling and `hive-core` for config,
+//! path discovery, audit logging, and event infrastructure; `hive-cli` controls this binary.
+//!
+//! ## Usage notes
+//!
+//! The default `inference` feature enables local model backends via `hive-api`, and the binary keeps domain logic in library crates.
+
 use anyhow::{Context, Result};
 use hive_api::{build_router, AppState};
 use hive_classification::DataClass;

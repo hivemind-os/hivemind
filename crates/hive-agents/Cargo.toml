@@ -1,5 +1,6 @@
 [package]
 name = "hive-agents"
+description = "Multi-agent orchestration and agent-to-agent delegation"
 version = "0.1.0"
 edition = "2021"
 
