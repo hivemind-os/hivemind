@@ -505,6 +505,18 @@
   }
 }
 
+/* ── CodeMirror / Tailwind compatibility ───────────────────────
+   The @layer base reset above sets border-style:solid on * which
+   breaks CodeMirror's internal flex layout on WebKit (macOS).
+   Reset it for all descendants of .cm-editor so CodeMirror can
+   manage its own borders.
+   ────────────────────────────────────────────────────────────── */
+.cm-editor *,
+.cm-editor *::before,
+.cm-editor *::after {
+  border-style: none;
+}
+
 /* ── Scrollbar styling ─────────────────────────────────────────── */
 /* Thin, theme-aware scrollbars for all scrollable elements */
 

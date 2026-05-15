@@ -24,10 +24,14 @@ const hivemindDarkTheme = EditorView.theme({
     fontSize: '13px',
     height: '100%',
   },
+  '&.cm-focused': {
+    outline: 'none',
+  },
   '.cm-content': {
     caretColor: 'hsl(210 13% 81%)',
     fontFamily: "'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
     padding: '8px 0',
+    outline: 'none',
   },
   '.cm-cursor, .cm-dropCursor': {
     borderLeftColor: 'hsl(210 13% 81%)',
