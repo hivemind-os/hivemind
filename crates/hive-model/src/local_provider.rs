@@ -266,6 +266,7 @@ mod tests {
             kind: ProviderKind::LocalRuntime,
             models,
             model_capabilities,
+            model_limits: std::collections::BTreeMap::new(),
             priority: 50,
             available: true,
         }

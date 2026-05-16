@@ -90,7 +90,10 @@ pub(crate) async fn api_save_config(
                         // Stop existing process
                         let _ = host.stop(&pid).await;
                         // Re-spawn with new config
-                        if host.spawn(&pid, &path, &entry, new_config.clone(), Some(&meta)).await.is_ok()
+                        if host
+                            .spawn(&pid, &path, &entry, new_config.clone(), Some(&meta))
+                            .await
+                            .is_ok()
                         {
                             let _ = host.activate(&pid, Some(new_config)).await;
                             if has_loop {
@@ -142,7 +145,10 @@ pub(crate) async fn api_set_enabled(
                     let meta = plugin.manifest.hivemind.clone();
                     let has_loop = meta.permissions.iter().any(|p| p == "loop:background");
                     tokio::spawn(async move {
-                        if host.spawn(&pid, &path, &entry, config.clone(), Some(&meta)).await.is_ok()
+                        if host
+                            .spawn(&pid, &path, &entry, config.clone(), Some(&meta))
+                            .await
+                            .is_ok()
                         {
                             let _ = host.activate(&pid, Some(config)).await;
                             if has_loop {

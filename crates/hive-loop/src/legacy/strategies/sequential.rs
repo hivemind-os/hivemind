@@ -3,7 +3,7 @@ use std::sync::Arc;
 use hive_model::{CompletionRequest, RoutingRequest};
 
 use super::super::interaction::UserInteractionGate;
-use super::super::model_router_error_to_loop_error;
+use super::super::{model_router_error_to_loop_error, try_recover_context_limit};
 use super::super::strategy::{LoopMiddleware, LoopStrategy};
 use super::super::types::{BoxFuture, LoopContext, LoopError, LoopEvent, LoopResult};
 
@@ -57,7 +57,7 @@ impl LoopStrategy for SequentialStrategy {
             let blocking_future = tokio::task::spawn_blocking(move || {
                 router.complete_with_decision(&request_clone, &decision_clone)
             });
-            let response = if let Some(ref token) = context.cancellation_token {
+            let model_result = if let Some(ref token) = context.cancellation_token {
                 tokio::select! {
                     biased;
                     _ = token.cancelled() => {
@@ -66,14 +66,32 @@ impl LoopStrategy for SequentialStrategy {
                     result = blocking_future => {
                         result
                             .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-                            .map_err(model_router_error_to_loop_error)?
+                            .map_err(model_router_error_to_loop_error)
                     }
                 }
             } else {
                 blocking_future
                     .await
                     .map_err(|error| LoopError::JoinFailed(error.to_string()))?
-                    .map_err(model_router_error_to_loop_error)?
+                    .map_err(model_router_error_to_loop_error)
+            };
+            let response = match model_result {
+                Ok(resp) => resp,
+                Err(err) => {
+                    if let Some(truncated) = try_recover_context_limit(&err, &request) {
+                        let router2 = Arc::clone(&model_router);
+                        let decision2 = decision.clone();
+                        let retry = tokio::task::spawn_blocking(move || {
+                            router2.complete_with_decision(&truncated, &decision2)
+                        });
+                        retry
+                            .await
+                            .map_err(|e| LoopError::JoinFailed(e.to_string()))?
+                            .map_err(model_router_error_to_loop_error)?
+                    } else {
+                        return Err(err);
+                    }
+                }
             };
 
             let mut response = response;

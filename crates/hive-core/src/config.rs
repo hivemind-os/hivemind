@@ -63,6 +63,7 @@ pub fn load_config_from_paths(
             models: vec![],
             capabilities: std::collections::BTreeSet::new(),
             model_capabilities: std::collections::BTreeMap::new(),
+            model_limits: std::collections::BTreeMap::new(),
             channel_class: hive_contracts::ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,

@@ -76,6 +76,7 @@ impl ScriptProvider {
                     "test-model".to_string(),
                     [Capability::Chat, Capability::ToolUse].into_iter().collect(),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 100,
                 available: true,
             },
@@ -96,6 +97,7 @@ impl ScriptProvider {
                     "test-model".to_string(),
                     [Capability::Chat, Capability::ToolUse].into_iter().collect(),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 100,
                 available: true,
             },
@@ -278,6 +280,8 @@ fn default_routing_decision() -> RoutingDecision {
         },
         fallback_chain: vec![],
         reason: "test".to_string(),
+        effective_context_window: None,
+        effective_max_output_tokens: None,
     }
 }
 

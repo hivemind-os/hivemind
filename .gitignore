@@ -14,3 +14,7 @@ config.yaml
 apps/hivemind-desktop/src-tauri/vc_redist.exe
 # CPython WASI binary for local CodeAct development/testing
 .python-wasm/
+
+# Copilot agent temp directories
+.copilot-*
+.manual-compact-target

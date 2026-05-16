@@ -882,14 +882,13 @@ pub(crate) async fn api_channel_oauth_poll(
 
                 // Auto-fetch the user's email from Google if the frontend
                 // didn't provide one, so that from_address is populated.
-                let resolved_email = if meta.email.is_empty()
-                    && meta.provider == ConnectorProvider::Gmail
-                {
-                    crate::provider_auth::google_fetch_userinfo_email(client, new_access_token)
-                        .await
-                } else {
-                    meta.email.clone()
-                };
+                let resolved_email =
+                    if meta.email.is_empty() && meta.provider == ConnectorProvider::Gmail {
+                        crate::provider_auth::google_fetch_userinfo_email(client, new_access_token)
+                            .await
+                    } else {
+                        meta.email.clone()
+                    };
 
                 save_oauth_channel(
                     &state,

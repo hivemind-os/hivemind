@@ -229,10 +229,7 @@ pub async fn google_poll_for_token(
 ///
 /// Requires the `email` scope (already included in our default Google scopes).
 /// Returns an empty string if the email cannot be determined (best-effort).
-pub async fn google_fetch_userinfo_email(
-    client: &reqwest::Client,
-    access_token: &str,
-) -> String {
+pub async fn google_fetch_userinfo_email(client: &reqwest::Client, access_token: &str) -> String {
     let resp = client
         .get("https://www.googleapis.com/oauth2/v2/userinfo")
         .bearer_auth(access_token)

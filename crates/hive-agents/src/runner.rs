@@ -45,16 +45,21 @@ impl From<LoopError> for TaskError {
                 model: None,
                 cancelled: true,
             },
-            LoopError::ModelExecution { message, error_code, http_status, provider_id, model } => {
-                Self {
-                    message: format!("model execution failed: {message}"),
-                    error_code,
-                    http_status,
-                    provider_id,
-                    model,
-                    cancelled: false,
-                }
-            }
+            LoopError::ModelExecution {
+                message,
+                error_code,
+                http_status,
+                provider_id,
+                model,
+                ..
+            } => Self {
+                message: format!("model execution failed: {message}"),
+                error_code,
+                http_status,
+                provider_id,
+                model,
+                cancelled: false,
+            },
             other => Self {
                 message: other.to_string(),
                 error_code: None,
@@ -931,6 +936,14 @@ fn convert_loop_event(event: LoopEvent, prompt_preview: &str, agent_id: &str) ->
                 stderr,
                 is_error,
                 duration_ms,
+            }
+        }
+        LoopEvent::ContextCompacted { messages_compacted, estimated_before, estimated_after } => {
+            ReasoningEvent::PathAbandoned {
+                reason: format!(
+                    "Context compacted: {messages_compacted} messages summarized \
+                     ({estimated_before} → {estimated_after} tokens)"
+                ),
             }
         }
     }

@@ -152,18 +152,19 @@ impl ConnectorService {
             // have secrets stripped via #[serde(skip_serializing)].
             cfg.restore_secrets();
 
-            let connector = match Self::create_connector(&cfg, &self.connectors_dir, Some(&self.audit_log)) {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!(
-                        connector_id = %cfg.id,
-                        provider = %cfg.provider.as_str(),
-                        error = %e,
-                        "failed to create connector, skipping"
-                    );
-                    continue;
-                }
-            };
+            let connector =
+                match Self::create_connector(&cfg, &self.connectors_dir, Some(&self.audit_log)) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(
+                            connector_id = %cfg.id,
+                            provider = %cfg.provider.as_str(),
+                            error = %e,
+                            "failed to create connector, skipping"
+                        );
+                        continue;
+                    }
+                };
 
             // Build a ResourceResolver from the communication destination rules
             // (primary service), falling back to empty rules.
@@ -228,7 +229,9 @@ impl ConnectorService {
             ConnectorProvider::Microsoft => Self::create_microsoft_connector(config),
             ConnectorProvider::Discord => Self::create_discord_connector(config),
             ConnectorProvider::Slack => Self::create_slack_connector(config),
-            ConnectorProvider::Gmail => Self::create_gmail_connector(config, connectors_dir, audit_log),
+            ConnectorProvider::Gmail => {
+                Self::create_gmail_connector(config, connectors_dir, audit_log)
+            }
             ConnectorProvider::Imap => Self::create_imap_connector(config, connectors_dir),
             ConnectorProvider::Coinbase => Self::create_coinbase_connector(config),
             ConnectorProvider::Apple => Self::create_apple_connector(config),
@@ -395,31 +398,26 @@ impl ConnectorService {
 
         let mut enabled_services = Vec::new();
 
-        let communication =
-            config.services.communication.as_ref().filter(|c| c.enabled).map(|c| {
-                let from_address = c.from_address.as_deref().unwrap_or_default();
-                if from_address.is_empty() {
-                    tracing::warn!(
-                        connector = %config.id,
-                        "Gmail communication enabled but no from_address configured; \
-                         sending will be unavailable but polling for incoming mail will work"
-                    );
-                }
-                enabled_services.push(ServiceType::Communication);
-                let comm = GmailCommunication::new(
-                    Arc::clone(&google),
-                    &config.id,
-                    from_address,
-                    &c.folder,
+        let communication = config.services.communication.as_ref().filter(|c| c.enabled).map(|c| {
+            let from_address = c.from_address.as_deref().unwrap_or_default();
+            if from_address.is_empty() {
+                tracing::warn!(
+                    connector = %config.id,
+                    "Gmail communication enabled but no from_address configured; \
+                     sending will be unavailable but polling for incoming mail will work"
                 );
-                // Give Gmail access to the persistent poll-dedup table so it can
-                // skip per-message GET calls for already-processed messages.
-                if let Some(al) = audit_log {
-                    comm.with_audit_log(Arc::clone(al))
-                } else {
-                    comm
-                }
-            });
+            }
+            enabled_services.push(ServiceType::Communication);
+            let comm =
+                GmailCommunication::new(Arc::clone(&google), &config.id, from_address, &c.folder);
+            // Give Gmail access to the persistent poll-dedup table so it can
+            // skip per-message GET calls for already-processed messages.
+            if let Some(al) = audit_log {
+                comm.with_audit_log(Arc::clone(al))
+            } else {
+                comm
+            }
+        });
 
         let calendar = config.services.calendar.as_ref().filter(|c| c.enabled).map(|c| {
             enabled_services.push(ServiceType::Calendar);

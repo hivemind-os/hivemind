@@ -49,6 +49,12 @@ pub trait LoopMiddleware: Send + Sync {
     ) -> Result<ToolResult, LoopError> {
         Ok(result)
     }
+
+    /// Drain any events generated during `before_model_call`.
+    /// Called by the strategy after running the middleware chain.
+    fn drain_pending_events(&self) -> Vec<LoopEvent> {
+        Vec::new()
+    }
 }
 
 // ── Strategy trait ────────────────────────────────────────────────────────

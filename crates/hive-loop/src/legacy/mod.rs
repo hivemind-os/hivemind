@@ -33,7 +33,7 @@ use tool_handlers::*;
 pub(crate) mod strategies;
 pub use strategies::{CodeActStrategy, PlanThenExecuteStrategy, ReActStrategy, SequentialStrategy};
 
-use hive_model::{ModelRouterError, RoutingDecision};
+use hive_model::{CompletionRequest, ModelRouterError, RoutingDecision};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
@@ -119,22 +119,28 @@ pub(crate) fn is_budget_exempt(tool_id: &str) -> bool {
 /// Convert a [`ModelRouterError`] into a [`LoopError::ModelExecution`] with
 /// structured error fields extracted from the router error.
 pub(crate) fn model_router_error_to_loop_error(error: ModelRouterError) -> LoopError {
-    match &error {
-        ModelRouterError::ProviderExecutionFailed { error_kind, http_status, .. } => {
-            LoopError::ModelExecution {
-                error_code: error_kind.map(|k| format!("{k:?}").to_lowercase()),
-                http_status: *http_status,
-                provider_id: None,
-                model: None,
-                message: error.to_string(),
-            }
-        }
-        _ => LoopError::ModelExecution {
-            message: error.to_string(),
+    match error {
+        ModelRouterError::ProviderExecutionFailed {
+            last_error,
+            error_kind,
+            http_status,
+            context_limit,
+            ..
+        } => LoopError::ModelExecution {
+            message: last_error,
+            error_code: error_kind.map(|k| format!("{k:?}").to_lowercase()),
+            http_status,
+            provider_id: None,
+            model: None,
+            context_limit,
+        },
+        other => LoopError::ModelExecution {
+            message: other.to_string(),
             error_code: None,
             http_status: None,
             provider_id: None,
             model: None,
+            context_limit: None,
         },
     }
 }
@@ -148,6 +154,32 @@ pub(crate) fn simple_model_error(message: String) -> LoopError {
         http_status: None,
         provider_id: None,
         model: None,
+        context_limit: None,
+    }
+}
+
+/// If `error` is a [`LoopError::ModelExecution`] with a `context_limit`,
+/// truncate the request to fit within that limit and return the truncated
+/// request.  Returns `None` when the error is not a context-limit error or
+/// when truncation itself fails.
+pub(crate) fn try_recover_context_limit(
+    error: &LoopError,
+    request: &CompletionRequest,
+) -> Option<CompletionRequest> {
+    if let LoopError::ModelExecution { context_limit: Some(limit), .. } = error {
+        tracing::warn!(
+            context_limit = limit,
+            "provider reported context-length exceeded — attempting recovery truncation"
+        );
+        match crate::token_budget::enforce_with_limit(request.clone(), *limit) {
+            Ok(truncated) => Some(truncated),
+            Err(err) => {
+                tracing::warn!(%err, "context-limit recovery truncation failed");
+                None
+            }
+        }
+    } else {
+        None
     }
 }
 

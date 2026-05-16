@@ -297,7 +297,8 @@ impl BotService {
                         }
                         match &event {
                             SupervisorEvent::AgentStatusChanged { agent_id, status }
-                                if *status == AgentStatus::Done || *status == AgentStatus::Error =>
+                                if *status == AgentStatus::Done
+                                    || *status == AgentStatus::Error =>
                             {
                                 let to_persist = {
                                     let mut configs = bot_svc.bot_configs.write().await;

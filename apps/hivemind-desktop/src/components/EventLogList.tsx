@@ -63,12 +63,13 @@ interface LoopEventError { Error: { message: string } }
 interface LoopEventAgentMessage { AgentSessionMessage: { from_agent_id: string; content: string } }
 interface LoopEventModelFallback { ModelFallback: { from_provider: string; from_model: string; to_provider: string; to_model: string } }
 interface LoopEventCodeExecution { CodeExecution: { phase: string; code?: string; stdout?: string; stderr?: string; is_error?: boolean; duration_ms?: number } }
+interface LoopEventContextCompacted { ContextCompacted: { messages_compacted: number; estimated_before: number; estimated_after: number } }
 
 type LoopEvent =
   | LoopEventModelLoading | LoopEventToken | LoopEventModelDone
   | LoopEventToolCallStart | LoopEventToolCallResult | LoopEventUserInteraction
   | LoopEventDone | LoopEventError | LoopEventAgentMessage | LoopEventModelFallback
-  | LoopEventCodeExecution;
+  | LoopEventCodeExecution | LoopEventContextCompacted;
 
 // A SessionEvent is either a SupervisorEvent (has "type" field) or a LoopEvent (variant name key)
 export type SessionEvent = SupervisorEvent | LoopEvent;
@@ -111,7 +112,7 @@ function isSupervisorEvent(ev: SessionEvent): ev is SupervisorEvent {
 const LOOP_VARIANTS = new Set([
   'ModelLoading', 'Token', 'ModelDone', 'ToolCallStart', 'ToolCallResult',
   'UserInteractionRequired', 'Done', 'Error', 'AgentSessionMessage', 'ModelFallback',
-  'CodeExecution',
+  'CodeExecution', 'ContextCompacted',
 ]);
 
 function loopVariant(ev: SessionEvent): string | null {
@@ -190,6 +191,8 @@ function loopEventSummary(ev: SessionEvent): { icon: JSX.Element; label: string;
       }
       return { icon: <CheckCircle size={14} />, label: `Code executed${data.duration_ms ? ` (${(data.duration_ms / 1000).toFixed(1)}s)` : ''}`, cls: 'evl-code' };
     }
+    case 'ContextCompacted':
+      return { icon: <ArrowRightLeft size={14} />, label: `Compacted ${data.messages_compacted} messages (${formatTokenCount(data.estimated_before)} → ${formatTokenCount(data.estimated_after)} tokens)`, cls: 'evl-status' };
     case 'Done':
       return { icon: <CheckCircle size={14} />, label: 'Done', cls: 'evl-done' };
     case 'Token':
@@ -352,6 +355,12 @@ function loopEventDetail(ev: SessionEvent): { title: JSX.Element; sections: { la
       const icon = data.is_error ? <XCircle size={14} /> : <Cpu size={14} />;
       return { title: <>{icon} Code Execution</>, sections };
     }
+
+    case 'ContextCompacted':
+      sections.push({ label: 'Messages Compacted', content: String(data.messages_compacted) });
+      sections.push({ label: 'Tokens Before', content: formatTokenCount(data.estimated_before) });
+      sections.push({ label: 'Tokens After', content: formatTokenCount(data.estimated_after) });
+      return { title: <><ArrowRightLeft size={14} /> Context Compacted</>, sections };
 
     case 'Done':
       sections.push({ label: 'Provider', content: data.provider_id ?? '' });

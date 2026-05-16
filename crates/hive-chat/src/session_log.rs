@@ -154,6 +154,11 @@ impl SessionLogger {
                 let tag = if *is_error { "CODE_ERROR" } else { "CODE_EXEC" };
                 self.log_loop(&format!("{tag} code={code_preview} output={output_preview}"));
             }
+            LoopEvent::ContextCompacted { messages_compacted, estimated_before, estimated_after } => {
+                self.log_loop(&format!(
+                    "CONTEXT_COMPACTED messages={messages_compacted} before={estimated_before} after={estimated_after}"
+                ));
+            }
         }
     }
 

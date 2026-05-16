@@ -1,3 +1,4 @@
+use crate::config::ModelLimitOverride;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -50,6 +51,8 @@ pub struct ProviderDescriptor {
     pub kind: ProviderKind,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_capabilities: BTreeMap<String, BTreeSet<Capability>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_limits: BTreeMap<String, ModelLimitOverride>,
     pub models: Vec<String>,
     pub priority: i32,
     pub available: bool,

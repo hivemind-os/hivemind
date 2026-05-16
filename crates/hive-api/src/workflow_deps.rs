@@ -601,8 +601,7 @@ impl WorkflowAgentRunner for WorkflowAgentRunnerImpl {
         // Wait for completion using the pre-subscribed receiver.
         // In test/auto_respond mode, apply a safety-net deadline even if
         // the step definition didn't specify a timeout.
-        let effective_timeout =
-            timeout_secs.or(if auto_respond { Some(120) } else { None });
+        let effective_timeout = timeout_secs.or(if auto_respond { Some(120) } else { None });
         let deadline = effective_timeout
             .map(|secs| tokio::time::Instant::now() + tokio::time::Duration::from_secs(secs));
 

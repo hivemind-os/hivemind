@@ -11,7 +11,7 @@
 //! This is the "summarize-only" path (SPEC.md §9.12).  KG extraction
 //! (`extract-and-summarize`) is a future extension.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use hive_contracts::{CompactionStrategy, ContextCompactionConfig};
 use hive_core::model_limits::ModelLimitsRegistry;
@@ -20,7 +20,7 @@ use hive_model::{
 };
 use tracing::{debug, info, warn};
 
-use crate::legacy::{simple_model_error, LoopContext, LoopError, LoopMiddleware};
+use crate::legacy::{simple_model_error, LoopContext, LoopError, LoopEvent, LoopMiddleware};
 #[cfg(test)]
 use crate::legacy::{
     AgentContext, ConversationContext, RoutingConfig, SecurityContext, ToolsContext,
@@ -29,12 +29,142 @@ use crate::token_budget::estimate_request_tokens;
 
 /// Marker prefix used for compaction summary messages so they can be
 /// identified (and themselves compacted) in future rounds.
-const COMPACTION_SUMMARY_PREFIX: &str = "[Compaction Summary";
+pub const COMPACTION_SUMMARY_PREFIX: &str = "[Compaction Summary";
+
+/// Perform context compaction on the given messages, returning compacted messages.
+///
+/// This is the standalone entry point for manual/on-demand compaction.
+/// Unlike the middleware path, this always attempts compaction regardless of
+/// token thresholds.
+pub fn compact_messages(
+    messages: Vec<CompletionMessage>,
+    model_router: &ModelRouter,
+    routing_decision: &RoutingDecision,
+    config: &ContextCompactionConfig,
+    limits: &ModelLimitsRegistry,
+) -> Result<Vec<CompletionMessage>, LoopError> {
+    let model_name = routing_decision.selected.model.as_str();
+    let model_limits = limits.lookup(model_name);
+
+    let system_count = messages.iter().take_while(|m| m.role == "system").count();
+    let non_system = messages.len().saturating_sub(system_count);
+
+    if non_system <= config.keep_recent_turns {
+        return Ok(messages);
+    }
+
+    let compact_end = system_count + non_system - config.keep_recent_turns;
+    if compact_end > messages.len() {
+        return Ok(messages);
+    }
+
+    let to_compact: Vec<CompletionMessage> = messages[system_count..compact_end].to_vec();
+    if to_compact.is_empty() {
+        return Ok(messages);
+    }
+
+    let compact_count = to_compact.len();
+    let summary_prompt = ContextCompactorMiddleware::build_summary_prompt(&to_compact);
+    let request = CompletionRequest {
+        prompt: summary_prompt,
+        prompt_content_parts: vec![],
+        messages: vec![],
+        required_capabilities: std::collections::BTreeSet::new(),
+        preferred_models: None,
+        tools: vec![],
+    };
+
+    let effective_decision = if let Some(ref spec) = config.extraction_model {
+        if let Some((pid, model)) = spec.split_once(':') {
+            RoutingDecision {
+                selected: ModelSelection { provider_id: pid.to_string(), model: model.to_string() },
+                fallback_chain: vec![],
+                reason: "manual compaction extraction model".into(),
+                effective_context_window: None,
+                effective_max_output_tokens: None,
+            }
+        } else {
+            warn!(
+                extraction_model = %spec,
+                "extraction_model should be 'provider_id:model_name', falling back to conversation model"
+            );
+            routing_decision.clone()
+        }
+    } else {
+        routing_decision.clone()
+    };
+
+    let response = model_router
+        .complete_with_decision(&request, &effective_decision)
+        .map_err(|e| simple_model_error(format!("manual compaction summary failed: {e}")))?;
+
+    let summary_count = ContextCompactorMiddleware::count_summaries(&messages) + 1;
+    let summary_message = CompletionMessage {
+        role: "system".to_string(),
+        content: format!(
+            "{COMPACTION_SUMMARY_PREFIX} #{summary_count} — {compact_count} messages compacted]\n\n{}",
+            response.content
+        ),
+        content_parts: vec![],
+        blocks: vec![],
+    };
+
+    let mut result = Vec::new();
+    result.extend_from_slice(&messages[..system_count]);
+    result.push(summary_message);
+    result.extend_from_slice(&messages[compact_end..]);
+
+    while ContextCompactorMiddleware::count_summaries(&result) > config.max_summaries_in_context {
+        let summary_indices: Vec<usize> = result
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.content.starts_with(COMPACTION_SUMMARY_PREFIX))
+            .map(|(i, _)| i)
+            .collect();
+
+        if summary_indices.len() <= 1 {
+            break;
+        }
+
+        let oldest_summaries: Vec<CompletionMessage> =
+            summary_indices.iter().take(2).map(|&i| result[i].clone()).collect();
+
+        let epoch_summary = format!(
+            "{COMPACTION_SUMMARY_PREFIX} — epoch summary]\n\n{}\n\n{}",
+            oldest_summaries[0].content, oldest_summaries[1].content
+        );
+
+        result.remove(summary_indices[1]);
+        result.remove(summary_indices[0]);
+        result.insert(
+            summary_indices[0],
+            CompletionMessage {
+                role: "system".to_string(),
+                content: epoch_summary,
+                content_parts: vec![],
+                blocks: vec![],
+            },
+        );
+    }
+
+    info!(
+        model = model_name,
+        context_window = model_limits.context_window,
+        before = messages.len(),
+        after = result.len(),
+        compacted = compact_count,
+        "manual context compaction complete"
+    );
+
+    Ok(result)
+}
 
 pub struct ContextCompactorMiddleware {
     limits: Arc<ModelLimitsRegistry>,
     config: Arc<arc_swap::ArcSwap<ContextCompactionConfig>>,
     model_router: Arc<arc_swap::ArcSwap<ModelRouter>>,
+    /// Events emitted during compaction, drained by the strategy after middleware runs.
+    pending_events: Mutex<Vec<LoopEvent>>,
 }
 
 impl ContextCompactorMiddleware {
@@ -43,11 +173,11 @@ impl ContextCompactorMiddleware {
         config: Arc<arc_swap::ArcSwap<ContextCompactionConfig>>,
         model_router: Arc<arc_swap::ArcSwap<ModelRouter>>,
     ) -> Self {
-        Self { limits, config, model_router }
+        Self { limits, config, model_router, pending_events: Mutex::new(Vec::new()) }
     }
 
     /// Build a summarization prompt from the messages being compacted.
-    fn build_summary_prompt(messages: &[CompletionMessage]) -> String {
+    pub fn build_summary_prompt(messages: &[CompletionMessage]) -> String {
         let mut prompt = String::from(
             "You are a precise summarizer. Below is a section of conversation history that needs \
              to be compacted into a concise summary. Preserve all important facts, decisions, \
@@ -127,6 +257,8 @@ impl ContextCompactorMiddleware {
                     },
                     fallback_chain: vec![],
                     reason: "compaction extraction model override".into(),
+                    effective_context_window: None,
+                    effective_max_output_tokens: None,
                 }
             } else {
                 warn!(
@@ -167,6 +299,13 @@ impl LoopMiddleware for ContextCompactorMiddleware {
             }
         }
     }
+
+    fn drain_pending_events(&self) -> Vec<LoopEvent> {
+        match self.pending_events.lock() {
+            Ok(mut events) => events.drain(..).collect(),
+            Err(_) => Vec::new(),
+        }
+    }
 }
 
 impl ContextCompactorMiddleware {
@@ -186,7 +325,10 @@ impl ContextCompactorMiddleware {
         let model_name =
             context.routing_decision().map(|d| d.selected.model.as_str()).unwrap_or("");
         let model_limits = self.limits.lookup(model_name);
-        let context_window = model_limits.context_window as usize;
+        let context_window = context
+            .routing_decision()
+            .and_then(|d| d.effective_context_window)
+            .unwrap_or(model_limits.context_window) as usize;
 
         // Check if we've crossed the threshold.
         let estimated = estimate_request_tokens(&request);
@@ -273,6 +415,15 @@ impl ContextCompactorMiddleware {
             compacted = compact_count,
             "context compaction complete"
         );
+
+        // Queue a compaction event for the strategy to emit.
+        if let Ok(mut events) = self.pending_events.lock() {
+            events.push(LoopEvent::ContextCompacted {
+                messages_compacted: compact_count,
+                estimated_before: estimated,
+                estimated_after: new_estimated,
+            });
+        }
 
         // Recursive compaction: if we have too many summaries, merge the oldest.
         if Self::count_summaries(&request.messages) > config.max_summaries_in_context {
@@ -432,6 +583,8 @@ mod tests {
                     },
                     fallback_chain: vec![],
                     reason: "test".into(),
+                    effective_context_window: None,
+                    effective_max_output_tokens: None,
                 }),
             },
             security: SecurityContext {

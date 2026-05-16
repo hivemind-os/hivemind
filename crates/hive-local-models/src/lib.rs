@@ -297,9 +297,7 @@ impl LocalModelService {
                                         }
                                     }
 
-                                    for (idx, shard_name) in
-                                        &pending_shards
-                                    {
+                                    for (idx, shard_name) in &pending_shards {
                                         // Update progress so frontend shows shard status.
                                         {
                                             let mut map = downloads.lock();

@@ -6,7 +6,7 @@ import { Switch, SwitchControl, SwitchThumb, SwitchLabel } from '~/ui/switch';
 import { Dialog, DialogContent } from '~/ui/dialog';
 import { Button } from '~/ui/button';
 import CopilotAuthWizard from '../CopilotAuthWizard';
-import type { AppContext, CapabilityOption, HiveMindConfigData, InstalledModel } from '../../types';
+import type { AppContext, CapabilityOption, HiveMindConfigData, InstalledModel, ModelLimitOverride } from '../../types';
 import { displayModelName, modelCapsToProviderCaps } from '../../types';
 
 // Priority patterns for model sorting — popular models appear first
@@ -57,15 +57,23 @@ function sortCopilotModels(models: CopilotModel[]): CopilotModel[] {
 
 const ALL_CAPABILITIES: CapabilityOption[] = ['chat', 'code', 'vision', 'embedding', 'tool-use'];
 
-/** A single model row: enable/disable switch + per-model capability toggles. */
+/** A single model row: enable/disable switch + per-model capability toggles + optional limit overrides. */
 function ModelToggleItem(props: {
   modelId: string;
   label?: JSX.Element;
   enabled: boolean;
   caps: CapabilityOption[];
+  limits?: ModelLimitOverride;
   onToggle: (checked: boolean) => void;
   onToggleCap: (cap: CapabilityOption) => void;
+  onUpdateLimits?: (limits: ModelLimitOverride | null) => void;
 }) {
+  const [showLimits, setShowLimits] = createSignal(false);
+  const hasLimits = () => {
+    const l = props.limits;
+    return l && ((l.context_window != null && l.context_window > 0) || (l.max_output_tokens != null && l.max_output_tokens > 0));
+  };
+
   return (
     <div style={{
       padding: '8px 10px',
@@ -74,10 +82,29 @@ function ModelToggleItem(props: {
       background: props.enabled ? 'hsl(var(--card))' : 'transparent',
       opacity: props.enabled ? '1' : '0.6',
     }}>
-      <Switch checked={props.enabled} onChange={props.onToggle} class="flex items-center gap-2">
-        <SwitchControl><SwitchThumb /></SwitchControl>
-        <SwitchLabel>{props.label ?? <span style="font-weight: 600;">{props.modelId}</span>}</SwitchLabel>
-      </Switch>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <Switch checked={props.enabled} onChange={props.onToggle} class="flex items-center gap-2" style="flex: 1;">
+          <SwitchControl><SwitchThumb /></SwitchControl>
+          <SwitchLabel>{props.label ?? <span style="font-weight: 600;">{props.modelId}</span>}</SwitchLabel>
+        </Switch>
+        <Show when={props.enabled && props.onUpdateLimits}>
+          <button
+            onClick={() => setShowLimits(!showLimits())}
+            title="Set token limits"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 6px',
+              'font-size': '0.75em',
+              color: hasLimits() ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+              'border-radius': '4px',
+            }}
+          >
+            {hasLimits() ? '⚙ limits' : '⚙'}
+          </button>
+        </Show>
+      </div>
       <Show when={props.enabled}>
         <div style="margin-top: 6px; margin-left: 24px; display: flex; flex-wrap: wrap; gap: 6px;">
           {ALL_CAPABILITIES.map((cap) => (
@@ -86,6 +113,55 @@ function ModelToggleItem(props: {
               <SwitchLabel>{cap}</SwitchLabel>
             </Switch>
           ))}
+        </div>
+      </Show>
+      <Show when={showLimits() && props.enabled && props.onUpdateLimits}>
+        <div style="margin-top: 8px; margin-left: 24px; padding: 8px; border-radius: 4px; background: hsl(var(--muted)); display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 0.75em; font-weight: 600; color: hsl(var(--muted-foreground));">Token Limit Overrides</span>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.8em;">
+              Context Window
+              <input
+                type="number"
+                min="1"
+                placeholder="default"
+                value={props.limits?.context_window ?? ''}
+                onInput={(e) => {
+                  const raw = e.currentTarget.value;
+                  const val = raw ? Math.max(1, parseInt(raw)) || null : null;
+                  const current = props.limits ?? {};
+                  const updated: ModelLimitOverride = { ...current, context_window: val };
+                  if (!updated.context_window && !updated.max_output_tokens) {
+                    props.onUpdateLimits?.(null);
+                  } else {
+                    props.onUpdateLimits?.(updated);
+                  }
+                }}
+                style="width: 110px; padding: 2px 6px; font-size: 0.9em;"
+              />
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.8em;">
+              Max Output
+              <input
+                type="number"
+                min="1"
+                placeholder="default"
+                value={props.limits?.max_output_tokens ?? ''}
+                onInput={(e) => {
+                  const raw = e.currentTarget.value;
+                  const val = raw ? Math.max(1, parseInt(raw)) || null : null;
+                  const current = props.limits ?? {};
+                  const updated: ModelLimitOverride = { ...current, max_output_tokens: val };
+                  if (!updated.context_window && !updated.max_output_tokens) {
+                    props.onUpdateLimits?.(null);
+                  } else {
+                    props.onUpdateLimits?.(updated);
+                  }
+                }}
+                style="width: 110px; padding: 2px 6px; font-size: 0.9em;"
+              />
+            </label>
+          </div>
         </div>
       </Show>
     </div>
@@ -97,8 +173,10 @@ function FetchedModelList(props: {
   allModels: string[];
   enabledModels: string[];
   modelCaps: Record<string, CapabilityOption[]>;
+  modelLimits?: Record<string, ModelLimitOverride>;
   onToggleModel: (modelId: string, checked: boolean) => void;
   onToggleCap: (modelId: string, cap: CapabilityOption) => void;
+  onUpdateModelLimit?: (modelId: string, limits: ModelLimitOverride | null) => void;
   onAddManual: (modelId: string) => void;
   onRemoveManual: (modelIdx: number) => void;
   renderLabel?: (modelId: string) => JSX.Element;
@@ -139,8 +217,10 @@ function FetchedModelList(props: {
                 label={props.renderLabel?.(modelId)}
                 enabled={props.enabledModels.includes(modelId)}
                 caps={(props.modelCaps[modelId] ?? []) as CapabilityOption[]}
+                limits={props.modelLimits?.[modelId]}
                 onToggle={(checked) => props.onToggleModel(modelId, checked)}
                 onToggleCap={(cap) => props.onToggleCap(modelId, cap)}
+                onUpdateLimits={props.onUpdateModelLimit ? (limits) => props.onUpdateModelLimit!(modelId, limits) : undefined}
               />
             )}
           </For>
@@ -357,6 +437,15 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                   autoPopulateModelCaps(idx(), modelId);
                 };
                 const handleRemoveManual = (mIdx: number) => removeModelFromProvider(idx(), mIdx);
+                const handleUpdateModelLimit = (modelId: string, limits: ModelLimitOverride | null) => {
+                  const allLimits = { ...(provider().model_limits ?? {}) };
+                  if (limits) {
+                    allLimits[modelId] = limits;
+                  } else {
+                    delete allLimits[modelId];
+                  }
+                  updateProvider(idx(), 'model_limits', Object.keys(allLimits).length > 0 ? allLimits : {});
+                };
 
                 const apiKeyKinds = ['anthropic', 'open-ai-compatible', 'microsoft-foundry'];
                 const needsApiKey = () => apiKeyKinds.includes(provider().kind);
@@ -793,8 +882,10 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                               allModels={sortedCopilotModelIds()}
                               enabledModels={provider().models}
                               modelCaps={provider().model_capabilities ?? {}}
+                              modelLimits={provider().model_limits ?? {}}
                               onToggleModel={handleToggleModel}
                               onToggleCap={handleToggleCap}
+                              onUpdateModelLimit={handleUpdateModelLimit}
                               onAddManual={handleAddManual}
                               onRemoveManual={handleRemoveManual}
                               renderLabel={(modelId) => {
@@ -814,8 +905,10 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                             allModels={sortedAnthropicModels()}
                             enabledModels={provider().models}
                             modelCaps={provider().model_capabilities ?? {}}
+                            modelLimits={provider().model_limits ?? {}}
                             onToggleModel={handleToggleModel}
                             onToggleCap={handleToggleCap}
+                            onUpdateModelLimit={handleUpdateModelLimit}
                             onAddManual={handleAddManual}
                             onRemoveManual={handleRemoveManual}
                             showFallbackTags
@@ -831,8 +924,10 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                             allModels={sortedOpenAiModels()}
                             enabledModels={provider().models}
                             modelCaps={provider().model_capabilities ?? {}}
+                            modelLimits={provider().model_limits ?? {}}
                             onToggleModel={handleToggleModel}
                             onToggleCap={handleToggleCap}
+                            onUpdateModelLimit={handleUpdateModelLimit}
                             onAddManual={handleAddManual}
                             onRemoveManual={handleRemoveManual}
                             showFallbackTags
@@ -848,8 +943,10 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                             allModels={sortedFoundryModels()}
                             enabledModels={provider().models}
                             modelCaps={provider().model_capabilities ?? {}}
+                            modelLimits={provider().model_limits ?? {}}
                             onToggleModel={handleToggleModel}
                             onToggleCap={handleToggleCap}
+                            onUpdateModelLimit={handleUpdateModelLimit}
                             onAddManual={handleAddManual}
                             onRemoveManual={handleRemoveManual}
                             showFallbackTags
@@ -894,8 +991,10 @@ export default function ProvidersTab(props: ProvidersTabProps) {
                                       label={<><span style="font-weight: 600;">{displayModelName(m)}</span> <span class="muted" style="font-size: 0.8em;">({m.runtime})</span></>}
                                       enabled={provider().models.length === 0 || provider().models.includes(m.id)}
                                       caps={((provider().model_capabilities ?? {})[m.id] ?? []) as CapabilityOption[]}
+                                      limits={(provider().model_limits ?? {})[m.id]}
                                       onToggle={toggleLocal}
                                       onToggleCap={(cap) => handleToggleCap(m.id, cap)}
+                                      onUpdateLimits={(limits) => handleUpdateModelLimit(m.id, limits)}
                                     />
                                   );
                                 }}

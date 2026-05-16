@@ -408,6 +408,15 @@ pub enum LoopEvent {
         duration_ms: Option<u64>,
         phase: CodeExecutionPhase,
     },
+    /// Context compaction was performed to reduce token usage.
+    ContextCompacted {
+        /// Number of messages that were compacted into a summary.
+        messages_compacted: usize,
+        /// Estimated token count before compaction.
+        estimated_before: usize,
+        /// Estimated token count after compaction.
+        estimated_after: usize,
+    },
 }
 
 /// Phase of a CodeAct code execution event.
@@ -435,6 +444,8 @@ pub enum LoopError {
         provider_id: Option<String>,
         /// Model that produced the error.
         model: Option<String>,
+        /// Actual context/prompt token limit from provider error, if parsed.
+        context_limit: Option<u32>,
     },
     #[error("model worker join failed: {0}")]
     JoinFailed(String),

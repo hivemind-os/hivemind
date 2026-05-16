@@ -96,10 +96,10 @@ pub use stall_middleware::StallDetectionMiddleware;
 pub use tool_budget::{AdaptiveBudget, BudgetDecision};
 
 // ── Token budget middleware ────────────────────────────────────────────────
-pub use token_budget::{estimate_request_tokens, TokenBudgetMiddleware};
+pub use token_budget::{enforce_with_limit, estimate_request_tokens, TokenBudgetMiddleware};
 
 // ── Context compaction middleware ──────────────────────────────────────────
-pub use compactor::ContextCompactorMiddleware;
+pub use compactor::{compact_messages, ContextCompactorMiddleware, COMPACTION_SUMMARY_PREFIX};
 
 // ── Risk scanning middleware ──────────────────────────────────────────────
 pub use risk_middleware::RiskScanMiddleware;

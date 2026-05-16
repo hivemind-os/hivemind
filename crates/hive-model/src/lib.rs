@@ -168,6 +168,12 @@ pub struct RoutingDecision {
     pub selected: ModelSelection,
     pub fallback_chain: Vec<ModelSelection>,
     pub reason: String,
+    /// Provider-configured context window override (if set in provider's model_limits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_context_window: Option<u32>,
+    /// Provider-configured max output tokens override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_max_output_tokens: Option<u32>,
 }
 
 /// A single part of a multimodal message.
@@ -467,10 +473,9 @@ impl ProviderAuth {
         use hive_contracts::config::{ProviderAuthConfig, ProviderKindConfig};
         match (kind, auth) {
             (_, ProviderAuthConfig::None) => Self::None,
-            (ProviderKindConfig::Anthropic, ProviderAuthConfig::Env(env_var)) => Self::HeaderEnv {
-                env_var: env_var.clone(),
-                header_name: "x-api-key".to_string(),
-            },
+            (ProviderKindConfig::Anthropic, ProviderAuthConfig::Env(env_var)) => {
+                Self::HeaderEnv { env_var: env_var.clone(), header_name: "x-api-key".to_string() }
+            }
             (ProviderKindConfig::MicrosoftFoundry, ProviderAuthConfig::Env(env_var)) => {
                 Self::HeaderEnv { env_var: env_var.clone(), header_name: "api-key".to_string() }
             }
@@ -708,9 +713,7 @@ struct AzureCredentialChain {
 
 impl std::fmt::Debug for AzureCredentialChain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AzureCredentialChain")
-            .field("sources_count", &self.sources.len())
-            .finish()
+        f.debug_struct("AzureCredentialChain").field("sources_count", &self.sources.len()).finish()
     }
 }
 
@@ -762,9 +765,9 @@ pub(crate) fn get_azure_token_blocking(scope: &str) -> Result<String> {
     // Acquire a fresh token. get_token is async, so handle both
     // inside-tokio and outside-tokio scenarios.
     let access_token = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => tokio::task::block_in_place(|| {
-            handle.block_on(acquire_azure_token_async(scope))
-        })?,
+        Ok(handle) => {
+            tokio::task::block_in_place(|| handle.block_on(acquire_azure_token_async(scope)))?
+        }
         Err(_) => {
             let rt = tokio::runtime::Runtime::new()
                 .context("failed to create tokio runtime for Azure credential")?;
@@ -988,6 +991,17 @@ impl ModelRouter {
         providers
     }
 
+    fn effective_limits_for_selection(
+        &self,
+        selection: &ModelSelection,
+    ) -> (Option<u32>, Option<u32>) {
+        self.providers
+            .get(&selection.provider_id)
+            .and_then(|provider| provider.descriptor().model_limits.get(&selection.model))
+            .map(|limits| (limits.context_window, limits.max_output_tokens))
+            .unwrap_or((None, None))
+    }
+
     pub fn route(&self, request: &RoutingRequest) -> Result<RoutingDecision, ModelRouterError> {
         // If the user provided a preference list of model patterns, try each
         // pattern in order against eligible providers.
@@ -1103,6 +1117,8 @@ impl ModelRouter {
 
             if !ordered.is_empty() {
                 let selected = ordered.remove(0);
+                let (effective_context_window, effective_max_output_tokens) =
+                    self.effective_limits_for_selection(&selected);
                 return Ok(RoutingDecision {
                     selected,
                     fallback_chain: ordered,
@@ -1110,6 +1126,8 @@ impl ModelRouter {
                         "using preferred model pattern: {}",
                         matched_pattern.unwrap_or("?")
                     ),
+                    effective_context_window,
+                    effective_max_output_tokens,
                 });
             }
             tracing::warn!(
@@ -1134,6 +1152,8 @@ impl ModelRouter {
             .collect();
 
         let selected = ordered.first().cloned().ok_or(ModelRouterError::NoEligibleProviders)?;
+        let (effective_context_window, effective_max_output_tokens) =
+            self.effective_limits_for_selection(&selected);
 
         let fallback_chain = ordered.iter().skip(1).cloned().collect::<Vec<_>>();
 
@@ -1141,6 +1161,8 @@ impl ModelRouter {
             selected,
             fallback_chain,
             reason: "using provider priority order".to_string(),
+            effective_context_window,
+            effective_max_output_tokens,
         })
     }
 
@@ -1189,6 +1211,7 @@ impl ModelRouter {
 
         let mut last_kind: Option<ProviderErrorKind> = None;
         let mut last_status: Option<u16> = None;
+        let mut last_error_msg: Option<String> = None;
 
         for (idx, selection) in chain.iter().enumerate() {
             attempted.push(format!("{}:{}", selection.provider_id, selection.model));
@@ -1203,8 +1226,10 @@ impl ModelRouter {
                     Err(error) => {
                         let kind = classify_provider_error(&error);
                         let status = extract_http_status(&error);
+                        let error_message = format!("{:#}", error);
                         last_kind = Some(kind);
                         last_status = status;
+                        last_error_msg = Some(error_message.clone());
 
                         if kind.is_retryable() && attempt < policy.max_attempts {
                             let backoff = policy.backoff_ms(attempt);
@@ -1233,26 +1258,40 @@ impl ModelRouter {
                             continue;
                         }
 
-                        if idx == last_idx {
+                        if idx == last_idx
+                            || matches!(kind, ProviderErrorKind::ContextLengthExceeded)
+                        {
                             return Err(ModelRouterError::ProviderExecutionFailed {
                                 attempted,
-                                last_error: format!("{:#}", error),
+                                last_error: error_message.clone(),
                                 error_kind: Some(kind),
                                 http_status: status,
+                                context_limit: last_error_msg
+                                    .as_deref()
+                                    .and_then(extract_context_limit),
                             });
                         }
-                        // Non-retryable or retries exhausted: move to next provider.
+                        // Retries exhausted but retryable: move to next provider.
+                        tracing::warn!(
+                            provider_id = %selection.provider_id,
+                            model = %selection.model,
+                            error_kind = ?kind,
+                            "non-streaming call failed after retries, trying next in fallback chain"
+                        );
                         break;
                     }
                 }
             }
         }
 
+        let context_limit = last_error_msg.as_deref().and_then(extract_context_limit);
+        let last_error = last_error_msg.unwrap_or_else(|| "all providers failed".to_string());
         Err(ModelRouterError::ProviderExecutionFailed {
             attempted,
-            last_error: "all providers failed".to_string(),
+            last_error,
             error_kind: last_kind,
             http_status: last_status,
+            context_limit,
         })
     }
 
@@ -1294,6 +1333,7 @@ impl ModelRouter {
 
         let mut last_kind: Option<ProviderErrorKind> = None;
         let mut last_status: Option<u16> = None;
+        let mut last_error_msg: Option<String> = None;
 
         for (idx, selection) in chain.iter().enumerate() {
             attempted.push(format!("{}:{}", selection.provider_id, selection.model));
@@ -1308,8 +1348,10 @@ impl ModelRouter {
                     Err(error) => {
                         let kind = classify_provider_error(&error);
                         let status = extract_http_status(&error);
+                        let error_message = format!("{:#}", error);
                         last_kind = Some(kind);
                         last_status = status;
+                        last_error_msg = Some(error_message.clone());
 
                         if kind.is_retryable() && attempt < policy.max_attempts {
                             let backoff = policy.backoff_ms(attempt);
@@ -1340,12 +1382,17 @@ impl ModelRouter {
                             continue;
                         }
 
-                        if idx == last_idx || !kind.is_retryable() {
+                        if idx == last_idx
+                            || matches!(kind, ProviderErrorKind::ContextLengthExceeded)
+                        {
                             return Err(ModelRouterError::ProviderExecutionFailed {
                                 attempted,
-                                last_error: format!("{:#}", error),
+                                last_error: error_message.clone(),
                                 error_kind: Some(kind),
                                 http_status: status,
+                                context_limit: last_error_msg
+                                    .as_deref()
+                                    .and_then(extract_context_limit),
                             });
                         }
                         tracing::warn!(
@@ -1361,11 +1408,14 @@ impl ModelRouter {
             }
         }
 
+        let context_limit = last_error_msg.as_deref().and_then(extract_context_limit);
+        let last_error = last_error_msg.unwrap_or_else(|| "all providers failed".to_string());
         Err(ModelRouterError::ProviderExecutionFailed {
             attempted,
-            last_error: "all providers failed".to_string(),
+            last_error,
             error_kind: last_kind,
             http_status: last_status,
+            context_limit,
         })
     }
 
@@ -1434,6 +1484,8 @@ pub enum ModelRouterError {
         error_kind: Option<ProviderErrorKind>,
         /// HTTP status code from the final failure, if available.
         http_status: Option<u16>,
+        /// Actual context/prompt token limit extracted from the error, if available.
+        context_limit: Option<u32>,
     },
 }
 
@@ -1446,6 +1498,8 @@ pub struct ProviderError {
     pub kind: ProviderErrorKind,
     pub http_status: Option<u16>,
     pub message: String,
+    /// The actual token limit reported by the provider (parsed from error body).
+    pub context_limit: Option<u32>,
 }
 
 /// Classifies a provider error as retryable or not.
@@ -1462,6 +1516,8 @@ pub enum ProviderErrorKind {
     AuthError,
     /// HTTP 402 — insufficient credits / payment required.
     InsufficientCredits,
+    /// The request exceeded the model's context length / prompt token limit.
+    ContextLengthExceeded,
     /// Any other error (network, parse, unknown).
     Other,
 }
@@ -1516,6 +1572,18 @@ fn classify_error_message(msg: &str) -> ProviderErrorKind {
     {
         return ProviderErrorKind::InsufficientCredits;
     }
+
+    if lower.contains("context_length_exceeded")
+        || lower.contains("model_max_prompt_tokens_exceeded")
+        || lower.contains("maximum context length")
+        || (lower.contains("prompt") && lower.contains("too long"))
+        || (lower.contains("token") && lower.contains("exceed") && lower.contains("limit"))
+        || lower.contains("request too large")
+        || lower.contains("prompt is too long")
+    {
+        return ProviderErrorKind::ContextLengthExceeded;
+    }
+
     // Look for "returned <status_code>:" pattern
     if let Some(pos) = msg.find("returned ") {
         let after = &msg[pos + "returned ".len()..];
@@ -1536,6 +1604,52 @@ fn classify_error_message(msg: &str) -> ProviderErrorKind {
         return ProviderErrorKind::ServerError;
     }
     ProviderErrorKind::Other
+}
+
+/// Attempt to extract the actual token limit from a provider error message.
+///
+/// Supports patterns like:
+/// - "exceeds the limit of 128000"
+/// - "maximum context length is 128000"
+/// - "max_tokens: 128000"
+pub fn extract_context_limit(msg: &str) -> Option<u32> {
+    let lower = msg.to_lowercase();
+
+    if let Some(pos) = lower.find("limit of ") {
+        let after = &msg[pos + "limit of ".len()..];
+        if let Some(num_str) = after.split(|c: char| !c.is_ascii_digit()).next() {
+            if let Ok(limit) = num_str.parse::<u32>() {
+                if limit > 0 {
+                    return Some(limit);
+                }
+            }
+        }
+    }
+
+    if let Some(pos) = lower.find("context length is ") {
+        let after = &msg[pos + "context length is ".len()..];
+        if let Some(num_str) = after.split(|c: char| !c.is_ascii_digit()).next() {
+            if let Ok(limit) = num_str.parse::<u32>() {
+                if limit > 0 {
+                    return Some(limit);
+                }
+            }
+        }
+    }
+
+    if let Some(pos) = lower.find("max_tokens") {
+        let after = &msg[pos + "max_tokens".len()..];
+        let after = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+        if let Some(num_str) = after.split(|c: char| !c.is_ascii_digit()).next() {
+            if let Ok(limit) = num_str.parse::<u32>() {
+                if limit > 0 {
+                    return Some(limit);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Simple glob matching against model names.
@@ -1960,9 +2074,10 @@ fn anthropic_messages_from_request(
                     .blocks
                     .iter()
                     .filter_map(|block| match block {
-                        MessageBlock::Text { text } => {
-                            Some(AnthropicContentPart::Text { text: text.clone(), cache_control: None })
-                        }
+                        MessageBlock::Text { text } => Some(AnthropicContentPart::Text {
+                            text: text.clone(),
+                            cache_control: None,
+                        }),
                         MessageBlock::ToolUse { id, name, input } => {
                             Some(AnthropicContentPart::ToolUse {
                                 id: id.clone(),
@@ -2052,7 +2167,9 @@ fn anthropic_messages_from_request(
                         break;
                     }
                 }
-            } else if let AnthropicContent::Text(text) = std::mem::replace(&mut msg.content, AnthropicContent::Text(String::new())) {
+            } else if let AnthropicContent::Text(text) =
+                std::mem::replace(&mut msg.content, AnthropicContent::Text(String::new()))
+            {
                 // Convert plain text to a structured block so we can attach cache_control.
                 msg.content = AnthropicContent::Parts(vec![AnthropicContentPart::Text {
                     text,
@@ -2093,7 +2210,9 @@ fn anthropic_content_from_completion(msg: &CompletionMessage) -> AnthropicConten
         msg.content_parts
             .iter()
             .map(|part| match part {
-                ContentPart::Text { text } => AnthropicContentPart::Text { text: text.clone(), cache_control: None },
+                ContentPart::Text { text } => {
+                    AnthropicContentPart::Text { text: text.clone(), cache_control: None }
+                }
                 ContentPart::Image { media_type, data } => AnthropicContentPart::Image {
                     source: AnthropicImageSource {
                         source_type: "base64".to_string(),
@@ -2433,7 +2552,11 @@ pub fn discover_provider_models(
     }
 }
 
-fn discover_anthropic_models(client: &Client, base: &str, auth: &ProviderAuth) -> Result<Vec<String>> {
+fn discover_anthropic_models(
+    client: &Client,
+    base: &str,
+    auth: &ProviderAuth,
+) -> Result<Vec<String>> {
     let mut all_models = Vec::new();
     let mut after_id: Option<String> = None;
     for _ in 0..10 {
@@ -2489,7 +2612,11 @@ fn discover_openai_models(client: &Client, base: &str, auth: &ProviderAuth) -> R
     Ok(all_models)
 }
 
-fn discover_foundry_models(client: &Client, base: &str, auth: &ProviderAuth) -> Result<Vec<String>> {
+fn discover_foundry_models(
+    client: &Client,
+    base: &str,
+    auth: &ProviderAuth,
+) -> Result<Vec<String>> {
     // The Foundry Projects API lists only user-deployed models.
     // The base URL must include the project path, e.g.:
     //   https://{resource}.services.ai.azure.com/api/projects/{project}
@@ -2666,24 +2793,24 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
     match event_type {
         "message_start" => {
             // Anthropic sends input_tokens and cache info in the message_start event.
-            let usage = value
-                .get("message")
-                .and_then(|m| m.get("usage"))
-                .and_then(|u| {
-                    let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let cache_read = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let cache_write = u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    if input > 0 || cache_read > 0 || cache_write > 0 {
-                        Some(CompletionUsage {
-                            input_tokens: input,
-                            output_tokens: 0,
-                            cached_input_tokens: cache_read,
-                            cache_write_tokens: cache_write,
-                        })
-                    } else {
-                        None
-                    }
-                });
+            let usage = value.get("message").and_then(|m| m.get("usage")).and_then(|u| {
+                let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let cache_read =
+                    u.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let cache_write =
+                    u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                        as u32;
+                if input > 0 || cache_read > 0 || cache_write > 0 {
+                    Some(CompletionUsage {
+                        input_tokens: input,
+                        output_tokens: 0,
+                        cached_input_tokens: cache_read,
+                        cache_write_tokens: cache_write,
+                    })
+                } else {
+                    None
+                }
+            });
             Ok(SseParseResult { chunk: None, tool_call_deltas: vec![], usage })
         }
         "content_block_start" => {
@@ -2745,9 +2872,11 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
                 usage: None,
             })
         }
-        "content_block_stop" => {
-            Ok(SseParseResult { chunk: None, tool_call_deltas: vec![ToolCallDelta::AnthropicStop], usage: None })
-        }
+        "content_block_stop" => Ok(SseParseResult {
+            chunk: None,
+            tool_call_deltas: vec![ToolCallDelta::AnthropicStop],
+            usage: None,
+        }),
         "message_delta" => {
             let stop_reason =
                 value.get("delta").and_then(|d| d.get("stop_reason")).and_then(|r| r.as_str());
@@ -2761,7 +2890,11 @@ fn parse_anthropic_sse_data(data: &str, provider_id: &str) -> Result<SseParseRes
             let usage = value.get("usage").and_then(|u| {
                 let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 if output > 0 {
-                    Some(CompletionUsage { input_tokens: 0, output_tokens: output, ..Default::default() })
+                    Some(CompletionUsage {
+                        input_tokens: 0,
+                        output_tokens: output,
+                        ..Default::default()
+                    })
                 } else {
                     None
                 }
@@ -2844,6 +2977,7 @@ mod tests {
                         capabilities.iter().cloned().collect(),
                     )]),
                     models,
+                    model_limits: std::collections::BTreeMap::new(),
                     priority,
                     available: true,
                 },
@@ -3393,6 +3527,7 @@ mod tests {
                     "test-model".to_string(),
                     [Capability::Chat].into_iter().collect(),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 100,
                 available: true,
             },
@@ -3957,7 +4092,50 @@ mod tests {
         assert!(ProviderErrorKind::ServerError.is_retryable());
         assert!(!ProviderErrorKind::AuthError.is_retryable());
         assert!(!ProviderErrorKind::InsufficientCredits.is_retryable());
+        assert!(!ProviderErrorKind::ContextLengthExceeded.is_retryable());
         assert!(!ProviderErrorKind::Other.is_retryable());
+    }
+
+    #[test]
+    fn context_length_exceeded_classification() {
+        assert_eq!(
+            classify_error_message("provider abc returned 400 Bad Request: {\"error\":{\"message\":\"prompt token count of 128722 exceeds the limit of 128000\",\"code\":\"model_max_prompt_tokens_exceeded\"}}"),
+            ProviderErrorKind::ContextLengthExceeded
+        );
+
+        assert_eq!(
+            classify_error_message(
+                "provider xyz returned 400: maximum context length is 4096 tokens"
+            ),
+            ProviderErrorKind::ContextLengthExceeded
+        );
+
+        assert_eq!(
+            classify_error_message(
+                "provider abc returned 400: prompt is too long: 150000 tokens > 100000 maximum"
+            ),
+            ProviderErrorKind::ContextLengthExceeded
+        );
+
+        assert_eq!(
+            classify_error_message("provider abc returned 400: invalid request"),
+            ProviderErrorKind::Other
+        );
+    }
+
+    #[test]
+    fn context_length_exceeded_not_retryable() {
+        assert!(!ProviderErrorKind::ContextLengthExceeded.is_retryable());
+    }
+
+    #[test]
+    fn extract_context_limit_patterns() {
+        assert_eq!(
+            extract_context_limit("prompt token count of 128722 exceeds the limit of 128000"),
+            Some(128000)
+        );
+        assert_eq!(extract_context_limit("maximum context length is 4096 tokens"), Some(4096));
+        assert_eq!(extract_context_limit("some random error"), None);
     }
 
     // -- Retry tests ---------------------------------------------------------
@@ -3988,6 +4166,7 @@ mod tests {
                         [Capability::Chat].into_iter().collect(),
                     )]),
                     models: vec!["default".to_string()],
+                    model_limits: std::collections::BTreeMap::new(),
                     priority: 100,
                     available: true,
                 },
@@ -4249,6 +4428,7 @@ mod tests {
             kind: ProviderErrorKind::RateLimited,
             http_status: Some(429),
             message: "rate limited".into(),
+            context_limit: None,
         };
         let err: anyhow::Error = pe.into();
         assert_eq!(extract_http_status(&err), Some(429));
@@ -4527,7 +4707,11 @@ mod tests {
             model: "gpt-4".to_string(),
             content: "Hello".to_string(),
             tool_calls: vec![],
-            usage: Some(CompletionUsage { input_tokens: 100, output_tokens: 50, ..Default::default() }),
+            usage: Some(CompletionUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                ..Default::default()
+            }),
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: CompletionResponse = serde_json::from_str(&json).unwrap();

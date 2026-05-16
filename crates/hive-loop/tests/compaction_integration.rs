@@ -47,6 +47,7 @@ impl SummarizerProvider {
                     "test-model".to_string(),
                     [Capability::Chat].into_iter().collect(),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 100,
                 available: true,
             },
@@ -166,6 +167,8 @@ fn make_context(model: &str) -> LoopContext {
                 selected: ModelSelection { provider_id: TEST_PROVIDER.into(), model: model.into() },
                 fallback_chain: vec![],
                 reason: "test".into(),
+                effective_context_window: None,
+                effective_max_output_tokens: None,
             }),
         },
         security: SecurityContext {

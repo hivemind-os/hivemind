@@ -51,6 +51,7 @@ impl ScriptProvider {
                     "test-model".to_string(),
                     BTreeSet::from([Capability::Chat, Capability::ToolUse]),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 10,
                 available: true,
             },
@@ -217,6 +218,8 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
                 selected: ModelSelection { provider_id: "mock".into(), model: "test-model".into() },
                 fallback_chain: vec![],
                 reason: "test".into(),
+                effective_context_window: None,
+                effective_max_output_tokens: None,
             }),
         },
         security: SecurityContext {

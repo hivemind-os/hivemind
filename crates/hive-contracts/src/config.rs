@@ -477,6 +477,15 @@ impl<'de> Deserialize<'de> for ProviderAuthConfig {
 
 // ── ModelProviderConfig ─────────────────────────────────────────────
 
+/// Per-model token limit overrides for a provider deployment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ModelLimitOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelProviderConfig {
     pub id: String,
@@ -495,6 +504,8 @@ pub struct ModelProviderConfig {
     pub capabilities: BTreeSet<CapabilityConfig>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_capabilities: BTreeMap<String, BTreeSet<CapabilityConfig>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_limits: BTreeMap<String, ModelLimitOverride>,
     pub channel_class: ChannelClass,
     #[serde(default = "default_provider_priority")]
     pub priority: i32,
@@ -857,6 +868,7 @@ pub fn default_provider_registry() -> Vec<ModelProviderConfig> {
             models: vec![], // empty = auto-discover from registry
             capabilities: BTreeSet::new(),
             model_capabilities: BTreeMap::new(), // auto-populated at runtime
+            model_limits: BTreeMap::new(),
             channel_class: ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,
@@ -1545,6 +1557,7 @@ mod tests {
             models: vec!["phi-3-mini".to_string()],
             capabilities: [CapabilityConfig::Chat].into_iter().collect(),
             model_capabilities: BTreeMap::new(),
+            model_limits: BTreeMap::new(),
             channel_class: ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,

@@ -40,6 +40,7 @@ impl TestProvider {
                         "test-model".to_string(),
                         BTreeSet::from([Capability::Chat]),
                     )]),
+                    model_limits: std::collections::BTreeMap::new(),
                     priority: 10,
                     available: true,
                 },
@@ -1857,6 +1858,8 @@ async fn check_preempt_returns_none_when_signal_not_set() {
         selected: ModelSelection { provider_id: "p".into(), model: "m".into() },
         fallback_chain: vec![],
         reason: String::new(),
+        effective_context_window: None,
+        effective_max_output_tokens: None,
     };
 
     let result = super::check_preempt(&Some(signal), &None, &decision, "p", "m", None).await;
@@ -1869,6 +1872,8 @@ async fn check_preempt_returns_none_when_no_signal() {
         selected: ModelSelection { provider_id: "p".into(), model: "m".into() },
         fallback_chain: vec![],
         reason: String::new(),
+        effective_context_window: None,
+        effective_max_output_tokens: None,
     };
 
     let result = super::check_preempt(&None, &None, &decision, "p", "m", None).await;
@@ -1882,6 +1887,8 @@ async fn check_preempt_returns_result_when_signal_set() {
         selected: ModelSelection { provider_id: "test".into(), model: "test-model".into() },
         fallback_chain: vec![],
         reason: String::new(),
+        effective_context_window: None,
+        effective_max_output_tokens: None,
     };
 
     let result =
@@ -1899,6 +1906,8 @@ async fn check_preempt_emits_event() {
         selected: ModelSelection { provider_id: "p".into(), model: "m".into() },
         fallback_chain: vec![],
         reason: String::new(),
+        effective_context_window: None,
+        effective_max_output_tokens: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<LoopEvent>(10);
 

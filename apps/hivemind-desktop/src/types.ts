@@ -692,6 +692,11 @@ export type ProviderOptionsConfig = {
   headers: Record<string, string>;
 };
 
+export type ModelLimitOverride = {
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+};
+
 export type ModelProviderConfig = {
   id: string;
   name: string;
@@ -701,6 +706,7 @@ export type ModelProviderConfig = {
   models: string[];
   capabilities?: CapabilityOption[];  // legacy, may be absent
   model_capabilities: Record<string, CapabilityOption[]>;
+  model_limits?: Record<string, ModelLimitOverride>;
   channel_class: ChannelClassOption;
   priority: number;
   enabled: boolean;

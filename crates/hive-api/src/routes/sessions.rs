@@ -147,6 +147,13 @@ pub(crate) async fn send_chat_message(
     state.chat.enqueue_message(&session_id, request).await.map(Json).map_err(chat_error)
 }
 
+pub(crate) async fn compact_chat_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<ChatSessionSnapshot>, (StatusCode, String)> {
+    state.chat.compact_session(&session_id).await.map(Json).map_err(chat_error)
+}
+
 // ── Session persona ─────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]

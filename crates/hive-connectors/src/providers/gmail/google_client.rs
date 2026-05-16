@@ -176,8 +176,11 @@ impl GoogleClient {
         if let Some(idx) = body_text.find("Retry after ") {
             let ts_start = idx + "Retry after ".len();
             // Take up to 30 chars to cover "2026-05-03T15:46:59.905Z"
-            let ts_str: String =
-                body_text[ts_start..].chars().take(30).take_while(|c| !c.is_whitespace() && *c != '"').collect();
+            let ts_str: String = body_text[ts_start..]
+                .chars()
+                .take(30)
+                .take_while(|c| !c.is_whitespace() && *c != '"')
+                .collect();
             if let Ok(retry_at) = chrono::DateTime::parse_from_rfc3339(&ts_str) {
                 let now = chrono::Utc::now();
                 let diff = retry_at.signed_duration_since(now);

@@ -4,9 +4,7 @@
 //! running workflows.
 
 use hive_agents::types::{AgentStatus, AgentSummary};
-use hive_workflow_service::hive_workflow::types::{
-    StepStatus, StepType, TaskDef, WorkflowStatus,
-};
+use hive_workflow_service::hive_workflow::types::{StepStatus, StepType, TaskDef, WorkflowStatus};
 use hive_workflow_service::WorkflowService;
 use std::collections::HashSet;
 use std::fmt::Write;

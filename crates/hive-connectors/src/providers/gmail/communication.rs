@@ -488,11 +488,8 @@ impl CommunicationService for GmailCommunication {
                 .map(|raw| extract_email_address(&raw))
                 .unwrap_or_else(|| "unknown".to_string());
             let to_header = header_value(&headers, "To").unwrap_or_default();
-            let to_addrs: Vec<String> = to_header
-                .split(',')
-                .map(extract_email_address)
-                .filter(|s| !s.is_empty())
-                .collect();
+            let to_addrs: Vec<String> =
+                to_header.split(',').map(extract_email_address).filter(|s| !s.is_empty()).collect();
 
             let subject = header_value(&headers, "Subject");
             let body_text = extract_body(payload);
@@ -756,33 +753,21 @@ mod tests {
 
     #[test]
     fn test_extract_email_address_bare() {
-        assert_eq!(
-            extract_email_address("user@example.com"),
-            "user@example.com"
-        );
+        assert_eq!(extract_email_address("user@example.com"), "user@example.com");
     }
 
     #[test]
     fn test_extract_email_address_angle_brackets_only() {
-        assert_eq!(
-            extract_email_address("<user@example.com>"),
-            "user@example.com"
-        );
+        assert_eq!(extract_email_address("<user@example.com>"), "user@example.com");
     }
 
     #[test]
     fn test_extract_email_address_with_quotes() {
-        assert_eq!(
-            extract_email_address("\"Doe, John\" <john@example.com>"),
-            "john@example.com"
-        );
+        assert_eq!(extract_email_address("\"Doe, John\" <john@example.com>"), "john@example.com");
     }
 
     #[test]
     fn test_extract_email_address_whitespace() {
-        assert_eq!(
-            extract_email_address("  user@example.com  "),
-            "user@example.com"
-        );
+        assert_eq!(extract_email_address("  user@example.com  "), "user@example.com");
     }
 }

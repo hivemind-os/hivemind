@@ -25,10 +25,10 @@ use hive_core::{
 use hive_inference::{LocalModelRegistry, ModelRegistryStore, RuntimeManager};
 use hive_knowledge::{KgPool, KnowledgeGraph, NewNode, Node, SearchResult};
 use hive_loop::{
-    AgentContext, AgentOrchestrator, BoxFuture, ContextCompactorMiddleware, ConversationContext,
-    ConversationJournal, KnowledgeQueryHandler, LoopContext, LoopEvent, LoopExecutor,
-    ReActStrategy, RiskScanMiddleware, RoutingConfig, SecurityContext, TokenBudgetMiddleware,
-    ToolsContext, UserInteractionGate,
+    compact_messages, AgentContext, AgentOrchestrator, BoxFuture, ContextCompactorMiddleware,
+    ConversationContext, ConversationJournal, KnowledgeQueryHandler, LoopContext, LoopEvent,
+    LoopExecutor, ReActStrategy, RiskScanMiddleware, RoutingConfig, SecurityContext,
+    TokenBudgetMiddleware, ToolsContext, UserInteractionGate, COMPACTION_SUMMARY_PREFIX,
 };
 use hive_mcp::{McpCatalogStore, McpService, SessionMcpManager};
 use hive_model::{
@@ -1008,6 +1008,7 @@ pub struct ChatService {
     /// Global default permission rules inherited by new sessions.
     default_permissions: Arc<Mutex<Vec<PermissionRule>>>,
     compaction_config: Arc<ArcSwap<hive_contracts::ContextCompactionConfig>>,
+    model_limits: Arc<ModelLimitsRegistry>,
     tool_limits: Arc<hive_contracts::ToolLimitsConfig>,
     code_act_config: hive_contracts::CodeActConfig,
     /// Shared session registry for CodeAct code execution.
@@ -1725,6 +1726,7 @@ impl ChatService {
             personas: bot_service.personas.clone(),
             default_permissions: Arc::new(Mutex::new(Vec::new())),
             compaction_config: compaction_config_swap,
+            model_limits,
             tool_limits: Arc::new(tool_limits),
             code_act_config,
             code_session_registry,
@@ -3008,6 +3010,154 @@ impl ChatService {
             .get(session_id)
             .map(|session| session.snapshot.clone())
             .ok_or_else(|| ChatServiceError::SessionNotFound { session_id: session_id.to_string() })
+    }
+
+    /// Manually trigger context compaction on a session.
+    ///
+    /// Builds a summary of older conversation history and replaces it with a
+    /// compact summary message. Returns the updated session snapshot.
+    pub async fn compact_session(
+        &self,
+        session_id: &str,
+    ) -> Result<ChatSessionSnapshot, ChatServiceError> {
+        let (session_node_id, history_indices, expected_ids, history) = {
+            let sessions = self.sessions.read().await;
+            let session = sessions.get(session_id).ok_or_else(|| {
+                ChatServiceError::SessionNotFound { session_id: session_id.to_string() }
+            })?;
+            let (history_indices, history) = build_compaction_history(&session.snapshot.messages);
+            let expected_ids: Vec<String> = history_indices
+                .iter()
+                .map(|&i| session.snapshot.messages[i].id.clone())
+                .collect();
+            (session.session_node_id, history_indices, expected_ids, history)
+        };
+
+        if history.len() <= 2 {
+            return self.get_session(session_id).await;
+        }
+
+        let model_router = self.model_router.load();
+        let compaction_config = self.compaction_config.load();
+        let routing_request = RoutingRequest {
+            prompt: String::new(),
+            required_capabilities: BTreeSet::from([Capability::Chat]),
+            preferred_models: None,
+        };
+        let decision =
+            model_router.route(&routing_request).map_err(|error| ChatServiceError::Internal {
+                detail: format!("failed to route compaction request: {error}"),
+            })?;
+
+        // Run blocking model call off the async runtime.
+        let history_for_compact = history.clone();
+        let limits = Arc::clone(&self.model_limits);
+        let compacted = tokio::task::spawn_blocking(move || {
+            compact_messages(
+                history_for_compact,
+                &model_router,
+                &decision,
+                &compaction_config,
+                limits.as_ref(),
+            )
+        })
+        .await
+        .map_err(|error| ChatServiceError::Internal {
+            detail: format!("compaction task join failed: {error}"),
+        })?
+        .map_err(|error| ChatServiceError::Internal {
+            detail: format!("compaction failed: {error}"),
+        })?;
+
+        if compacted == history {
+            return self.get_session(session_id).await;
+        }
+
+        let prefix_len =
+            history.iter().zip(compacted.iter()).take_while(|(left, right)| left == right).count();
+        let suffix_len = history[prefix_len..]
+            .iter()
+            .rev()
+            .zip(compacted[prefix_len..].iter().rev())
+            .take_while(|(left, right)| left == right)
+            .count();
+        let old_middle_end = history.len().saturating_sub(suffix_len);
+        let new_middle_end = compacted.len().saturating_sub(suffix_len);
+
+        if prefix_len >= old_middle_end {
+            return self.get_session(session_id).await;
+        }
+
+        let compacted_count = old_middle_end.saturating_sub(prefix_len);
+        let now = now_ms();
+        let inserted_messages: Vec<ChatMessage> = compacted[prefix_len..new_middle_end]
+            .iter()
+            .map(|message| completion_to_chat_message(message, now, &self.message_seq))
+            .collect();
+        let note_message = ChatMessage {
+            id: format!("msg-{}", self.message_seq.fetch_add(1, Ordering::Relaxed)),
+            role: ChatMessageRole::System,
+            status: ChatMessageStatus::Complete,
+            content: format!(
+                "Context compacted: {compacted_count} messages summarized into a compact summary."
+            ),
+            data_class: None,
+            classification_reason: None,
+            provider_id: None,
+            model: None,
+            scan_summary: None,
+            intent: Some("Context compacted".to_string()),
+            thinking: Some("Manual compaction triggered by user.".to_string()),
+            attachments: vec![],
+            interaction_request_id: None,
+            interaction_kind: None,
+            interaction_meta: None,
+            interaction_answer: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+
+        let snapshot = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions.get_mut(session_id).ok_or_else(|| {
+                ChatServiceError::SessionNotFound { session_id: session_id.to_string() }
+            })?;
+
+            // Validate that messages haven't changed since we read the snapshot.
+            // If any expected message ID no longer matches, abort to avoid
+            // corrupting the conversation from stale indices.
+            let indices_valid = history_indices.iter().enumerate().all(|(pos, &idx)| {
+                session
+                    .snapshot
+                    .messages
+                    .get(idx)
+                    .map(|m| m.id == expected_ids[pos])
+                    .unwrap_or(false)
+            });
+            if !indices_valid {
+                tracing::warn!(
+                    session_id,
+                    "manual compaction aborted: session messages changed during compaction"
+                );
+                return self.get_session(session_id).await;
+            }
+
+            let insert_at = history_indices[prefix_len];
+            for index in history_indices[prefix_len..old_middle_end].iter().rev() {
+                session.snapshot.messages.remove(*index);
+            }
+            for (offset, message) in inserted_messages.into_iter().enumerate() {
+                session.snapshot.messages.insert(insert_at + offset, message);
+            }
+            session.snapshot.messages.push(note_message);
+            session.snapshot.updated_at_ms = now;
+            session.snapshot.clone()
+        };
+
+        self.replace_persisted_session_messages(session_node_id, &snapshot.messages).await?;
+        self.persist_session_metadata(session_id).await?;
+
+        Ok(snapshot)
     }
 
     /// Get the per-session MCP manager for a given session.
@@ -5740,6 +5890,15 @@ impl ChatService {
             attachments,
             skip_preempt,
         } = request;
+
+        let trimmed = content.trim();
+        if role == ChatMessageRole::User
+            && (trimmed == "/compact" || trimmed.starts_with("/compact "))
+        {
+            let session = self.compact_session(session_id).await?;
+            return Ok(SendMessageResponse::Queued { session });
+        }
+
         let persona = self.resolve_persona(agent_id.as_deref());
         // Persona patterns take priority; per-message selection is fallback.
         let preferred_models = persona.preferred_models.clone().or(request_preferred_models);
@@ -6658,7 +6817,11 @@ impl ChatService {
                 let fwd_prompt = pending.content.clone();
                 let fwd_approval_tx = self.approval_tx.clone();
                 // Grab telemetry accumulator so direct chat model calls are tracked
-                let fwd_telemetry = self.get_or_create_supervisor(&session_id).await.ok().map(|s| Arc::clone(&s.telemetry));
+                let fwd_telemetry = self
+                    .get_or_create_supervisor(&session_id)
+                    .await
+                    .ok()
+                    .map(|s| Arc::clone(&s.telemetry));
                 let forward_handle = tokio::spawn(async move {
                     let mut generating_set = false;
 
@@ -6695,9 +6858,16 @@ impl ChatService {
                         }
 
                         match &event {
-                            LoopEvent::ModelLoading { model, provider_id, estimated_tokens, .. } => {
+                            LoopEvent::ModelLoading {
+                                model,
+                                provider_id,
+                                estimated_tokens,
+                                ..
+                            } => {
                                 // Record estimated input tokens for telemetry
-                                if let (Some(tel), Some(tokens)) = (&fwd_telemetry, estimated_tokens) {
+                                if let (Some(tel), Some(tokens)) =
+                                    (&fwd_telemetry, estimated_tokens)
+                                {
                                     let model_key = format!("{provider_id}:{model}");
                                     tel.record_input_tokens("chat", &model_key, *tokens as u64);
                                 }
@@ -6721,7 +6891,14 @@ impl ChatService {
                                     .await;
                                 }
                             }
-                            LoopEvent::ModelDone { model, provider_id, output_tokens, cached_input_tokens, cache_write_tokens, .. } => {
+                            LoopEvent::ModelDone {
+                                model,
+                                provider_id,
+                                output_tokens,
+                                cached_input_tokens,
+                                cache_write_tokens,
+                                ..
+                            } => {
                                 // Record model call telemetry
                                 if let Some(tel) = &fwd_telemetry {
                                     let model_key = format!("{provider_id}:{model}");
@@ -7917,6 +8094,36 @@ impl ChatService {
         })?
     }
 
+    async fn replace_persisted_session_messages(
+        &self,
+        session_node_id: i64,
+        messages: &[ChatMessage],
+    ) -> Result<(), ChatServiceError> {
+        let graph_path = Arc::clone(&self.knowledge_graph_path);
+        tokio::task::spawn_blocking(move || {
+            let graph = open_graph(&graph_path)?;
+            graph.scrub_session_messages(session_node_id).map_err(|error| {
+                ChatServiceError::KnowledgeGraphFailed {
+                    operation: "scrub_session_messages",
+                    detail: error.to_string(),
+                }
+            })?;
+            Ok::<(), ChatServiceError>(())
+        })
+        .await
+        .map_err(|error| ChatServiceError::KnowledgeGraphFailed {
+            operation: "replace_session_messages",
+            detail: error.to_string(),
+        })??;
+
+        for message in messages.iter().cloned() {
+            let node_id = self.store_message_node(session_node_id, message.clone()).await?;
+            self.embed_node_async(node_id, message.content.clone());
+        }
+
+        Ok(())
+    }
+
     /// Fire-and-forget embedding generation for a node. If no embedding
     /// runtime is available or the embedding fails, the error is logged but
     /// the chat flow continues — the node remains searchable via FTS5 and
@@ -8462,6 +8669,7 @@ pub fn build_model_router_from_config(
             name: provider.name.clone(),
             kind: map_provider_kind(provider.kind),
             model_capabilities,
+            model_limits: provider.model_limits.clone(),
             models: provider.models.clone(),
             priority: provider.priority,
             available: provider.enabled,
@@ -8729,44 +8937,98 @@ const HISTORY_MAX_CHARS: usize = 8000;
 /// Build conversation history from previous session messages.
 /// Returns a Vec of CompletionMessage suitable for multi-turn prompting.
 /// Budget: last N messages up to HISTORY_MAX_MESSAGES or HISTORY_MAX_CHARS total.
-fn build_conversation_history(messages: &[ChatMessage]) -> Vec<CompletionMessage> {
-    let delivered: Vec<&ChatMessage> = messages
-        .iter()
-        .filter(|m| {
-            matches!(m.status, ChatMessageStatus::Complete)
-                && matches!(m.role, ChatMessageRole::User | ChatMessageRole::Assistant)
-        })
-        .collect();
+fn is_compaction_summary_message(message: &ChatMessage) -> bool {
+    matches!(message.role, ChatMessageRole::System)
+        && message.content.starts_with(COMPACTION_SUMMARY_PREFIX)
+}
 
-    // Take the last N messages within budget
+fn build_compaction_history(messages: &[ChatMessage]) -> (Vec<usize>, Vec<CompletionMessage>) {
+    let mut indices = Vec::new();
+    let mut history = Vec::new();
+
+    for (index, message) in messages.iter().enumerate() {
+        if message.status != ChatMessageStatus::Complete {
+            continue;
+        }
+
+        let role = match message.role {
+            ChatMessageRole::User => Some("user"),
+            ChatMessageRole::Assistant => Some("assistant"),
+            ChatMessageRole::System if is_compaction_summary_message(message) => Some("system"),
+            ChatMessageRole::Notification | ChatMessageRole::System => None,
+        };
+
+        if let Some(role) = role {
+            indices.push(index);
+            history.push(CompletionMessage {
+                role: role.to_string(),
+                content: message.content.clone(),
+                content_parts: if role == "system" {
+                    vec![]
+                } else {
+                    build_content_parts(&message.content, &message.attachments)
+                },
+                blocks: vec![],
+            });
+        }
+    }
+
+    (indices, history)
+}
+
+fn completion_to_chat_message(
+    message: &CompletionMessage,
+    now: u64,
+    sequence: &AtomicU64,
+) -> ChatMessage {
+    let role = match message.role.as_str() {
+        "user" => ChatMessageRole::User,
+        "assistant" => ChatMessageRole::Assistant,
+        _ => ChatMessageRole::System,
+    };
+    let is_summary = message.content.starts_with(COMPACTION_SUMMARY_PREFIX);
+
+    ChatMessage {
+        id: format!("msg-{}", sequence.fetch_add(1, Ordering::Relaxed)),
+        role,
+        status: ChatMessageStatus::Complete,
+        content: message.content.clone(),
+        data_class: None,
+        classification_reason: None,
+        provider_id: None,
+        model: None,
+        scan_summary: None,
+        intent: is_summary.then(|| "Context compacted".to_string()),
+        thinking: is_summary.then(|| "Manual compaction summary created.".to_string()),
+        attachments: vec![],
+        interaction_request_id: None,
+        interaction_kind: None,
+        interaction_meta: None,
+        interaction_answer: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+    }
+}
+
+fn build_conversation_history(messages: &[ChatMessage]) -> Vec<CompletionMessage> {
+    let (_, delivered) = build_compaction_history(messages);
+
     let mut history = Vec::new();
     let mut total_chars = 0usize;
 
-    for msg in delivered.iter().rev() {
+    for message in delivered.iter().rev() {
         if history.len() >= HISTORY_MAX_MESSAGES {
             break;
         }
-        if total_chars + msg.content.len() > HISTORY_MAX_CHARS && !history.is_empty() {
+        if total_chars + message.content.len() > HISTORY_MAX_CHARS && !history.is_empty() {
             break;
         }
-        let (role, content) = match msg.role {
-            ChatMessageRole::User => ("user", msg.content.clone()),
-            ChatMessageRole::Assistant => ("assistant", msg.content.clone()),
-            ChatMessageRole::Notification | ChatMessageRole::System => continue,
-        };
-        let content_parts = build_content_parts(&content, &msg.attachments);
-        history.push(CompletionMessage {
-            role: role.to_string(),
-            content,
-            content_parts,
-            blocks: vec![],
-        });
-        total_chars += msg.content.len();
+        history.push(message.clone());
+        total_chars += message.content.len();
     }
 
     history.reverse();
-    // Exclude the last user message — that's the current prompt, not history
-    if history.last().is_some_and(|m| m.role == "user") {
+    if history.last().is_some_and(|message| message.role == "user") {
         history.pop();
     }
     history
@@ -9455,6 +9717,14 @@ fn loop_event_to_reasoning(event: &LoopEvent) -> ReasoningEvent {
                 duration_ms: *duration_ms,
             }
         }
+        LoopEvent::ContextCompacted { messages_compacted, estimated_before, estimated_after } => {
+            ReasoningEvent::PathAbandoned {
+                reason: format!(
+                    "Context compacted: {messages_compacted} messages summarized \
+                     ({estimated_before} → {estimated_after} tokens)"
+                ),
+            }
+        }
     }
 }
 
@@ -9670,6 +9940,31 @@ mod tests {
         ))
     }
 
+    /// Build a [`ModelRouter`] with an [`EchoProvider`] for tests that need
+    /// a working model backend (e.g. manual compaction).
+    fn echo_model_router() -> Arc<ModelRouter> {
+        let mut router = ModelRouter::new();
+        router.register_provider(EchoProvider::new(
+            ProviderDescriptor {
+                id: "echo".to_string(),
+                name: Some("Echo".to_string()),
+                kind: ProviderKind::Mock,
+                models: vec!["echo-model".to_string()],
+                model_capabilities: std::collections::BTreeMap::from([(
+                    "echo-model".to_string(),
+                    std::collections::BTreeSet::from([
+                        hive_model::Capability::Chat,
+                    ]),
+                )]),
+                model_limits: std::collections::BTreeMap::new(),
+                priority: 10,
+                available: true,
+            },
+            "echo",
+        ));
+        Arc::new(router)
+    }
+
     #[test]
     fn router_registers_local_models_provider() {
         let registry = LocalModelRegistry::open_in_memory().unwrap();
@@ -9688,6 +9983,7 @@ mod tests {
             models: vec![],
             capabilities: [CapabilityConfig::Chat].into_iter().collect(),
             model_capabilities: Default::default(),
+            model_limits: std::collections::BTreeMap::new(),
             channel_class: ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,
@@ -9728,6 +10024,7 @@ mod tests {
             models: vec!["phi-3".to_string()],
             capabilities: [CapabilityConfig::Chat].into_iter().collect(),
             model_capabilities: Default::default(),
+            model_limits: std::collections::BTreeMap::new(),
             channel_class: ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,
@@ -9759,6 +10056,7 @@ mod tests {
             models: vec![],
             capabilities: [CapabilityConfig::Chat].into_iter().collect(),
             model_capabilities: Default::default(),
+            model_limits: std::collections::BTreeMap::new(),
             channel_class: ChannelClass::LocalOnly,
             priority: 50,
             enabled: true,
@@ -12022,6 +12320,168 @@ mod tests {
         );
 
         supervisor.kill_all().await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn compact_session_persists_manual_summary() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path.clone());
+        service.swap_router(echo_model_router());
+        let session = service
+            .create_session(SessionModality::Linear, Some("Compaction test".to_string()), None)
+            .await
+            .expect("create session");
+
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.snapshot.messages = (0..12)
+                .flat_map(|index| {
+                    [
+                        ChatMessage {
+                            id: format!("seed-user-{index}"),
+                            role: ChatMessageRole::User,
+                            status: ChatMessageStatus::Complete,
+                            content: format!("user message {index}"),
+                            data_class: Some(DataClass::Public),
+                            classification_reason: None,
+                            provider_id: None,
+                            model: None,
+                            scan_summary: None,
+                            intent: None,
+                            thinking: None,
+                            attachments: vec![],
+                            interaction_request_id: None,
+                            interaction_kind: None,
+                            interaction_meta: None,
+                            interaction_answer: None,
+                            created_at_ms: now_ms(),
+                            updated_at_ms: now_ms(),
+                        },
+                        ChatMessage {
+                            id: format!("seed-assistant-{index}"),
+                            role: ChatMessageRole::Assistant,
+                            status: ChatMessageStatus::Complete,
+                            content: format!("assistant message {index}"),
+                            data_class: Some(DataClass::Public),
+                            classification_reason: None,
+                            provider_id: None,
+                            model: None,
+                            scan_summary: None,
+                            intent: None,
+                            thinking: None,
+                            attachments: vec![],
+                            interaction_request_id: None,
+                            interaction_kind: None,
+                            interaction_meta: None,
+                            interaction_answer: None,
+                            created_at_ms: now_ms(),
+                            updated_at_ms: now_ms(),
+                        },
+                    ]
+                })
+                .collect();
+        }
+
+        let snapshot = service.compact_session(&session.id).await.expect("compact session");
+        assert!(snapshot.messages.iter().any(|message| {
+            message.role == ChatMessageRole::System
+                && message.content.starts_with(COMPACTION_SUMMARY_PREFIX)
+        }));
+        assert!(snapshot.messages.iter().any(|message| {
+            message.role == ChatMessageRole::System
+                && message.content.contains("Context compacted:")
+        }));
+        assert!(build_conversation_history(&snapshot.messages)
+            .iter()
+            .any(|message| message.role == "system"
+                && message.content.starts_with(COMPACTION_SUMMARY_PREFIX)));
+
+        let restored = test_chat_service(graph_path);
+        restored.restore_sessions().await.expect("restore sessions");
+        let restored_snapshot = restored.get_session(&session.id).await.expect("restored session");
+        assert!(restored_snapshot.messages.iter().any(|message| {
+            message.role == ChatMessageRole::System
+                && message.content.starts_with(COMPACTION_SUMMARY_PREFIX)
+        }));
+    }
+
+    #[tokio::test]
+    async fn enqueue_compact_command_triggers_manual_compaction() {
+        let tempdir = tempdir().expect("tempdir");
+        let graph_path = tempdir.path().join("knowledge.db");
+        let service = test_chat_service(graph_path);
+        service.swap_router(echo_model_router());
+        let session = service
+            .create_session(SessionModality::Linear, Some("Compact command".to_string()), None)
+            .await
+            .expect("create session");
+
+        {
+            let mut sessions = service.sessions.write().await;
+            let record = sessions.get_mut(&session.id).expect("session record");
+            record.snapshot.messages = (0..12)
+                .flat_map(|index| {
+                    [
+                        ChatMessage {
+                            id: format!("cmd-user-{index}"),
+                            role: ChatMessageRole::User,
+                            status: ChatMessageStatus::Complete,
+                            content: format!("user message {index}"),
+                            data_class: Some(DataClass::Public),
+                            classification_reason: None,
+                            provider_id: None,
+                            model: None,
+                            scan_summary: None,
+                            intent: None,
+                            thinking: None,
+                            attachments: vec![],
+                            interaction_request_id: None,
+                            interaction_kind: None,
+                            interaction_meta: None,
+                            interaction_answer: None,
+                            created_at_ms: now_ms(),
+                            updated_at_ms: now_ms(),
+                        },
+                        ChatMessage {
+                            id: format!("cmd-assistant-{index}"),
+                            role: ChatMessageRole::Assistant,
+                            status: ChatMessageStatus::Complete,
+                            content: format!("assistant message {index}"),
+                            data_class: Some(DataClass::Public),
+                            classification_reason: None,
+                            provider_id: None,
+                            model: None,
+                            scan_summary: None,
+                            intent: None,
+                            thinking: None,
+                            attachments: vec![],
+                            interaction_request_id: None,
+                            interaction_kind: None,
+                            interaction_meta: None,
+                            interaction_answer: None,
+                            created_at_ms: now_ms(),
+                            updated_at_ms: now_ms(),
+                        },
+                    ]
+                })
+                .collect();
+        }
+
+        let response = service
+            .enqueue_message(&session.id, make_request("/compact"))
+            .await
+            .expect("enqueue compact command");
+        let SendMessageResponse::Queued { session } = response else {
+            panic!("expected queued response");
+        };
+
+        assert!(session.messages.iter().any(|message| {
+            message.role == ChatMessageRole::System
+                && message.content.starts_with(COMPACTION_SUMMARY_PREFIX)
+        }));
+        assert!(!session.messages.iter().any(|message| message.content == "/compact"));
     }
 
     #[tokio::test]

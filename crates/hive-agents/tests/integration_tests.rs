@@ -516,6 +516,7 @@ async fn test_spawned_agent_uses_loop_executor_when_configured() {
                 "test-model".to_string(),
                 BTreeSet::from([Capability::Chat]),
             )]),
+            model_limits: std::collections::BTreeMap::new(),
             priority: 10,
             available: true,
         },

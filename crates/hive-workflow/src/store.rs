@@ -2506,9 +2506,7 @@ mod tests {
             external_id: &str,
         ) -> Result<(), WorkflowError> {
             let mut inner = self.inner.lock().unwrap();
-            inner
-                .trigger_dedup
-                .remove(&(definition_id.to_string(), external_id.to_string()));
+            inner.trigger_dedup.remove(&(definition_id.to_string(), external_id.to_string()));
             Ok(())
         }
 

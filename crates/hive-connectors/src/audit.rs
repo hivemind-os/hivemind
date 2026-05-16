@@ -259,8 +259,7 @@ impl SqliteAuditStore {
         }
         let conn = self.conn.lock();
         // Build a dynamic IN clause for up to ~50 IDs (safe for SQLite).
-        let placeholders: Vec<&str> =
-            external_ids.iter().map(|_| "?").collect();
+        let placeholders: Vec<&str> = external_ids.iter().map(|_| "?").collect();
         let sql = format!(
             "SELECT external_id FROM poll_dedup WHERE connector_id = ?1 AND external_id IN ({})",
             placeholders.join(",")

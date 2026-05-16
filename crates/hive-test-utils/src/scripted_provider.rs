@@ -59,6 +59,7 @@ impl ScriptedProvider {
                     model.to_string(),
                     BTreeSet::from([Capability::Chat, Capability::ToolUse]),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 priority: 10,
                 available: true,
             },

@@ -100,19 +100,25 @@ impl TokenBudgetMiddleware {
     /// Compute the input token budget for the selected model.
     fn input_budget(&self, context: &LoopContext) -> usize {
         let model = self.model_name(context);
-        let limits = self.limits.lookup(model);
-        let context_window = limits.context_window as usize;
+        let static_limits = self.limits.lookup(model);
+        let context_window = context
+            .routing_decision()
+            .and_then(|d| d.effective_context_window)
+            .unwrap_or(static_limits.context_window) as usize;
+        let max_output_tokens = context
+            .routing_decision()
+            .and_then(|d| d.effective_max_output_tokens)
+            .unwrap_or(static_limits.max_output_tokens) as usize;
 
         // Reserve space for the model's output.
         let output_reserve = (context_window as f64 * OUTPUT_RESERVE_FRACTION) as usize;
-        let output_reserve =
-            output_reserve.max(OUTPUT_RESERVE_MIN).min(limits.max_output_tokens as usize);
+        let output_reserve = output_reserve.max(OUTPUT_RESERVE_MIN).min(max_output_tokens);
 
         let budget = context_window.saturating_sub(output_reserve);
         debug!(
             model,
             context_window,
-            max_output_tokens = limits.max_output_tokens,
+            max_output_tokens,
             output_reserve,
             input_budget = budget,
             "token budget computed for model"
@@ -121,99 +127,121 @@ impl TokenBudgetMiddleware {
     }
 }
 
+/// Truncate a [`CompletionRequest`] so its estimated token count fits within
+/// the given `budget`. Returns the (possibly modified) request or an error if
+/// truncation cannot bring it within budget.
+///
+/// This is the shared implementation used by both the middleware and the
+/// standalone [`enforce_with_limit`] recovery path.
+fn truncate_request_to_budget(
+    mut request: CompletionRequest,
+    budget: usize,
+    model_label: &str,
+) -> Result<CompletionRequest, LoopError> {
+    let mut estimated = estimate_request_tokens(&request);
+
+    if estimated <= budget {
+        return Ok(request);
+    }
+
+    warn!(model = model_label, estimated, budget, "token budget exceeded — truncating request");
+
+    // ── Step 1: Truncate conversation history (oldest non-system first) ─
+    if request.messages.len() > KEEP_RECENT_MESSAGES + 1 {
+        let system_count = request.messages.iter().take_while(|m| m.role == "system").count();
+        let non_system_count = request.messages.len() - system_count;
+
+        if non_system_count > KEEP_RECENT_MESSAGES {
+            let to_remove = non_system_count - KEEP_RECENT_MESSAGES;
+            let remove_start = system_count;
+            let remove_end = system_count + to_remove;
+            let dropped: Vec<CompletionMessage> =
+                request.messages.drain(remove_start..remove_end).collect();
+            let dropped_count = dropped.len();
+
+            request.messages.insert(
+                remove_start,
+                CompletionMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "[{dropped_count} earlier conversation messages were omitted \
+                         to fit within the model's context window]"
+                    ),
+                    content_parts: vec![],
+                    blocks: vec![],
+                },
+            );
+
+            estimated = estimate_request_tokens(&request);
+            if estimated <= budget {
+                warn!(
+                    estimated,
+                    budget, dropped_count, "budget restored after history truncation"
+                );
+                return Ok(request);
+            }
+        }
+    }
+
+    // ── Step 2: Truncate old tool blocks in the prompt ──────────────────
+    let tool_result_end = "</tool_result>";
+    let tool_call_start = "<tool_call>";
+
+    let mut last_estimated = estimated;
+    while estimated > budget {
+        if let Some(tc_start) = request.prompt.find(tool_call_start) {
+            if let Some(tr_end) = request.prompt[tc_start..].find(tool_result_end) {
+                let block_end = tc_start + tr_end + tool_result_end.len();
+                request
+                    .prompt
+                    .replace_range(tc_start..block_end, "[earlier tool interaction omitted]");
+                estimated = estimate_request_tokens(&request);
+                if estimated >= last_estimated {
+                    break;
+                }
+                last_estimated = estimated;
+                continue;
+            }
+        }
+        break;
+    }
+
+    if estimated <= budget {
+        warn!(estimated, budget, "budget restored after prompt truncation");
+        return Ok(request);
+    }
+
+    // ── Step 3: Hard error — still over budget ──────────────────────────
+    Err(simple_model_error(format!(
+        "request exceeds model context window after truncation \
+         (estimated {estimated} tokens, budget {budget} tokens for model '{model_label}'). \
+         Consider using a model with a larger context window or reducing tool output size."
+    )))
+}
+
+/// Truncate a [`CompletionRequest`] to fit within an explicit context window
+/// limit (in tokens). This is used by the auto-recovery path when a provider
+/// rejects a request with a token-limit error and reports its actual limit.
+pub fn enforce_with_limit(
+    request: CompletionRequest,
+    context_window: u32,
+) -> Result<CompletionRequest, LoopError> {
+    let context_window = context_window as usize;
+    let output_reserve = (context_window as f64 * OUTPUT_RESERVE_FRACTION) as usize;
+    let output_reserve = output_reserve.max(OUTPUT_RESERVE_MIN);
+    let budget = context_window.saturating_sub(output_reserve);
+    truncate_request_to_budget(request, budget, "recovery")
+}
+
 impl LoopMiddleware for TokenBudgetMiddleware {
     fn before_model_call(
         &self,
         context: &LoopContext,
-        mut request: CompletionRequest,
+        request: CompletionRequest,
     ) -> Result<CompletionRequest, LoopError> {
         let budget = self.input_budget(context);
-        let mut estimated = estimate_request_tokens(&request);
-
-        if estimated <= budget {
-            return Ok(request);
-        }
-
         let model = self.model_name(context);
-        warn!(model, estimated, budget, "token budget exceeded — truncating request");
-
-        // ── Step 1: Truncate conversation history (oldest non-system first) ─
-        if request.messages.len() > KEEP_RECENT_MESSAGES + 1 {
-            // Find where non-system messages start.
-            let system_count = request.messages.iter().take_while(|m| m.role == "system").count();
-            let non_system_count = request.messages.len() - system_count;
-
-            if non_system_count > KEEP_RECENT_MESSAGES {
-                let to_remove = non_system_count - KEEP_RECENT_MESSAGES;
-                // Remove oldest non-system messages (they come right after system messages).
-                let remove_start = system_count;
-                let remove_end = system_count + to_remove;
-                // Insert a summary placeholder for the dropped messages.
-                let dropped: Vec<CompletionMessage> =
-                    request.messages.drain(remove_start..remove_end).collect();
-                let dropped_count = dropped.len();
-
-                request.messages.insert(
-                    remove_start,
-                    CompletionMessage {
-                        role: "system".to_string(),
-                        content: format!(
-                            "[{dropped_count} earlier conversation messages were omitted to fit within the model's context window]"
-                        ),
-                        content_parts: vec![],
-                        blocks: vec![],
-                    },
-                );
-
-                estimated = estimate_request_tokens(&request);
-                if estimated <= budget {
-                    warn!(
-                        estimated,
-                        budget, dropped_count, "budget restored after history truncation"
-                    );
-                    return Ok(request);
-                }
-            }
-        }
-
-        // ── Step 2: Truncate old tool blocks in the prompt ──────────────────
-        //
-        // The ReAct strategy appends `<tool_call>…</tool_call><tool_result>…</tool_result>`
-        // blocks to the prompt. We remove the oldest blocks first.
-        let tool_result_end = "</tool_result>";
-        let tool_call_start = "<tool_call>";
-
-        let mut last_estimated = estimated;
-        while estimated > budget {
-            // Find the first complete tool-call/result pair.
-            if let Some(tc_start) = request.prompt.find(tool_call_start) {
-                if let Some(tr_end) = request.prompt[tc_start..].find(tool_result_end) {
-                    let block_end = tc_start + tr_end + tool_result_end.len();
-                    request
-                        .prompt
-                        .replace_range(tc_start..block_end, "[earlier tool interaction omitted]");
-                    estimated = estimate_request_tokens(&request);
-                    if estimated >= last_estimated {
-                        break;
-                    }
-                    last_estimated = estimated;
-                    continue;
-                }
-            }
-            break;
-        }
-
-        if estimated <= budget {
-            warn!(estimated, budget, "budget restored after prompt truncation");
-            return Ok(request);
-        }
-
-        // ── Step 3: Hard error — still over budget ──────────────────────────
-        Err(simple_model_error(format!(
-            "request exceeds model context window after truncation \
-             (estimated {estimated} tokens, budget {budget} tokens for model '{model}'). \
-             Consider using a model with a larger context window or reducing tool output size."
-        )))
+        truncate_request_to_budget(request, budget, model)
     }
 }
 
@@ -249,6 +277,8 @@ mod tests {
                     },
                     fallback_chain: vec![],
                     reason: "test".into(),
+                    effective_context_window: None,
+                    effective_max_output_tokens: None,
                 }),
             },
             security: SecurityContext {
@@ -384,5 +414,47 @@ mod tests {
         assert_eq!(estimate_tokens("abcd"), 1);
         assert_eq!(estimate_tokens("abcde"), 2);
         assert_eq!(estimate_tokens("hello world"), 3); // 11 chars
+    }
+
+    #[test]
+    fn enforce_with_limit_truncates_history() {
+        // 120 messages × ~500 tokens = ~60K tokens.
+        // enforce_with_limit(32768) → budget ≈ 27853
+        let messages: Vec<CompletionMessage> = (0..120)
+            .map(|i| CompletionMessage {
+                role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+                content: "y".repeat(2000), // ~500 tokens
+                content_parts: vec![],
+                blocks: vec![],
+            })
+            .collect();
+        let req = CompletionRequest {
+            prompt: "task".into(),
+            prompt_content_parts: vec![],
+            messages,
+            required_capabilities: BTreeSet::new(),
+            preferred_models: None,
+            tools: vec![],
+        };
+        let result = enforce_with_limit(req, 32768);
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert!(out.messages.len() < 120, "expected truncation");
+    }
+
+    #[test]
+    fn enforce_with_limit_small_request_passes() {
+        let req = CompletionRequest {
+            prompt: "hello".into(),
+            prompt_content_parts: vec![],
+            messages: vec![],
+            required_capabilities: BTreeSet::new(),
+            preferred_models: None,
+            tools: vec![],
+        };
+        let result = enforce_with_limit(req.clone(), 128000);
+        assert!(result.is_ok());
+        let out = result.unwrap();
+        assert_eq!(out.prompt, req.prompt);
     }
 }

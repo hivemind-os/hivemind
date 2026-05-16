@@ -2141,6 +2141,7 @@ pub fn build_router(state: AppState) -> Router {
                 .patch(sessions::rename_chat_session),
         )
         .route("/api/v1/chat/sessions/{session_id}/messages", post(sessions::send_chat_message))
+        .route("/api/v1/chat/sessions/{session_id}/compact", post(sessions::compact_chat_session))
         .route("/api/v1/chat/sessions/{session_id}/persona", put(sessions::set_session_persona))
         .route("/api/v1/chat/sessions/{session_id}/upload", post(sessions::upload_file_to_session))
         .route(
@@ -2772,6 +2773,7 @@ mod tests {
                     "chat-fast".to_string(),
                     std::collections::BTreeSet::from([CapabilityConfig::Chat]),
                 )]),
+                model_limits: std::collections::BTreeMap::new(),
                 channel_class: hive_classification::ChannelClass::Internal,
                 priority: 100,
                 enabled: true,
@@ -3634,6 +3636,7 @@ mod tests {
                 models: vec!["test-model".to_string()],
                 capabilities: [CapabilityConfig::Chat].into_iter().collect(),
                 model_capabilities: Default::default(),
+                model_limits: std::collections::BTreeMap::new(),
                 channel_class: hive_classification::ChannelClass::Internal,
                 priority: 100,
                 enabled: true,
