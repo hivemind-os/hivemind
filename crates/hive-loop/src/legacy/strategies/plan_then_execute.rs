@@ -155,9 +155,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                 let plan_response = match model_result {
                     Ok(resp) => resp,
                     Err(err) => {
-                        if let Some(truncated) =
-                            try_recover_context_limit(&err, &plan_request)
-                        {
+                        if let Some(truncated) = try_recover_context_limit(&err, &plan_request) {
                             let router2 = Arc::clone(&model_router);
                             let decision2 = decision.clone();
                             let retry = tokio::task::spawn_blocking(move || {
@@ -288,9 +286,7 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                     let response = match model_result {
                         Ok(resp) => resp,
                         Err(err) => {
-                            if let Some(truncated) =
-                                try_recover_context_limit(&err, &request)
-                            {
+                            if let Some(truncated) = try_recover_context_limit(&err, &request) {
                                 let router2 = Arc::clone(&model_router);
                                 let decision2 = decision.clone();
                                 let retry = tokio::task::spawn_blocking(move || {

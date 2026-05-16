@@ -3,9 +3,9 @@ use std::sync::Arc;
 use hive_model::{CompletionRequest, RoutingRequest};
 
 use super::super::interaction::UserInteractionGate;
-use super::super::{model_router_error_to_loop_error, try_recover_context_limit};
 use super::super::strategy::{LoopMiddleware, LoopStrategy};
 use super::super::types::{BoxFuture, LoopContext, LoopError, LoopEvent, LoopResult};
+use super::super::{model_router_error_to_loop_error, try_recover_context_limit};
 
 #[derive(Default)]
 pub struct SequentialStrategy;

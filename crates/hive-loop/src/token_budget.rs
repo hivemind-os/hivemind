@@ -174,10 +174,7 @@ fn truncate_request_to_budget(
 
             estimated = estimate_request_tokens(&request);
             if estimated <= budget {
-                warn!(
-                    estimated,
-                    budget, dropped_count, "budget restored after history truncation"
-                );
+                warn!(estimated, budget, dropped_count, "budget restored after history truncation");
                 return Ok(request);
             }
         }

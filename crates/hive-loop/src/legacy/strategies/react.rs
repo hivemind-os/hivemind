@@ -241,31 +241,24 @@ impl LoopStrategy for ReActStrategy {
                         });
                     };
 
-                    let stream_result = router
-                        .complete_stream_with_decision_and_callback(
-                            &request,
-                            &decision_clone,
-                            Some(&retry_cb),
-                        );
+                    let stream_result = router.complete_stream_with_decision_and_callback(
+                        &request,
+                        &decision_clone,
+                        Some(&retry_cb),
+                    );
 
                     let (stream, actual_selection) = match stream_result {
                         Ok(result) => result,
                         Err(err) => {
                             let loop_err = model_router_error_to_loop_error(err);
-                            if let Some(truncated) =
-                                try_recover_context_limit(&loop_err, &request)
+                            if let Some(truncated) = try_recover_context_limit(&loop_err, &request)
                             {
                                 request = truncated;
                                 let _ = tx.try_send(LoopEvent::ModelLoading {
-                                    provider_id: decision_clone
-                                        .selected
-                                        .provider_id
-                                        .clone(),
+                                    provider_id: decision_clone.selected.provider_id.clone(),
                                     model: decision_clone.selected.model.clone(),
                                     tool_result_counts: tool_result_counts.clone(),
-                                    estimated_tokens: Some(
-                                        estimate_request_tokens(&request),
-                                    ),
+                                    estimated_tokens: Some(estimate_request_tokens(&request)),
                                 });
                                 router
                                     .complete_stream_with_decision_and_callback(
@@ -434,22 +427,15 @@ impl LoopStrategy for ReActStrategy {
                     match model_result {
                         Ok(resp) => resp,
                         Err(err) => {
-                            if let Some(truncated) =
-                                try_recover_context_limit(&err, &request)
-                            {
+                            if let Some(truncated) = try_recover_context_limit(&err, &request) {
                                 let router2 = Arc::clone(&model_router);
                                 let decision2 = decision.clone();
-                                let retry_future =
-                                    tokio::task::spawn_blocking(move || {
-                                        router2.complete_with_decision(
-                                            &truncated, &decision2,
-                                        )
-                                    });
+                                let retry_future = tokio::task::spawn_blocking(move || {
+                                    router2.complete_with_decision(&truncated, &decision2)
+                                });
                                 retry_future
                                     .await
-                                    .map_err(|e| {
-                                        LoopError::JoinFailed(e.to_string())
-                                    })?
+                                    .map_err(|e| LoopError::JoinFailed(e.to_string()))?
                                     .map_err(model_router_error_to_loop_error)?
                             } else {
                                 return Err(err);

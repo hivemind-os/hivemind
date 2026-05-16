@@ -17,7 +17,9 @@ use super::super::tool_execution::{execute_tool_batch, execute_tool_call};
 use super::super::types::{
     BoxFuture, CodeExecutionPhase, LoopContext, LoopError, LoopEvent, LoopResult,
 };
-use super::super::{model_router_error_to_loop_error, simple_model_error, try_recover_context_limit};
+use super::super::{
+    model_router_error_to_loop_error, simple_model_error, try_recover_context_limit,
+};
 
 // ── BridgedToolCallHandler: dispatches tool calls from Python to the ToolRegistry ──
 
@@ -367,32 +369,26 @@ impl LoopStrategy for CodeActStrategy {
                         });
                     };
 
-                    let stream_result = router
-                        .complete_stream_with_decision_and_callback(
-                            &request,
-                            &decision_clone,
-                            Some(&retry_cb),
-                        );
+                    let stream_result = router.complete_stream_with_decision_and_callback(
+                        &request,
+                        &decision_clone,
+                        Some(&retry_cb),
+                    );
 
                     let (stream, actual_selection) = match stream_result {
                         Ok(result) => result,
                         Err(err) => {
                             let loop_err = model_router_error_to_loop_error(err);
-                            if let Some(truncated) =
-                                try_recover_context_limit(&loop_err, &request)
+                            if let Some(truncated) = try_recover_context_limit(&loop_err, &request)
                             {
                                 request = truncated;
                                 let _ = tx.try_send(LoopEvent::ModelLoading {
-                                    provider_id: decision_clone
-                                        .selected
-                                        .provider_id
-                                        .clone(),
+                                    provider_id: decision_clone.selected.provider_id.clone(),
                                     model: decision_clone.selected.model.clone(),
                                     tool_result_counts: HashMap::new(),
                                     estimated_tokens: Some(
-                                        crate::token_budget::estimate_request_tokens(
-                                            &request,
-                                        ) as u32,
+                                        crate::token_budget::estimate_request_tokens(&request)
+                                            as u32,
                                     ),
                                 });
                                 router
@@ -528,9 +524,7 @@ impl LoopStrategy for CodeActStrategy {
                     match model_result {
                         Ok(resp) => resp,
                         Err(err) => {
-                            if let Some(truncated) =
-                                try_recover_context_limit(&err, &request)
-                            {
+                            if let Some(truncated) = try_recover_context_limit(&err, &request) {
                                 let router2 = Arc::clone(&model_router);
                                 let decision2 = decision.clone();
                                 let retry = tokio::task::spawn_blocking(move || {

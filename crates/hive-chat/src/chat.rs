@@ -3026,10 +3026,8 @@ impl ChatService {
                 ChatServiceError::SessionNotFound { session_id: session_id.to_string() }
             })?;
             let (history_indices, history) = build_compaction_history(&session.snapshot.messages);
-            let expected_ids: Vec<String> = history_indices
-                .iter()
-                .map(|&i| session.snapshot.messages[i].id.clone())
-                .collect();
+            let expected_ids: Vec<String> =
+                history_indices.iter().map(|&i| session.snapshot.messages[i].id.clone()).collect();
             (session.session_node_id, history_indices, expected_ids, history)
         };
 
@@ -9952,9 +9950,7 @@ mod tests {
                 models: vec!["echo-model".to_string()],
                 model_capabilities: std::collections::BTreeMap::from([(
                     "echo-model".to_string(),
-                    std::collections::BTreeSet::from([
-                        hive_model::Capability::Chat,
-                    ]),
+                    std::collections::BTreeSet::from([hive_model::Capability::Chat]),
                 )]),
                 model_limits: std::collections::BTreeMap::new(),
                 priority: 10,
