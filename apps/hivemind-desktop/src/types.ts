@@ -63,6 +63,9 @@ export interface Persona {
   color?: string | null;
   archived?: boolean;
   bundled?: boolean;
+  mcp_sampling?: boolean;
+  mcp_sampling_requires_approval?: boolean;
+  mcp_sampling_max_tokens?: number | null;
   prompts?: PromptTemplate[];
 }
 

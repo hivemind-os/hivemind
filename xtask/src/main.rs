@@ -18,6 +18,7 @@ fn main() {
         "build-installer" => build_installer(&args[2..]),
         "build-daemon" => build_daemon(&args[2..]),
         "run-daemon" => run_daemon(&args[2..]),
+        "build-mock-mcp" => build_mock_mcp(),
         "check-version" => check_version(),
         "bump-version" => bump_version(&args[2..]),
         _ => {
@@ -30,6 +31,7 @@ fn main() {
                 "  build-daemon [--release]       Build hive-daemon (with macOS codesign for TCC)"
             );
             eprintln!("  run-daemon [--release]         Build, codesign, and run hive-daemon");
+            eprintln!("  build-mock-mcp                Build the mock MCP server (npm install + compile)");
             eprintln!("  check-version                  Assert Cargo.toml and tauri.conf.json versions match");
             eprintln!(
                 "  bump-version <X.Y.Z>           Update version in Cargo.toml and tauri.conf.json"
@@ -353,6 +355,51 @@ fn run_daemon(args: &[String]) {
         std::process::exit(1);
     });
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn build_mock_mcp() {
+    let root = project_root();
+    let mock_dir = root.join("tools").join("mock-mcp-server");
+
+    if !mock_dir.join("package.json").exists() {
+        eprintln!("tools/mock-mcp-server/package.json not found");
+        std::process::exit(1);
+    }
+
+    // Resolve the npm command (Windows uses npm.cmd)
+    let npm = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
+
+    // npm install
+    println!("==> Installing mock-mcp-server dependencies...");
+    let status = std::process::Command::new(npm)
+        .args(["install"])
+        .current_dir(&mock_dir)
+        .status()
+        .expect("failed to run npm install");
+    if !status.success() {
+        eprintln!("npm install failed");
+        std::process::exit(1);
+    }
+
+    // npm run compile
+    println!("==> Compiling mock-mcp-server...");
+    let status = std::process::Command::new(npm)
+        .args(["run", "compile"])
+        .current_dir(&mock_dir)
+        .status()
+        .expect("failed to run npm run compile");
+    if !status.success() {
+        eprintln!("npm run compile failed");
+        std::process::exit(1);
+    }
+
+    let dist = mock_dir.join("dist").join("index.js");
+    if dist.exists() {
+        println!("==> mock-mcp-server built successfully: {}", dist.display());
+    } else {
+        eprintln!("Build appeared to succeed but dist/index.js was not created");
+        std::process::exit(1);
+    }
 }
 
 // ── Version management ────────────────────────────────────────────────────────

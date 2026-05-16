@@ -65,6 +65,9 @@ impl SearchSynthesizer {
             required_capabilities: BTreeSet::from([Capability::Chat]),
             preferred_models: self.preferred_models.clone(),
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let response = self.router.complete(&request)?;

@@ -97,6 +97,9 @@ export function PersonaWizard(props: PersonaWizardProps) {
   const [allTools, setAllTools] = createSignal(true);
   const [selectedTools, setSelectedTools] = createSignal<string[]>([]);
   const [mcpServers, setMcpServers] = createSignal<McpServerConfig[]>([]);
+  const [mcpSampling, setMcpSampling] = createSignal(false);
+  const [mcpSamplingRequiresApproval, setMcpSamplingRequiresApproval] = createSignal(true);
+  const [mcpSamplingMaxTokens, setMcpSamplingMaxTokens] = createSignal<number | null>(null);
   const [prompts, setPrompts] = createSignal<PromptTemplate[]>([]);
 
   // MCP wizard state
@@ -134,6 +137,9 @@ export function PersonaWizard(props: PersonaWizardProps) {
       secondary_models: secondaryModels().length > 0 ? secondaryModels() : null,
       allowed_tools: allTools() ? ['*'] : selectedTools(),
       mcp_servers: mcpServers(),
+      mcp_sampling: mcpSampling(),
+      mcp_sampling_requires_approval: mcpSamplingRequiresApproval(),
+      mcp_sampling_max_tokens: mcpSamplingMaxTokens(),
       avatar: normalizeOptional(avatar()),
       color: normalizeOptional(color()),
       prompts: prompts(),
@@ -760,6 +766,46 @@ export function PersonaWizard(props: PersonaWizardProps) {
               }}
               onClose={() => { setEditingMcpServerIdx(null); setShowMcpWizard(false); }}
             />
+          </Show>
+        </div>
+      </div>
+
+      {/* ── MCP Sampling toggle ──────────────────────────────── */}
+      <div class="agents-form-field">
+        <span>MCP Sampling</span>
+        <div class="agents-form-control">
+          <Switch
+            checked={mcpSampling()}
+            onChange={(checked) => setMcpSampling(checked)}
+            class="flex items-center gap-2"
+          >
+            <SwitchControl><SwitchThumb /></SwitchControl>
+            <SwitchLabel>Allow MCP servers to request LLM completions</SwitchLabel>
+          </Switch>
+          <Show when={mcpSampling()}>
+            <Switch
+              checked={mcpSamplingRequiresApproval()}
+              onChange={(checked) => setMcpSamplingRequiresApproval(checked)}
+              class="flex items-center gap-2"
+              style="margin-top: 0.5rem;"
+            >
+              <SwitchControl><SwitchThumb /></SwitchControl>
+              <SwitchLabel>Require user approval for each request</SwitchLabel>
+            </Switch>
+            <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.85rem;">
+              Max tokens per sampling request
+              <input
+                type="number"
+                min={1}
+                style="width: 6rem;"
+                placeholder="16384"
+                value={mcpSamplingMaxTokens() ?? ''}
+                onInput={(e) => {
+                  const val = e.currentTarget.value;
+                  setMcpSamplingMaxTokens(val ? parseInt(val, 10) || null : null);
+                }}
+              />
+            </label>
           </Show>
         </div>
       </div>

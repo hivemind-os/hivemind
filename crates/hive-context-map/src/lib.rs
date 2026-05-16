@@ -499,6 +499,9 @@ impl AdvancedContextMap {
                 required_capabilities: BTreeSet::new(),
                 preferred_models: models.clone(),
                 tools: tools.clone(),
+                temperature: None,
+                stop_sequences: None,
+                max_tokens: None,
             };
 
             let router = self.model_router.load();

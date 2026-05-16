@@ -68,6 +68,7 @@ impl ScriptProvider {
             content: content.into(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -87,6 +88,7 @@ impl ScriptProvider {
                 arguments: args,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -105,6 +107,7 @@ impl ScriptProvider {
                 })
                 .collect(),
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -131,6 +134,8 @@ impl ModelProvider for ScriptProvider {
             content: "done".into(),
             tool_calls: vec![],
             usage: None,
+
+            finish_reason: None,
         });
         resp.provider_id = self.descriptor.id.clone();
         resp.model = selection.model.clone();

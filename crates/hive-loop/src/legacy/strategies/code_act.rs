@@ -300,6 +300,9 @@ impl LoopStrategy for CodeActStrategy {
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: native_tool_defs.clone(),
+                        temperature: None,
+                        stop_sequences: None,
+                        max_tokens: None,
                     }
                 } else {
                     // Non-multi-turn: prompt goes as the final user message via
@@ -327,6 +330,9 @@ impl LoopStrategy for CodeActStrategy {
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: native_tool_defs.clone(),
+                        temperature: None,
+                        stop_sequences: None,
+                        max_tokens: None,
                     }
                 };
 
@@ -495,6 +501,8 @@ impl LoopStrategy for CodeActStrategy {
                         content,
                         tool_calls: streamed_tool_calls,
                         usage: streamed_usage,
+
+                        finish_reason: None,
                     }
                 } else {
                     let router = Arc::clone(&model_router);

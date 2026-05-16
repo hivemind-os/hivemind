@@ -158,6 +158,8 @@ impl ModelProvider for TestProvider {
             content: response,
             tool_calls: vec![],
             usage: None,
+
+            finish_reason: None,
         })
     }
 }
@@ -221,6 +223,9 @@ async fn execute_tool_call_intercepts_agent_orchestration_tools() {
                 secondary_models: None,
                 archived: false,
                 bundled: false,
+                mcp_sampling: false,
+                mcp_sampling_requires_approval: true,
+                mcp_sampling_max_tokens: None,
                 prompts: Default::default(),
             }],
             current_agent_id: Some("system/general".to_string()),

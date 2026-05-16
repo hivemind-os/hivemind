@@ -77,6 +77,7 @@ impl ScriptProvider {
             content: content.to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -91,6 +92,7 @@ impl ScriptProvider {
                 arguments: args,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 }

@@ -113,6 +113,9 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                     required_capabilities: context.routing.required_capabilities.clone(),
                     preferred_models: context.routing.preferred_models.clone(),
                     tools: context.tools_ctx.tools.list_definitions(),
+                    temperature: None,
+                    stop_sequences: None,
+                    max_tokens: None,
                 };
 
                 for hook in middleware {
@@ -210,6 +213,8 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                 content: String::new(),
                 tool_calls: Vec::new(),
                 usage: None,
+
+                finish_reason: None,
             };
 
             // Shared adaptive budget across all plan steps.
@@ -244,6 +249,9 @@ impl LoopStrategy for PlanThenExecuteStrategy {
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: context.tools_ctx.tools.list_definitions(),
+                        temperature: None,
+                        stop_sequences: None,
+                        max_tokens: None,
                     };
 
                     for hook in middleware {

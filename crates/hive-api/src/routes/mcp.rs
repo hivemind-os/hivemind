@@ -500,6 +500,9 @@ pub(crate) async fn mcp_sampling_create_message(
         required_capabilities: BTreeSet::from([Capability::Chat]),
         preferred_models,
         tools: vec![],
+        temperature: None,
+        stop_sequences: None,
+        max_tokens: None,
     };
 
     // complete_once is synchronous (blocking I/O) — run on a blocking thread
@@ -632,4 +635,39 @@ pub(crate) async fn mcp_app_tools_respond(
     }
 
     Ok(Json(json!({ "ok": true })))
+}
+
+// ── MCP Sampling Approval ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub(crate) struct SamplingApprovalRequest {
+    pub request_id: String,
+    pub approved: bool,
+}
+
+/// POST /api/v1/mcp/sampling/approve — approve or deny a pending sampling request.
+pub(crate) async fn api_mcp_sampling_approve(
+    State(state): State<AppState>,
+    Json(req): Json<SamplingApprovalRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let found = state
+        .sampling_handler
+        .respond_to_approval(&req.request_id, req.approved);
+
+    if !found {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("No pending sampling approval with id '{}'", req.request_id),
+        ));
+    }
+
+    Ok(Json(json!({ "ok": true, "approved": req.approved })))
+}
+
+/// GET /api/v1/mcp/sampling/pending — list all pending sampling approval requests.
+pub(crate) async fn api_mcp_sampling_pending(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let pending = state.sampling_handler.list_pending_approvals();
+    Json(json!({ "pending": pending }))
 }

@@ -8,8 +8,9 @@ use crate::transport_utils::{apply_async_auth, send_json_blocking, sse_completio
 use crate::{
     build_tool_name_map, format_tools_openai, openai_messages_from_request,
     restore_tool_name_with_map, shared_async_client, shared_blocking_client, trim_trailing_slash,
-    CompletionRequest, CompletionResponse, CompletionStream, CompletionUsage, ModelSelection,
-    OpenAiChatRequest, OpenAiChatResponse, OpenAiChatStreamRequest, ToolCallResponse,
+    CompletionRequest, CompletionResponse, CompletionStream, CompletionUsage, FinishReason,
+    ModelSelection, OpenAiChatRequest, OpenAiChatResponse, OpenAiChatStreamRequest,
+    ToolCallResponse,
 };
 
 /// Compute the Foundry inference URL by stripping the `/api/projects/{project}`
@@ -19,6 +20,15 @@ fn foundry_inference_url(base_url: &str) -> String {
     let resource_base =
         if let Some(idx) = base.find("/api/projects/") { &base[..idx] } else { base };
     format!("{resource_base}/openai/v1/chat/completions")
+}
+
+fn map_openai_finish_reason(reason: Option<&str>) -> Option<FinishReason> {
+    match reason {
+        Some("stop") => Some(FinishReason::Stop),
+        Some("length") => Some(FinishReason::Length),
+        Some("tool_calls") => Some(FinishReason::ToolCalls),
+        _ => None,
+    }
 }
 
 pub(crate) struct FoundryTransport;
@@ -53,6 +63,7 @@ impl ProviderTransport for FoundryTransport {
             )
         })?;
 
+        let finish_reason = map_openai_finish_reason(first_choice.finish_reason.as_deref());
         let msg = first_choice.message;
         let text = first_choice.text;
 
@@ -104,6 +115,7 @@ impl ProviderTransport for FoundryTransport {
                     .unwrap_or(0),
                 ..Default::default()
             }),
+            finish_reason,
         })
     }
 

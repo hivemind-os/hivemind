@@ -65,6 +65,9 @@ impl ModelBackend for HiveModelBackend {
             required_capabilities: BTreeSet::from([Capability::Chat]),
             preferred_models: None,
             tools: tool_defs,
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let response = router

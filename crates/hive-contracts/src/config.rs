@@ -1071,6 +1071,20 @@ pub struct Persona {
     /// archived (hidden).  Users can edit them and later reset to defaults.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bundled: bool,
+    /// When `true`, MCP servers attached to this persona are allowed to
+    /// request LLM completions via the MCP sampling/createMessage flow.
+    /// Disabled by default for security — the user must explicitly opt in.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mcp_sampling: bool,
+    /// When `true`, each MCP sampling request requires explicit user approval
+    /// before being forwarded to the model router.  Defaults to `true` so that
+    /// enabling sampling alone doesn't silently proxy requests.
+    #[serde(default = "default_true")]
+    pub mcp_sampling_requires_approval: bool,
+    /// Maximum tokens allowed per MCP sampling request.  Requests exceeding
+    /// this limit will be rejected.  Defaults to 16 384 when not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_sampling_max_tokens: Option<u32>,
     /// Reusable prompt templates that users can invoke from chat, the Agent
     /// Stage, Flight Deck, or the API.  Each template is a Handlebars string
     /// with an optional JSON Schema describing its parameters.
@@ -1097,6 +1111,9 @@ impl Persona {
             secondary_models: None,
             archived: false,
             bundled: true,
+            mcp_sampling: false,
+            mcp_sampling_requires_approval: true,
+            mcp_sampling_max_tokens: None,
             prompts: Vec::new(),
         }
     }

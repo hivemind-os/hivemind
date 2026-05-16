@@ -191,6 +191,8 @@ fn do_complete(
         content: output.text,
         tool_calls: vec![],
         usage: None,
+
+        finish_reason: None,
     })
 }
 
@@ -296,6 +298,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         }
     }
 

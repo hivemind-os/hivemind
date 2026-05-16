@@ -72,6 +72,9 @@ pub fn compact_messages(
         required_capabilities: std::collections::BTreeSet::new(),
         preferred_models: None,
         tools: vec![],
+        temperature: None,
+        stop_sequences: None,
+        max_tokens: None,
     };
 
     let effective_decision = if let Some(ref spec) = config.extraction_model {
@@ -243,6 +246,9 @@ impl ContextCompactorMiddleware {
             required_capabilities: std::collections::BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         // If an extraction model is configured (format: "provider_id:model_name"),
@@ -554,6 +560,9 @@ mod tests {
             required_capabilities: std::collections::BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let result = mw.before_model_call(&ctx, req.clone());
         assert!(result.is_ok());

@@ -1299,6 +1299,49 @@ const PersonasTab = (props: PersonasTabProps) => {
               </div>
             </div>
 
+            {/* ── MCP Sampling toggle ──────────────────────────────── */}
+            <div class="agents-form-field">
+              <span>MCP Sampling</span>
+              <div class="agents-form-control">
+                <Switch
+                  checked={draft().mcp_sampling ?? false}
+                  onChange={(checked) => setDraft({ ...draft(), mcp_sampling: checked })}
+                  class="flex items-center gap-2"
+                >
+                  <SwitchControl><SwitchThumb /></SwitchControl>
+                  <SwitchLabel>Allow MCP servers to request LLM completions</SwitchLabel>
+                </Switch>
+                <Show when={draft().mcp_sampling}>
+                  <Switch
+                    checked={draft().mcp_sampling_requires_approval ?? true}
+                    onChange={(checked) => setDraft({ ...draft(), mcp_sampling_requires_approval: checked })}
+                    class="flex items-center gap-2"
+                    style="margin-top: 0.5rem;"
+                  >
+                    <SwitchControl><SwitchThumb /></SwitchControl>
+                    <SwitchLabel>Require user approval for each request</SwitchLabel>
+                  </Switch>
+                  <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.85rem;">
+                    Max tokens per sampling request
+                    <input
+                      type="number"
+                      min={1}
+                      style="width: 6rem;"
+                      placeholder="16384"
+                      value={draft().mcp_sampling_max_tokens ?? ''}
+                      onInput={(e) => {
+                        const val = e.currentTarget.value;
+                        setDraft({
+                          ...draft(),
+                          mcp_sampling_max_tokens: val ? parseInt(val, 10) || null : null,
+                        });
+                      }}
+                    />
+                  </label>
+                </Show>
+              </div>
+            </div>
+
             {/* ── Installed Skills ────────────────────────────────── */}
             <Show when={editingId() && editingId() !== NEW_AGENT_SENTINEL}>
               <div class="agents-form-field">
