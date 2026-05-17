@@ -125,6 +125,7 @@ pub(crate) async fn api_save_personas(
     }
 
     // Update in-memory state.
+    state.sampling_handler.refresh_policies(&personas);
     state.chat.update_personas(personas.clone());
 
     // Reconcile MCP servers so newly-added persona MCP tools become available.
@@ -158,6 +159,7 @@ pub(crate) async fn api_reset_persona(
 
     // Reload all personas and update in-memory state.
     let personas = load_personas(&state.personas_dir).unwrap_or_default();
+    state.sampling_handler.refresh_policies(&personas);
     state.chat.update_personas(personas.clone());
 
     // Reconcile MCP servers so reset persona MCP changes take effect.
@@ -219,6 +221,7 @@ pub(crate) async fn api_copy_persona(
 
     // Update in-memory state.
     let all_personas = load_personas(&state.personas_dir).unwrap_or_default();
+    state.sampling_handler.refresh_policies(&all_personas);
     state.chat.update_personas(all_personas.clone());
 
     // Reconcile MCP servers so copied persona MCP tools become available.

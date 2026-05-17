@@ -69,6 +69,9 @@ impl ModelBasedScanner {
             required_capabilities: BTreeSet::new(),
             preferred_models: Some(self.preferred_models.clone()),
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let router = self.model_router.load();
@@ -177,6 +180,9 @@ impl ModelBasedScanner {
             required_capabilities: BTreeSet::new(),
             preferred_models: Some(self.preferred_models.clone()),
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let router = self.model_router.load();

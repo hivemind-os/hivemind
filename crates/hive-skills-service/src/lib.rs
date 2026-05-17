@@ -188,6 +188,9 @@ impl SkillsService {
             required_capabilities: BTreeSet::new(),
             preferred_models: Some(vec![model.to_string()]),
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let router_guard = router.load();

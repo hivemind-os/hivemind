@@ -14,6 +14,7 @@ import Sidebar from './components/Sidebar';
 import { SidebarProvider, UiSidebar, SidebarInset } from '~/ui';
 import ToolApprovalDialog from './components/ToolApprovalDialog';
 import AgentApprovalToast, { type PendingApproval } from './components/AgentApprovalToast';
+import SamplingApprovalToast from './components/SamplingApprovalToast';
 import { UpdateDialog } from './components/UpdateDialog';
 import type { Update } from '@tauri-apps/plugin-updater';
 import type { PendingQuestion } from './components/InlineQuestion';
@@ -3854,6 +3855,9 @@ const App = () => {
 
       {/* ── Agent approval toasts (always visible) ─────────────── */}
       <AgentApprovalToast />
+
+      {/* ── MCP Sampling approval toasts ─────────────────────────── */}
+      <SamplingApprovalToast />
 
       {/* ── Session permissions dialog ───────────────────────────── */}
       <SessionPermsDialog

@@ -9,8 +9,18 @@ use crate::{
     anthropic_messages_from_request, build_tool_name_map, format_tools_anthropic,
     restore_tool_name_with_map, shared_async_client, shared_blocking_client, trim_trailing_slash,
     AnthropicRequest, AnthropicResponse, AnthropicStreamRequest, CompletionRequest,
-    CompletionResponse, CompletionStream, CompletionUsage, ModelSelection, ToolCallResponse,
+    CompletionResponse, CompletionStream, CompletionUsage, FinishReason, ModelSelection,
+    ToolCallResponse,
 };
+
+fn map_anthropic_finish_reason(reason: Option<&str>) -> Option<FinishReason> {
+    match reason {
+        Some("end_turn") => Some(FinishReason::Stop),
+        Some("max_tokens") => Some(FinishReason::Length),
+        Some("tool_use") => Some(FinishReason::ToolCalls),
+        _ => None,
+    }
+}
 
 pub(crate) struct AnthropicTransport;
 
@@ -41,6 +51,7 @@ impl ProviderTransport for AnthropicTransport {
             ctx.provider_id,
         )?;
 
+        let finish_reason = map_anthropic_finish_reason(response.stop_reason.as_deref());
         let tool_calls = response
             .content
             .iter()
@@ -85,6 +96,7 @@ impl ProviderTransport for AnthropicTransport {
                 cached_input_tokens: u.cache_read_input_tokens.unwrap_or(0),
                 cache_write_tokens: u.cache_creation_input_tokens.unwrap_or(0),
             }),
+            finish_reason,
         })
     }
 

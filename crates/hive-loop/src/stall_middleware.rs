@@ -287,6 +287,9 @@ mod tests {
             required_capabilities: Default::default(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let err = mw.before_model_call(&ctx, req).unwrap_err();
         assert!(matches!(err, LoopError::StallDetected { .. }), "got: {err:?}");
@@ -350,6 +353,9 @@ mod tests {
             required_capabilities: Default::default(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         assert!(mw.before_model_call(&ctx, req).is_ok());
     }

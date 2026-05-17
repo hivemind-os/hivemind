@@ -51,6 +51,34 @@ use tokio::sync::{Mutex, RwLock};
 pub use catalog::{CatalogedTool, McpCatalogStore};
 pub use session_mcp::SessionMcpManager;
 
+// Re-export rmcp types needed by SamplingHandler consumers.
+pub use rmcp::model::{
+    Content as McpContent, CreateMessageRequestParam, CreateMessageResult,
+    ModelPreferences as McpModelPreferences, RawContent as McpRawContent,
+    ResourceContents as McpResourceContents, Role as McpRole, SamplingMessage,
+};
+pub use rmcp::Error as McpError;
+
+/// Trait for handling MCP sampling (`sampling/createMessage`) requests.
+///
+/// Implementors route the server's completion request through the model
+/// router (or any other LLM backend) and return a result.  The trait is
+/// object-safe so it can be stored as `Arc<dyn SamplingHandler>`.
+pub trait SamplingHandler: Send + Sync + 'static {
+    /// Service a `sampling/createMessage` request from the given MCP server.
+    ///
+    /// `server_id` identifies which MCP server made the request so the
+    /// implementation can look up per-server / per-persona policy (e.g.
+    /// whether sampling is enabled, token caps, preferred models fallback).
+    fn create_message(
+        &self,
+        server_id: &str,
+        params: CreateMessageRequestParam,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<CreateMessageResult, rmcp::Error>> + Send + '_>,
+    >;
+}
+
 const MAX_NOTIFICATIONS: usize = 200;
 const MAX_SERVER_LOGS: usize = 200;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -202,6 +230,8 @@ pub struct McpService {
     pending_runtime_servers: Arc<parking_lot::RwLock<HashMap<String, runtime::McpRuntime>>>,
     /// Cache of fetched MCP App UI resources. Key: (server_id, resource_uri).
     ui_resource_cache: Arc<RwLock<HashMap<(String, String), McpAppResource>>>,
+    /// Optional handler for MCP sampling (`sampling/createMessage`) requests.
+    sampling_handler: Option<Arc<dyn SamplingHandler>>,
 }
 
 impl McpService {
@@ -226,6 +256,7 @@ impl McpService {
             python_env: None,
             pending_runtime_servers: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             ui_resource_cache: Arc::new(RwLock::new(HashMap::new())),
+            sampling_handler: None,
         }
     }
 
@@ -238,6 +269,12 @@ impl McpService {
     /// Set the managed Python environment handle.
     pub fn with_python_env(mut self, python_env: Arc<hive_python_env::PythonEnvManager>) -> Self {
         self.python_env = Some(python_env);
+        self
+    }
+
+    /// Set the sampling handler for MCP `sampling/createMessage` support.
+    pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler>) -> Self {
+        self.sampling_handler = Some(handler);
         self
     }
 
@@ -1637,6 +1674,8 @@ pub(crate) struct McpClientHandler {
     peer: Option<Peer<RoleClient>>,
     /// Reference to the owning service for cache refresh on notifications.
     service: Option<McpService>,
+    /// Optional sampling handler for `sampling/createMessage` requests.
+    sampling_handler: Option<Arc<dyn SamplingHandler>>,
 }
 
 impl McpClientHandler {
@@ -1646,7 +1685,15 @@ impl McpClientHandler {
         notifications: Arc<Mutex<VecDeque<McpNotificationEvent>>>,
         service: McpService,
     ) -> Self {
-        Self { server_id, event_bus, notifications, peer: None, service: Some(service) }
+        let sampling_handler = service.sampling_handler.clone();
+        Self {
+            server_id,
+            event_bus,
+            notifications,
+            peer: None,
+            service: Some(service),
+            sampling_handler,
+        }
     }
 
     async fn record_notification(&self, kind: McpNotificationKind, payload: Value) {
@@ -1829,6 +1876,22 @@ impl ClientHandler for McpClientHandler {
         self.peer = Some(peer);
     }
 
+    fn create_message(
+        &self,
+        params: CreateMessageRequestParam,
+        _context: rmcp::service::RequestContext<RoleClient>,
+    ) -> impl std::future::Future<Output = Result<CreateMessageResult, rmcp::Error>> + Send + '_
+    {
+        let handler = self.sampling_handler.clone();
+        let server_id = self.server_id.clone();
+        async move {
+            let handler = handler.ok_or_else(|| {
+                rmcp::Error::method_not_found::<rmcp::model::CreateMessageRequestMethod>()
+            })?;
+            handler.create_message(&server_id, params).await
+        }
+    }
+
     fn get_info(&self) -> rmcp::model::ClientInfo {
         use rmcp::model::{ClientCapabilities, Implementation};
         use std::collections::BTreeMap;
@@ -1838,9 +1901,16 @@ impl ClientHandler for McpClientHandler {
         let mut extensions = BTreeMap::new();
         extensions.insert("io.modelcontextprotocol/ui".to_string(), ui_ext);
 
+        let sampling =
+            if self.sampling_handler.is_some() { Some(serde_json::Map::new()) } else { None };
+
         rmcp::model::ClientInfo {
             protocol_version: Default::default(),
-            capabilities: ClientCapabilities { extensions: Some(extensions), ..Default::default() },
+            capabilities: ClientCapabilities {
+                sampling,
+                extensions: Some(extensions),
+                ..Default::default()
+            },
             client_info: Implementation {
                 name: "hivemind".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -2288,12 +2358,13 @@ mod tests {
     use super::*;
     use hive_core::EventBus;
     use rmcp::model::{
-        Annotated, CallToolRequestParam, CallToolResult, Content, ListResourcesResult,
-        ListToolsResult, NumberOrString, PaginatedRequestParam, RawResource,
-        ReadResourceRequestParam, ReadResourceResult, Resource, ResourceContents,
-        ResourceUpdatedNotificationParam, ServerCapabilities, ServerInfo, SubscribeRequestParam,
-        Tool,
+        Annotated, CallToolRequestParam, CallToolResult, Content, CreateMessageRequestParam,
+        CreateMessageResult, ListResourcesResult, ListToolsResult, NumberOrString,
+        PaginatedRequestParam, RawResource, ReadResourceRequestParam, ReadResourceResult, Resource,
+        ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities, ServerInfo,
+        SubscribeRequestParam, Tool,
     };
+    use rmcp::service::ServiceError;
     use rmcp::{Peer, RoleServer, ServerHandler, ServiceExt};
     use std::collections::VecDeque;
     use std::sync::Arc;
@@ -2851,5 +2922,247 @@ mod tests {
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(200), other_sub.recv()).await;
         assert!(result.is_err(), "other subscriber should not receive mcp notification");
+    }
+
+    // ---------------------------------------------------------------
+    // Sampling tests
+    // ---------------------------------------------------------------
+
+    /// A mock `SamplingHandler` that returns canned responses for testing.
+    struct MockSamplingHandler {
+        /// When set, the handler returns this error instead of a success.
+        fail_with: Option<rmcp::Error>,
+    }
+
+    impl MockSamplingHandler {
+        fn succeeding() -> Self {
+            Self { fail_with: None }
+        }
+
+        fn failing(err: rmcp::Error) -> Self {
+            Self { fail_with: Some(err) }
+        }
+    }
+
+    impl SamplingHandler for MockSamplingHandler {
+        fn create_message(
+            &self,
+            server_id: &str,
+            params: CreateMessageRequestParam,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<CreateMessageResult, rmcp::Error>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            let server_id = server_id.to_string();
+            let fail = self.fail_with.clone();
+            Box::pin(async move {
+                if let Some(err) = fail {
+                    return Err(err);
+                }
+                // Return a canned response echoing back some request info.
+                let model = "mock-model-v1".to_string();
+                let reply_text = format!(
+                    "sampling reply for server={}, messages={}, max_tokens={}",
+                    server_id,
+                    params.messages.len(),
+                    params.max_tokens,
+                );
+                Ok(CreateMessageResult {
+                    model,
+                    stop_reason: Some(CreateMessageResult::STOP_REASON_END_TURN.to_string()),
+                    message: rmcp::model::SamplingMessage {
+                        role: rmcp::model::Role::Assistant,
+                        content: Content::text(reply_text),
+                    },
+                })
+            })
+        }
+    }
+
+    /// Like `connect_pair` but injects a `SamplingHandler` into the client.
+    async fn connect_pair_with_sampling(
+        server: MockMcpServer,
+        sampling_handler: Option<Arc<dyn SamplingHandler>>,
+    ) -> (
+        rmcp::service::RunningService<RoleClient, McpClientHandler>,
+        rmcp::service::RunningService<RoleServer, MockMcpServer>,
+    ) {
+        let (client_read, server_write) = tokio::io::duplex(64 * 1024);
+        let (server_read, client_write) = tokio::io::duplex(64 * 1024);
+
+        let notifications: Arc<Mutex<VecDeque<McpNotificationEvent>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
+        let event_bus = EventBus::new(128);
+
+        let mut dummy_service = McpService::from_configs(
+            &[],
+            event_bus.clone(),
+            Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
+        );
+        if let Some(handler) = sampling_handler {
+            dummy_service = dummy_service.with_sampling_handler(handler);
+        }
+        let handler = McpClientHandler::new(
+            "test-server".to_string(),
+            event_bus.clone(),
+            Arc::clone(&notifications),
+            dummy_service,
+        );
+
+        let (server_result, client_result) = tokio::join!(
+            server.serve((server_read, server_write)),
+            handler.serve((client_read, client_write)),
+        );
+
+        (client_result.unwrap(), server_result.unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_sampling_round_trip() {
+        let server = MockMcpServer::new();
+        let handler: Arc<dyn SamplingHandler> = Arc::new(MockSamplingHandler::succeeding());
+        let (_client, server_svc) = connect_pair_with_sampling(server, Some(handler)).await;
+
+        // Small delay to let the peer be set.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let peer = server_svc.peer().clone();
+        let result = peer
+            .create_message(CreateMessageRequestParam {
+                messages: vec![rmcp::model::SamplingMessage {
+                    role: rmcp::model::Role::User,
+                    content: Content::text("Hello from MCP server"),
+                }],
+                model_preferences: None,
+                system_prompt: Some("You are helpful.".into()),
+                include_context: None,
+                temperature: None,
+                max_tokens: 512,
+                stop_sequences: None,
+                metadata: None,
+            })
+            .await
+            .expect("create_message should succeed");
+
+        assert_eq!(result.model, "mock-model-v1");
+        assert_eq!(result.stop_reason.as_deref(), Some(CreateMessageResult::STOP_REASON_END_TURN));
+        assert_eq!(result.message.role, rmcp::model::Role::Assistant);
+        // The mock echoes back the server_id, message count, and max_tokens.
+        let text = match &result.message.content.raw {
+            rmcp::model::RawContent::Text(t) => t.text.as_str(),
+            _ => panic!("expected text content"),
+        };
+        assert!(text.contains("server=test-server"));
+        assert!(text.contains("messages=1"));
+        assert!(text.contains("max_tokens=512"));
+    }
+
+    #[tokio::test]
+    async fn test_sampling_disabled_returns_method_not_found() {
+        let server = MockMcpServer::new();
+        // No sampling handler — sampling is disabled.
+        let (_client, server_svc) = connect_pair_with_sampling(server, None).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let peer = server_svc.peer().clone();
+        let err = peer
+            .create_message(CreateMessageRequestParam {
+                messages: vec![rmcp::model::SamplingMessage {
+                    role: rmcp::model::Role::User,
+                    content: Content::text("Hello"),
+                }],
+                model_preferences: None,
+                system_prompt: None,
+                include_context: None,
+                temperature: None,
+                max_tokens: 100,
+                stop_sequences: None,
+                metadata: None,
+            })
+            .await
+            .expect_err("create_message should fail when sampling is disabled");
+
+        // The server receives a ServiceError wrapping the MCP error.
+        match err {
+            ServiceError::McpError(e) => {
+                assert_eq!(
+                    e.code,
+                    rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+                    "expected METHOD_NOT_FOUND error code"
+                );
+            }
+            other => panic!("expected McpError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sampling_handler_error_propagated() {
+        let server = MockMcpServer::new();
+        let handler: Arc<dyn SamplingHandler> = Arc::new(MockSamplingHandler::failing(
+            rmcp::Error::invalid_request("token cap exceeded", None),
+        ));
+        let (_client, server_svc) = connect_pair_with_sampling(server, Some(handler)).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let peer = server_svc.peer().clone();
+        let err = peer
+            .create_message(CreateMessageRequestParam {
+                messages: vec![rmcp::model::SamplingMessage {
+                    role: rmcp::model::Role::User,
+                    content: Content::text("Hello"),
+                }],
+                model_preferences: None,
+                system_prompt: None,
+                include_context: None,
+                temperature: None,
+                max_tokens: 999999,
+                stop_sequences: None,
+                metadata: None,
+            })
+            .await
+            .expect_err("create_message should propagate handler error");
+
+        match err {
+            ServiceError::McpError(e) => {
+                assert_eq!(e.code, rmcp::model::ErrorCode::INVALID_REQUEST);
+                assert!(
+                    e.message.contains("token cap exceeded"),
+                    "error message should contain handler's message: {}",
+                    e.message
+                );
+            }
+            other => panic!("expected McpError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sampling_capability_advertised_when_handler_present() {
+        let server = MockMcpServer::new();
+        let handler: Arc<dyn SamplingHandler> = Arc::new(MockSamplingHandler::succeeding());
+        let (_client, server_svc) = connect_pair_with_sampling(server, Some(handler)).await;
+
+        // The server can read the client's advertised info.
+        let client_info = server_svc.peer_info();
+        assert!(
+            client_info.capabilities.sampling.is_some(),
+            "client should advertise sampling capability"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sampling_capability_not_advertised_without_handler() {
+        let server = MockMcpServer::new();
+        let (_client, server_svc) = connect_pair_with_sampling(server, None).await;
+
+        let client_info = server_svc.peer_info();
+        assert!(
+            client_info.capabilities.sampling.is_none(),
+            "client should NOT advertise sampling capability"
+        );
     }
 }

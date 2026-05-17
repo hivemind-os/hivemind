@@ -6533,6 +6533,9 @@ impl ChatService {
                     .clone()
                     .or_else(|| pending.persona.preferred_models.clone()),
                 tools: vec![],
+                temperature: None,
+                stop_sequences: None,
+                max_tokens: None,
             };
 
             tracing::debug!(
@@ -10748,6 +10751,9 @@ mod tests {
             secondary_models: None,
             archived: false,
             bundled: false,
+            mcp_sampling: false,
+            mcp_sampling_requires_approval: true,
+            mcp_sampling_max_tokens: None,
             prompts: vec![],
         }]);
 

@@ -331,6 +331,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         }
     }
 
@@ -367,6 +370,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let result = mw.before_model_call(&ctx, req);
         assert!(result.is_ok());
@@ -397,6 +403,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let result = mw.before_model_call(&ctx, req);
         assert!(result.is_ok());
@@ -432,6 +441,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let result = enforce_with_limit(req, 32768);
         assert!(result.is_ok());
@@ -448,6 +460,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let result = enforce_with_limit(req.clone(), 128000);
         assert!(result.is_ok());

@@ -487,6 +487,7 @@ mod tests {
             attachments: vec![],
             tests: vec![],
             bundled: false,
+
             archived: false,
             triggers_paused: false,
         };
@@ -674,6 +675,7 @@ mod tests {
             attachments: vec![],
             tests: vec![],
             bundled: false,
+
             archived: false,
             triggers_paused: false,
         };

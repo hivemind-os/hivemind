@@ -115,6 +115,7 @@ impl ScriptProvider {
             content: content.to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -127,6 +128,7 @@ impl ScriptProvider {
             content,
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -143,6 +145,7 @@ impl ScriptProvider {
                 arguments: tool_args,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -157,6 +160,7 @@ impl ScriptProvider {
                 arguments: args,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 }
@@ -348,6 +352,9 @@ fn make_code_act_context_with_workspace(
                 secondary_models: None,
                 archived: false,
                 bundled: false,
+                mcp_sampling: false,
+                mcp_sampling_requires_approval: true,
+                mcp_sampling_max_tokens: None,
                 prompts: Default::default(),
             }),
             agent_orchestrator: None,

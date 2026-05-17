@@ -45,6 +45,9 @@ impl LoopStrategy for SequentialStrategy {
                 required_capabilities: context.routing.required_capabilities.clone(),
                 preferred_models: context.routing.preferred_models.clone(),
                 tools: context.tools_ctx.tools.list_definitions(),
+                temperature: None,
+                stop_sequences: None,
+                max_tokens: None,
             };
 
             for hook in middleware {

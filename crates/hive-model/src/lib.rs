@@ -251,6 +251,18 @@ pub struct CompletionRequest {
     pub preferred_models: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
+    /// Sampling temperature override.  When `Some`, providers should use this
+    /// value instead of their default.  Range is typically 0.0–2.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Stop sequences.  The model should stop generating further tokens when
+    /// any of these strings is produced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+    /// Maximum tokens to generate.  When `Some`, providers should cap output
+    /// at this limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 /// Token usage reported by the LLM provider.
@@ -282,6 +294,10 @@ pub struct CompletionResponse {
     /// Token usage reported by the provider, if available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
+    /// Why the model stopped generating.  Populated when the provider reports
+    /// a stop reason (not all providers do for non-streaming calls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<FinishReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,6 +451,7 @@ impl ModelProvider for EchoProvider {
             ),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         })
     }
 }
@@ -989,6 +1006,11 @@ impl ModelRouter {
             right.priority.cmp(&left.priority).then_with(|| left.id.cmp(&right.id))
         });
         providers
+    }
+
+    /// Returns a flat list of all model IDs across all registered providers.
+    pub fn available_model_ids(&self) -> Vec<String> {
+        self.providers.values().flat_map(|p| p.descriptor().models.iter().cloned()).collect()
     }
 
     fn effective_limits_for_selection(
@@ -2305,6 +2327,7 @@ struct OpenAiPromptTokensDetails {
 struct OpenAiChoice {
     message: Option<OpenAiChoiceMessage>,
     text: Option<String>,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2415,6 +2438,7 @@ struct AnthropicImageSource {
 struct AnthropicResponse {
     content: Vec<AnthropicBlock>,
     usage: Option<AnthropicUsage>,
+    stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3024,6 +3048,7 @@ mod tests {
                 content: self.content.clone(),
                 tool_calls: vec![],
                 usage: None,
+                finish_reason: None,
             })
         }
     }
@@ -3487,6 +3512,9 @@ mod tests {
                 required_capabilities: [Capability::Chat].into_iter().collect(),
                 preferred_models: None,
                 tools: vec![],
+                temperature: None,
+                stop_sequences: None,
+                max_tokens: None,
             })
             .expect("completion");
 
@@ -3557,6 +3585,9 @@ mod tests {
                     required_capabilities: [Capability::Chat].into_iter().collect(),
                     preferred_models: None,
                     tools: vec![],
+                    temperature: None,
+                    stop_sequences: None,
+                    max_tokens: None,
                 },
                 &ModelSelection {
                     provider_id: "openrouter".to_string(),
@@ -4205,6 +4236,7 @@ mod tests {
                 content: "ok".to_string(),
                 tool_calls: vec![],
                 usage: None,
+                finish_reason: None,
             })
         }
     }
@@ -4227,6 +4259,9 @@ mod tests {
             required_capabilities: [Capability::Chat].into_iter().collect(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         }
     }
 
@@ -4712,6 +4747,7 @@ mod tests {
                 output_tokens: 50,
                 ..Default::default()
             }),
+            finish_reason: None,
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: CompletionResponse = serde_json::from_str(&json).unwrap();
@@ -4727,6 +4763,7 @@ mod tests {
             content: "Hello".to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         };
         let json = serde_json::to_string(&response).unwrap();
         assert!(!json.contains("usage"), "None usage should be skipped");

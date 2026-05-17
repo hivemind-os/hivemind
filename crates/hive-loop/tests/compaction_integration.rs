@@ -109,6 +109,8 @@ impl ModelProvider for SummarizerProvider {
             content,
             tool_calls: vec![],
             usage: None,
+
+            finish_reason: None,
         })
     }
 }
@@ -213,6 +215,9 @@ fn make_request(prompt_chars: usize, messages: Vec<CompletionMessage>) -> Comple
         required_capabilities: BTreeSet::new(),
         preferred_models: None,
         tools: vec![],
+        temperature: None,
+        stop_sequences: None,
+        max_tokens: None,
     }
 }
 

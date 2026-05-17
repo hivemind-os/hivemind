@@ -385,6 +385,7 @@ mod tests {
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
+
             archived: false,
             triggers_paused: false,
         }
@@ -529,6 +530,7 @@ mod tests {
             mode: WorkflowMode::default(),
             result_message: None,
             bundled: false,
+
             archived: false,
             triggers_paused: false,
         };

@@ -66,6 +66,7 @@ impl ScriptProvider {
             content: content.to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -87,6 +88,7 @@ impl ScriptProvider {
                 }),
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 }
@@ -108,6 +110,8 @@ impl ModelProvider for ScriptProvider {
             content: "Task complete.".to_string(),
             tool_calls: vec![],
             usage: None,
+
+            finish_reason: None,
         });
         resp.provider_id = self.descriptor.id.clone();
         resp.model = selection.model.clone();
@@ -657,6 +661,8 @@ async fn test_07_parallel_fan_out() {
                     },
                 ],
                 usage: None,
+
+                finish_reason: None,
             },
             // A: after tool results
             ScriptProvider::make_response("A dispatched to both"),
@@ -887,6 +893,8 @@ async fn test_12_diamond_pattern() {
                     },
                 ],
                 usage: None,
+
+                finish_reason: None,
             },
             ScriptProvider::make_response("A dispatched"),
             // B: forward to D
@@ -1257,6 +1265,8 @@ async fn test_20_stress_fan_out_10_agents() {
         content: String::new(),
         tool_calls,
         usage: None,
+
+        finish_reason: None,
     });
     // Coordinator after tool results
     responses.push(ScriptProvider::make_response("Coordinator dispatched all"));

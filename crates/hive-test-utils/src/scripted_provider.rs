@@ -120,6 +120,7 @@ impl ScriptedProvider {
             content: content.to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -141,6 +142,7 @@ impl ScriptedProvider {
                 arguments,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -159,6 +161,7 @@ impl ScriptedProvider {
                 .map(|(id, name, args)| ToolCallResponse { id, name, arguments: args })
                 .collect(),
             usage: None,
+            finish_reason: None,
         }
     }
 }
@@ -223,6 +226,8 @@ impl ModelProvider for ScriptedProvider {
             content: "Task complete.".to_string(),
             tool_calls: vec![],
             usage: None,
+
+            finish_reason: None,
         })
     }
 
@@ -278,6 +283,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let resp = provider.complete(&req, &sel).unwrap();
         assert_eq!(resp.content, "I am researching");
@@ -293,6 +301,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let resp2 = provider.complete(&req2, &sel).unwrap();
         assert_eq!(resp2.content, "I am executing");
@@ -305,6 +316,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
         let resp3 = provider.complete(&req3, &sel).unwrap();
         assert_eq!(resp3.content, "default");
@@ -332,6 +346,9 @@ mod tests {
             required_capabilities: BTreeSet::new(),
             preferred_models: None,
             tools: vec![],
+            temperature: None,
+            stop_sequences: None,
+            max_tokens: None,
         };
 
         let resp = provider.complete(&req, &sel).unwrap();

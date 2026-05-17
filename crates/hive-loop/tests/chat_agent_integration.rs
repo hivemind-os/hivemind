@@ -79,6 +79,7 @@ impl ScriptProvider {
             content: content.to_string(),
             tool_calls: vec![],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -97,6 +98,7 @@ impl ScriptProvider {
                 arguments: args,
             }],
             usage: None,
+            finish_reason: None,
         }
     }
 
@@ -115,6 +117,7 @@ impl ScriptProvider {
                 })
                 .collect(),
             usage: None,
+            finish_reason: None,
         }
     }
 }
@@ -803,6 +806,8 @@ async fn t18_tool_call_from_xml_format() {
         content: xml_text,
         tool_calls: vec![],
         usage: None,
+
+        finish_reason: None,
     };
 
     let provider = ScriptProvider::new(vec![xml_response, ScriptProvider::text("xml done")]);
@@ -834,6 +839,8 @@ async fn t19_native_tool_calls_take_precedence_over_text() {
             arguments: json!({"from": "native"}),
         }],
         usage: None,
+
+        finish_reason: None,
     };
 
     let provider = ScriptProvider::new(vec![mixed_response, ScriptProvider::text("done")]);

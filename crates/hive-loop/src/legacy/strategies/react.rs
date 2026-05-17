@@ -124,6 +124,9 @@ impl LoopStrategy for ReActStrategy {
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: context.tools_ctx.tools.list_definitions(),
+                        temperature: None,
+                        stop_sequences: None,
+                        max_tokens: None,
                     }
                 } else {
                     // Legacy mode: growing prompt with XML tags.
@@ -134,6 +137,9 @@ impl LoopStrategy for ReActStrategy {
                         required_capabilities: context.routing.required_capabilities.clone(),
                         preferred_models: context.routing.preferred_models.clone(),
                         tools: context.tools_ctx.tools.list_definitions(),
+                        temperature: None,
+                        stop_sequences: None,
+                        max_tokens: None,
                     }
                 };
 
@@ -398,6 +404,8 @@ impl LoopStrategy for ReActStrategy {
                         content,
                         tool_calls: streamed_tool_calls,
                         usage: streamed_usage,
+
+                        finish_reason: None,
                     }
                 } else {
                     let router = Arc::clone(&model_router);

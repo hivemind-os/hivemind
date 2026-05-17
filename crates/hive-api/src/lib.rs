@@ -23,6 +23,7 @@
 pub mod afk;
 pub mod auth_middleware;
 pub mod canvas_ws;
+pub mod mcp_sampling;
 pub mod provider_auth;
 pub mod routes;
 mod scheduler_deps;
@@ -328,6 +329,8 @@ pub struct AppState {
     pub(crate) shell_env: Arc<parking_lot::RwLock<HashMap<String, String>>>,
     /// Sandbox configuration (hot-reloadable).
     pub(crate) sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>>,
+    /// MCP sampling handler — policies are refreshed when personas change.
+    pub(crate) sampling_handler: Arc<mcp_sampling::ModelRouterSamplingHandler>,
 }
 
 /// Components needed to wire up the workflow service extension traits.
@@ -505,6 +508,16 @@ impl AppState {
         )?;
         // Share the model router with SkillsService for server-side skill auditing.
         let skill_model_router = Arc::new(arc_swap::ArcSwap::from(Arc::clone(&model_router)));
+
+        // MCP sampling handler — shares the model router so MCP servers can
+        // request LLM completions when sampling is enabled on the persona.
+        let sampling_handler = Arc::new(mcp_sampling::ModelRouterSamplingHandler::new(
+            Arc::clone(&skill_model_router),
+            event_bus.clone(),
+        ));
+        // Seed initial policies from loaded personas (loaded later in
+        // this function, so we refresh again after persona load).
+
         let canvas_sessions = canvas_ws::CanvasSessionRegistry::new();
 
         let sandbox_config: Arc<parking_lot::RwLock<hive_contracts::SandboxConfig>> =
@@ -561,7 +574,10 @@ impl AppState {
                 Arc::clone(&sandbox_config),
             )
             .with_node_env(Arc::clone(&node_env))
-            .with_python_env(Arc::clone(&python_env)),
+            .with_python_env(Arc::clone(&python_env))
+            .with_sampling_handler(
+                Arc::clone(&sampling_handler) as Arc<dyn hive_mcp::SamplingHandler>
+            ),
         );
         let mcp_catalog = McpCatalogStore::new(&paths.hivemind_home);
 
@@ -937,7 +953,8 @@ impl AppState {
 
         // Personas were already loaded earlier (before McpService construction)
         // so that persona-defined MCP servers are included in the global catalog.
-        // Now push them into the chat service.
+        // Now push them into the chat service and refresh sampling policies.
+        sampling_handler.refresh_policies(&personas);
         chat.update_personas(personas);
 
         let skills_data_dir =
@@ -1139,6 +1156,7 @@ impl AppState {
             node_env,
             shell_env,
             sandbox_config,
+            sampling_handler,
         })
     }
 
@@ -1873,6 +1891,10 @@ impl AppState {
             )),
             shell_env: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             sandbox_config,
+            sampling_handler: Arc::new(mcp_sampling::ModelRouterSamplingHandler::new(
+                Arc::new(arc_swap::ArcSwap::from(Arc::new(hive_model::ModelRouter::new()))),
+                hive_core::EventBus::new(16),
+            )),
         }
     }
 
@@ -1947,6 +1969,7 @@ impl AppState {
         self.chat.update_web_search_config(resolve_web_search_keyring(&new_config.web_search));
         // Update sandbox configuration.
         *self.sandbox_config.write() = new_config.security.sandbox.clone();
+        self.sampling_handler.refresh_policies(&personas);
         self.chat.update_personas(personas);
 
         // 6. Reload connectors from connectors.yaml.
@@ -2320,6 +2343,8 @@ pub fn build_router(state: AppState) -> Router {
             post(mcp::fetch_mcp_ui_resource),
         )
         .route("/api/v1/mcp/sampling/create-message", post(mcp::mcp_sampling_create_message))
+        .route("/api/v1/mcp/sampling/approve", post(mcp::api_mcp_sampling_approve))
+        .route("/api/v1/mcp/sampling/pending", get(mcp::api_mcp_sampling_pending))
         .route("/api/v1/mcp/app-tools/register", post(mcp::mcp_app_tools_register))
         .route("/api/v1/mcp/app-tools/unregister", post(mcp::mcp_app_tools_unregister))
         .route("/api/v1/mcp/app-tools/respond", post(mcp::mcp_app_tools_respond))
