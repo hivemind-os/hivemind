@@ -11,6 +11,8 @@ default = []
 candle = ["hive-inference/candle"]
 llama-cpp = ["hive-inference/llama-cpp"]
 onnx = ["hive-inference/onnx"]
+cuda = ["hive-inference/cuda"]
+metal = ["hive-inference/metal"]
 
 [dependencies]
 anyhow.workspace = true

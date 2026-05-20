@@ -23,8 +23,10 @@ jobs:
         include:
           - os: macos-14         # Apple Silicon
             target: aarch64-apple-darwin
+            gpu_feature: metal
           - os: windows-latest   # x86_64
             target: x86_64-pc-windows-msvc
+            gpu_feature: cuda
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -105,17 +107,25 @@ jobs:
             echo "PYTHON_WASM_STDLIB=$STAGING/lib/python3.12" >> "$GITHUB_ENV"
           fi
 
+      - name: Install CUDA toolkit (Windows only)
+        if: matrix.gpu_feature == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.6.0'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
       - name: Check version consistency
         run: cargo xtask check-version
 
       - name: Cargo check
-        run: cargo check --workspace --target ${{ matrix.target }}
+        run: cargo check --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
 
       - name: Clippy
-        run: cargo clippy --workspace --target ${{ matrix.target }}
+        run: cargo clippy --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
 
       - name: Tests
-        run: cargo test --workspace --target ${{ matrix.target }}
+        run: cargo test --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
         timeout-minutes: 90
         env:
           HIVEMIND_TEST_PLUGIN_PATH: packages/test-plugin

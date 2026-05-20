@@ -11,6 +11,8 @@ all-backends = ["candle", "llama-cpp", "onnx"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
 llama-cpp = ["dep:llama-cpp-2", "dep:encoding_rs"]
 onnx = ["dep:ort", "dep:tokenizers"]
+cuda = ["llama-cpp", "llama-cpp-2/cuda"]
+metal = ["llama-cpp", "llama-cpp-2/metal"]
 
 [dependencies]
 anyhow.workspace = true

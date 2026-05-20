@@ -42,7 +42,14 @@ pub enum IpcMethod {
     /// Returns supported file extensions.
     RuntimeFormats,
     /// Loads a model from a local path.
-    ModelLoad { model_id: String, model_path: PathBuf },
+    ModelLoad {
+        model_id: String,
+        model_path: PathBuf,
+        #[serde(default)]
+        gpu_layers: u32,
+        #[serde(default)]
+        main_gpu: u32,
+    },
     /// Unloads a previously loaded model.
     ModelUnload { model_id: String },
     /// Checks if a model is currently loaded.

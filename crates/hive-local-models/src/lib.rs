@@ -574,7 +574,12 @@ pub async fn list_hub_repo_files(
 }
 
 pub async fn get_hardware(State(service): State<Arc<LocalModelService>>) -> Json<HardwareSummary> {
-    Json(HardwareSummary { hardware: service.hardware_info(), usage: service.resource_usage() })
+    let gpu_supported = cfg!(feature = "cuda") || cfg!(feature = "metal");
+    Json(HardwareSummary {
+        hardware: service.hardware_info(),
+        usage: service.resource_usage(),
+        gpu_supported,
+    })
 }
 
 pub async fn list_downloads(

@@ -11,6 +11,11 @@ Verified from `C:\dev\hivemind\Cargo.toml`, `C:\dev\hivemind\README.md`, and pac
 Helpful Windows extras:
 - WebView2 for the desktop app
 - Visual Studio C++ build tools for native Rust dependencies
+#### GPU acceleration (optional)
+To build with GPU support (`--gpu` flag or `cuda`/`metal` features):
+- **Windows / Linux (CUDA):** Install the [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) (12.x recommended). Ensure `nvcc` is on your PATH after installation.
+- **macOS (Metal):** No extra install needed — Metal support ships with Xcode Command Line Tools.
+Without the CUDA toolkit installed, `cargo xtask run-daemon --gpu` and `cargo build --features cuda` will fail at compile time.
 ### Clone, build, and test
 ```powershell
 git clone https://github.com/hivemind-os/hivemind.git C:\dev\hivemind

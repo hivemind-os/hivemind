@@ -30,6 +30,8 @@ pub struct HubSearchQuery {
 pub struct HardwareSummary {
     pub hardware: HardwareInfo,
     pub usage: RuntimeResourceUsage,
+    /// Whether this daemon binary was compiled with GPU acceleration support.
+    pub gpu_supported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

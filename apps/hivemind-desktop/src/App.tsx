@@ -254,6 +254,7 @@ const App = () => {
   const [hubSearchLoading, setHubSearchLoading] = createSignal(false);
   const [hubSearchError, setHubSearchError] = createSignal<string | null>(null);
   const [hardwareInfo, setHardwareInfo] = createSignal<HardwareInfo | null>(null);
+  const [gpuSupported, setGpuSupported] = createSignal(false);
   const [resourceUsage, setResourceUsage] = createSignal<RuntimeResourceUsage | null>(null);
   const [storageBytes, setStorageBytes] = createSignal<number>(0);
   const [localModelView, setLocalModelView] = createSignal<'library' | 'search' | 'hardware'>('library');
@@ -2248,6 +2249,7 @@ const App = () => {
     ]);
     if (hw.status === 'fulfilled') {
       setHardwareInfo(hw.value.hardware);
+      setGpuSupported(hw.value.gpu_supported ?? false);
       // HardwareSummary also contains usage data
       const u = hw.value.usage;
       setResourceUsage({
@@ -3289,6 +3291,7 @@ const App = () => {
               updateModelParamsDebounced={updateModelParamsDebounced}
               removeModel={removeModel}
               hardwareInfo={hardwareInfo}
+              gpuSupported={gpuSupported}
               resourceUsage={resourceUsage}
               hubSearchResults={hubSearchResults}
               hubSearchQuery={hubSearchQuery}

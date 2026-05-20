@@ -101,7 +101,7 @@ echo "==> Building HiveMind OS $VERSION for $TARGET (signing: ${SIGN_IDENTITY})"
 
 # 1. Build daemon and CLI first so they can be bundled into the .app.
 echo "==> Building hive-daemon and hive-cli..."
-cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager
+cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager,metal
 
 # 1b. Sign all CLI binaries.
 #
@@ -148,7 +148,7 @@ done
 echo "==> Building Tauri desktop app..."
 cd "$DESKTOP_DIR"
 npm ci --prefer-offline
-TAURI_BUILD_ARGS=(--target "$TARGET" --config src-tauri/tauri.macos-resources.conf.json --features service-manager)
+TAURI_BUILD_ARGS=(--target "$TARGET" --config src-tauri/tauri.macos-resources.conf.json --features service-manager,metal)
 if [ "$SIGN_IDENTITY" != "-" ]; then
     APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" npx tauri build "${TAURI_BUILD_ARGS[@]}"
 else

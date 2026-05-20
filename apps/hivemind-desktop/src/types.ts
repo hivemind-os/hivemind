@@ -398,6 +398,7 @@ export type InferenceParams = {
   temperature: number | null;
   top_p: number | null;
   repeat_penalty: number | null;
+  gpu_layers: number | null;
 };
 
 export type InstalledModel = {
@@ -633,6 +634,7 @@ export type HardwareSummary = {
     vram_used_bytes: number;
     cpu_utilization: number;
   };
+  gpu_supported: boolean;
 };
 
 export type PerModelUsage = {
@@ -700,6 +702,21 @@ export type ModelLimitOverride = {
   max_output_tokens?: number | null;
 };
 
+export type GpuAccelerationConfig = {
+  enabled: boolean;
+  gpu_layers: number | null;
+  main_gpu: number | null;
+};
+
+export type GpuRecommendation = {
+  model_id: string;
+  recommended_layers: number;
+  estimated_layer_count: number;
+  model_size_bytes: number;
+  vram_bytes: number;
+  gpu_supported: boolean;
+};
+
 export type ModelProviderConfig = {
   id: string;
   name: string;
@@ -752,7 +769,7 @@ export type HiveMindConfigData = {
     request_timeout_secs?: number | null;
     stream_timeout_secs?: number | null;
   };
-  local_models: { enabled: boolean; storage_path: string | null; max_loaded_models: number; max_download_concurrent: number; auto_evict: boolean };
+  local_models: { enabled: boolean; storage_path: string | null; max_loaded_models: number; max_download_concurrent: number; auto_evict: boolean; gpu: GpuAccelerationConfig };
   setup_completed: boolean;
   compaction: ContextCompactionConfigData;
   python?: { enabled: boolean; python_version: string; base_packages: string[]; auto_detect_workspace_deps: boolean; uv_version: string };
