@@ -121,19 +121,19 @@ jobs:
       - name: Cargo check
         run: cargo check --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
         env:
-          CMAKE_CUDA_ARCHITECTURES: '75;80;86;89;90'
+          CMAKE_CUDA_ARCHITECTURES: '89'
 
       - name: Clippy
         run: cargo clippy --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
         env:
-          CMAKE_CUDA_ARCHITECTURES: '75;80;86;89;90'
+          CMAKE_CUDA_ARCHITECTURES: '89'
 
       - name: Tests
         run: cargo test --workspace --target ${{ matrix.target }} --features ${{ matrix.gpu_feature }}
         timeout-minutes: 90
         env:
           HIVEMIND_TEST_PLUGIN_PATH: packages/test-plugin
-          CMAKE_CUDA_ARCHITECTURES: '75;80;86;89;90'
+          CMAKE_CUDA_ARCHITECTURES: '89'
 
       - name: Build frontend
         run: npm run build
