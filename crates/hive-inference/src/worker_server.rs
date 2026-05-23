@@ -206,6 +206,8 @@ mod tests {
             method: IpcMethod::ModelLoad {
                 model_id: "test".to_string(),
                 model_path: "/nonexistent/model.bin".into(),
+                gpu_layers: 0,
+                main_gpu: 0,
             },
         };
         let resp = dispatch(&rt, &req);
