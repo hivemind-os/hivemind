@@ -332,6 +332,18 @@ fn build_daemon_inner(args: &[String]) -> PathBuf {
                 eprintln!("After installing, ensure `nvcc` is on your PATH and restart your shell.");
                 std::process::exit(1);
             }
+
+            // Set CMAKE_CUDA_ARCHITECTURES to generate native SASS code for
+            // common GPU architectures. Without this, newer CUDA toolkits may
+            // emit PTX that fails JIT compilation on older GPUs.
+            // Cover: Turing (75), Ampere (80,86), Ada Lovelace (89), Hopper (90)
+            if std::env::var("CMAKE_CUDA_ARCHITECTURES").is_err() {
+                cmd.env("CMAKE_CUDA_ARCHITECTURES", "75;80;86;89;90");
+                println!("  CUDA architectures: 75;80;86;89;90 (auto)");
+            } else {
+                let archs = std::env::var("CMAKE_CUDA_ARCHITECTURES").unwrap();
+                println!("  CUDA architectures: {archs} (from env)");
+            }
         }
 
         cmd.args(["--features", gpu_feature]);

@@ -15,7 +15,11 @@ Helpful Windows extras:
 To build with GPU support (`--gpu` flag or `cuda`/`metal` features):
 - **Windows / Linux (CUDA):** Install the [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) (12.x recommended). Ensure `nvcc` is on your PATH after installation.
 - **macOS (Metal):** No extra install needed — Metal support ships with Xcode Command Line Tools.
+
 Without the CUDA toolkit installed, `cargo xtask run-daemon --gpu` and `cargo build --features cuda` will fail at compile time.
+
+> **Note:** `cargo xtask` automatically sets `CMAKE_CUDA_ARCHITECTURES=75;80;86;89;90` to generate native GPU code for Turing through Hopper architectures. If you need a different set (e.g. only your local GPU), override via `$env:CMAKE_CUDA_ARCHITECTURES = "75"` before building.
+
 ### Clone, build, and test
 ```powershell
 git clone https://github.com/hivemind-os/hivemind.git C:\dev\hivemind
