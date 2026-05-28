@@ -112,6 +112,9 @@ split-debuginfo = "unpacked"   # macOS: much faster incremental linking
 [profile.dev.package."*"]
 opt-level = 2                  # optimise third-party crates; keeps workspace at opt-level 0
 
+[profile.release]
+strip = "symbols"              # strip debug info + symbols; shrinks binaries for installers
+
 [patch.crates-io]
 rmcp = { path = "vendor/rmcp" }
 rmcp-macros = { path = "vendor/rmcp-macros" }
