@@ -209,6 +209,13 @@ jobs:
             exit 1
           }
 
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.6.0'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
       - name: Clean stale NSIS artifacts from cache
         shell: pwsh
         run: |
@@ -226,6 +233,9 @@ jobs:
           # llama.cpp uses throw, so we must re-enable them.
           # cc crate reads CXXFLAGS (not CMAKE_CXX_FLAGS) for extra C++ compiler flags.
           CXXFLAGS: /EHsc
+          # Generate native SASS for common GPU architectures to avoid PTX JIT
+          # incompatibilities between CUDA toolkit version and user GPU drivers.
+          CMAKE_CUDA_ARCHITECTURES: '75;80;86;89;90'
           BUILTIN_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           BUILTIN_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: cargo xtask build-installer --target ${{ matrix.xtask_target }}

@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+cuda = ["hive-inference/cuda"]
+metal = ["hive-inference/metal"]
+
 [dependencies]
 anyhow.workspace = true
 arc-swap.workspace = true

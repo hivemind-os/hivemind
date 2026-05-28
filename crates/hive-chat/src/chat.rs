@@ -8759,7 +8759,8 @@ pub fn build_model_router_from_config(
                         ..descriptor
                     };
                     let local_provider =
-                        LocalModelProvider::new(desc, (*registry).clone(), Arc::clone(runtime_mgr));
+                        LocalModelProvider::new(desc, (*registry).clone(), Arc::clone(runtime_mgr))
+                            .with_gpu_config(config.local_models.gpu.clone());
                     router.register_provider(local_provider);
                 } else {
                     tracing::warn!(

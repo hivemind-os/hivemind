@@ -11,6 +11,8 @@ default = []
 candle = ["hive-chat/candle"]
 llama-cpp = ["hive-chat/llama-cpp"]
 onnx = ["hive-chat/onnx"]
+cuda = ["hive-chat/cuda", "hive-local-models/cuda"]
+metal = ["hive-chat/metal", "hive-local-models/metal"]
 
 [dependencies]
 anyhow.workspace = true

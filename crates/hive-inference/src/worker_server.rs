@@ -97,8 +97,10 @@ fn dispatch_inner(runtime: &Arc<dyn InferenceRuntime>, id: u64, method: &IpcMeth
         IpcMethod::RuntimeFormats => {
             IpcResponse::result(id, IpcResult::Formats(runtime.supported_formats()))
         }
-        IpcMethod::ModelLoad { model_id, model_path } => {
-            match runtime.load_model(model_id, model_path) {
+        IpcMethod::ModelLoad { model_id, model_path, gpu_layers, main_gpu } => {
+            let options =
+                crate::runtime::ModelLoadOptions { gpu_layers: *gpu_layers, main_gpu: *main_gpu };
+            match runtime.load_model_with_options(model_id, model_path, &options) {
                 Ok(()) => IpcResponse::ok(id),
                 Err(e) => inference_error_to_response(id, &e),
             }
@@ -204,6 +206,8 @@ mod tests {
             method: IpcMethod::ModelLoad {
                 model_id: "test".to_string(),
                 model_path: "/nonexistent/model.bin".into(),
+                gpu_layers: 0,
+                main_gpu: 0,
             },
         };
         let resp = dispatch(&rt, &req);

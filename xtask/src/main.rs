@@ -28,9 +28,9 @@ fn main() {
             eprintln!("  fetch-models                  Download embedding model files to vendor/");
             eprintln!("  build-installer [--target T]   Build installer for the current (or specified) platform");
             eprintln!(
-                "  build-daemon [--release]       Build hive-daemon (with macOS codesign for TCC)"
+                "  build-daemon [--release] [--gpu]  Build hive-daemon (with macOS codesign for TCC)"
             );
-            eprintln!("  run-daemon [--release]         Build, codesign, and run hive-daemon");
+            eprintln!("  run-daemon [--release] [--gpu]    Build, codesign, and run hive-daemon");
             eprintln!("  build-mock-mcp                Build the mock MCP server (npm install + compile)");
             eprintln!("  check-version                  Assert Cargo.toml and tauri.conf.json versions match");
             eprintln!(
@@ -216,7 +216,7 @@ fn run_windows_build(root: &Path, target: &str) {
         "-p",
         "hive-runtime-worker",
         "--features",
-        "service-manager",
+        "service-manager,cuda",
     ]);
 
     // llama.cpp ggml requires Clang for ARM targets (MSVC is not supported).
@@ -297,6 +297,7 @@ fn build_daemon(args: &[String]) {
 fn build_daemon_inner(args: &[String]) -> PathBuf {
     let root = project_root();
     let release = args.iter().any(|a| a == "--release");
+    let gpu = args.iter().any(|a| a == "--gpu");
     let profile_dir = if release { "release" } else { "debug" };
 
     println!("==> Building hive-daemon ({})...", profile_dir);
@@ -305,8 +306,52 @@ fn build_daemon_inner(args: &[String]) -> PathBuf {
     if release {
         cmd.arg("--release");
     }
+
+    // --gpu enables platform-appropriate GPU acceleration:
+    //   macOS  → Metal (ships with Xcode, no extra install)
+    //   Others → CUDA  (requires CUDA toolkit)
+    if gpu {
+        let gpu_feature = if cfg!(target_os = "macos") { "metal" } else { "cuda" };
+
+        // Pre-flight: verify required toolchain is available
+        if gpu_feature == "cuda" {
+            let nvcc_ok = std::process::Command::new("nvcc")
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !nvcc_ok {
+                eprintln!("ERROR: --gpu requires the CUDA toolkit but `nvcc` was not found.");
+                eprintln!();
+                eprintln!("Install the CUDA toolkit:");
+                eprintln!("  Windows: https://developer.nvidia.com/cuda-downloads");
+                eprintln!("  Linux:   sudo apt install nvidia-cuda-toolkit");
+                eprintln!();
+                eprintln!("After installing, ensure `nvcc` is on your PATH and restart your shell.");
+                std::process::exit(1);
+            }
+
+            // Set CMAKE_CUDA_ARCHITECTURES to generate native SASS code for
+            // common GPU architectures. Without this, newer CUDA toolkits may
+            // emit PTX that fails JIT compilation on older GPUs.
+            // Cover: Turing (75), Ampere (80,86), Ada Lovelace (89), Hopper (90)
+            if std::env::var("CMAKE_CUDA_ARCHITECTURES").is_err() {
+                cmd.env("CMAKE_CUDA_ARCHITECTURES", "75;80;86;89;90");
+                println!("  CUDA architectures: 75;80;86;89;90 (auto)");
+            } else {
+                let archs = std::env::var("CMAKE_CUDA_ARCHITECTURES").unwrap();
+                println!("  CUDA architectures: {archs} (from env)");
+            }
+        }
+
+        cmd.args(["--features", gpu_feature]);
+        println!("  GPU acceleration: {gpu_feature}");
+    }
+
     // Forward remaining args (e.g. --features)
-    for arg in args.iter().filter(|a| a.as_str() != "--release") {
+    for arg in args.iter().filter(|a| a.as_str() != "--release" && a.as_str() != "--gpu") {
         cmd.arg(arg);
     }
     let status = cmd.current_dir(&root).status().expect("failed to run cargo build");
@@ -349,8 +394,28 @@ fn build_daemon_inner(args: &[String]) -> PathBuf {
 fn run_daemon(args: &[String]) {
     let binary = build_daemon_inner(args);
 
+    let gpu = args.iter().any(|a| a == "--gpu");
+
     println!("==> Running hive-daemon...");
-    let status = std::process::Command::new(&binary).status().unwrap_or_else(|e| {
+    let mut cmd = std::process::Command::new(&binary);
+
+    // On Windows with GPU, ensure CUDA runtime DLLs are on PATH.
+    // CUDA 12+ installs DLLs under bin\x64 which isn't always on the
+    // system PATH by default.
+    #[cfg(target_os = "windows")]
+    if gpu {
+        if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
+            let x64_bin = Path::new(&cuda_path).join("bin").join("x64");
+            if x64_bin.exists() {
+                let current_path = std::env::var("PATH").unwrap_or_default();
+                let new_path = format!("{};{}", x64_bin.display(), current_path);
+                cmd.env("PATH", &new_path);
+                println!("  Added {} to PATH", x64_bin.display());
+            }
+        }
+    }
+
+    let status = cmd.status().unwrap_or_else(|e| {
         eprintln!("failed to run {}: {e}", binary.display());
         std::process::exit(1);
     });

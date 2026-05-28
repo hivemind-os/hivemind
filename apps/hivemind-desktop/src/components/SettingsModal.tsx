@@ -139,6 +139,7 @@ export interface SettingsModalProps {
   updateModelParamsDebounced: (modelId: string, params: InferenceParams) => void;
   removeModel: (modelId: string) => Promise<void>;
   hardwareInfo: Accessor<HardwareInfo | null>;
+  gpuSupported: Accessor<boolean>;
   resourceUsage: Accessor<RuntimeResourceUsage | null>;
 
   // Hub search / install state
@@ -361,6 +362,7 @@ const SettingsModal = (props: SettingsModalProps) => {
   const updateModelParamsDebounced = props.updateModelParamsDebounced;
   const removeModel = props.removeModel;
   const hardwareInfo = props.hardwareInfo;
+  const gpuSupported = props.gpuSupported;
   const resourceUsage = props.resourceUsage;
   const hubSearchResults = props.hubSearchResults;
   const hubSearchQuery = props.hubSearchQuery;
@@ -1060,6 +1062,63 @@ const SettingsModal = (props: SettingsModalProps) => {
                               <SwitchLabel>Auto-evict LRU models when limit reached</SwitchLabel>
 
                             </Switch>
+
+                            {/* GPU Acceleration */}
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid hsl(var(--border));">
+                              <h4 style="margin: 0 0 8px 0; font-size: 13px;">GPU Acceleration</h4>
+                              <Show when={gpuSupported()} fallback={
+                                <p class="muted" style="font-size: 0.85em;">
+                                  GPU acceleration is not available. This build was compiled without GPU support (CUDA/Metal).
+                                </p>
+                              }>
+                                <Switch checked={editConfig()!.local_models.gpu?.enabled ?? true} onChange={(checked) => updateLocalModels('gpu', { ...editConfig()!.local_models.gpu, enabled: checked })} class="flex items-center gap-2">
+                                  <SwitchControl><SwitchThumb /></SwitchControl>
+                                  <SwitchLabel>Enable GPU offloading</SwitchLabel>
+                                </Switch>
+
+                                <Show when={editConfig()!.local_models.gpu?.enabled !== false}>
+                                  <Show when={hardwareInfo()?.gpus?.length}>
+                                    <p class="muted" style="font-size: 0.8em; margin: 6px 0;">
+                                      Detected: {hardwareInfo()!.gpus[0].name}
+                                      {hardwareInfo()!.gpus[0].vram_bytes ? ` (${formatBytes(hardwareInfo()!.gpus[0].vram_bytes!)})` : ''}
+                                    </p>
+                                  </Show>
+
+                                  <label style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                                    <span>Default GPU Layers</span>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                      <select
+                                        value={editConfig()!.local_models.gpu?.gpu_layers == null ? 'auto' : 'manual'}
+                                        onChange={(e) => {
+                                          if (e.currentTarget.value === 'auto') {
+                                            updateLocalModels('gpu', { ...editConfig()!.local_models.gpu, gpu_layers: null });
+                                          } else {
+                                            updateLocalModels('gpu', { ...editConfig()!.local_models.gpu, gpu_layers: 32 });
+                                          }
+                                        }}
+                                        style="width: auto;"
+                                      >
+                                        <option value="auto">Auto (recommended)</option>
+                                        <option value="manual">Manual</option>
+                                      </select>
+                                      <Show when={editConfig()!.local_models.gpu?.gpu_layers != null}>
+                                        <input
+                                          type="number"
+                                          min="0" max="200" step="1"
+                                          value={editConfig()!.local_models.gpu?.gpu_layers ?? 0}
+                                          onChange={(e) => updateLocalModels('gpu', { ...editConfig()!.local_models.gpu, gpu_layers: parseInt(e.currentTarget.value) || 0 })}
+                                          style="width: 70px;"
+                                        />
+                                        <span style="font-size: 12px; color: hsl(var(--muted-foreground));">layers</span>
+                                      </Show>
+                                    </div>
+                                  </label>
+                                  <p class="muted" style="font-size: 0.75em; margin-top: 4px;">
+                                    Auto mode calculates optimal layers based on available VRAM. Manual sets a fixed default for all models.
+                                  </p>
+                                </Show>
+                              </Show>
+                            </div>
                           </div>
                         </>
                     </Show>
@@ -1230,6 +1289,50 @@ const SettingsModal = (props: SettingsModalProps) => {
                                       </span>
                                     </div>
                                   </label>
+
+                                  {/* Per-model GPU layers override */}
+                                  <Show when={gpuSupported() && (editConfig()!.local_models.gpu?.enabled !== false)}>
+                                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid hsl(var(--border));">
+                                      <label style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span>GPU Layers</span>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                          <select
+                                            value={model.inference_params?.gpu_layers == null ? 'default' : 'override'}
+                                            onChange={(e) => {
+                                              if (e.currentTarget.value === 'default') {
+                                                updateModelParamsDebounced(model.id, { ...model.inference_params, gpu_layers: null } as InferenceParams);
+                                              } else {
+                                                updateModelParamsDebounced(model.id, { ...model.inference_params, gpu_layers: 32 } as InferenceParams);
+                                              }
+                                            }}
+                                            style="width: auto;"
+                                          >
+                                            <option value="default">Use global default</option>
+                                            <option value="override">Override</option>
+                                          </select>
+                                          <Show when={model.inference_params?.gpu_layers != null}>
+                                            <input
+                                              type="range"
+                                              min="0" max="128" step="1"
+                                              value={model.inference_params?.gpu_layers ?? 0}
+                                              onInput={(e) => {
+                                                const val = parseInt(e.currentTarget.value);
+                                                updateModelParamsDebounced(model.id, { ...model.inference_params, gpu_layers: val } as InferenceParams);
+                                              }}
+                                            />
+                                            <span style="min-width: 50px; text-align: right; font-size: 12px;">
+                                              {model.inference_params?.gpu_layers ?? 0}
+                                            </span>
+                                          </Show>
+                                        </div>
+                                      </label>
+                                      <p class="muted" style="font-size: 0.75em; margin-top: 2px;">
+                                        {model.inference_params?.gpu_layers != null
+                                          ? `${model.inference_params.gpu_layers} layers offloaded to GPU (~${formatBytes(Math.round((model.size_bytes / 64) * (model.inference_params.gpu_layers)))} VRAM est.)`
+                                          : 'Using global default (auto-detect or manual setting above)'}
+                                      </p>
+                                    </div>
+                                  </Show>
                                 </div>
                               </CollapsibleContent>
                               </Show>
@@ -1422,9 +1525,30 @@ const SettingsModal = (props: SettingsModalProps) => {
                             <article class="memory-card">
                               <header><strong>{gpu.name}</strong></header>
                               <p class="muted">VRAM: {gpu.vram_bytes ? formatBytes(gpu.vram_bytes) : 'N/A'} · Driver: {gpu.driver_version ?? 'N/A'}</p>
+                              <Show when={gpu.vram_bytes}>
+                                <div style="margin-top: 6px; background: hsl(var(--muted)); border-radius: 4px; height: 8px; overflow: hidden;">
+                                  <div style={`height: 100%; background: hsl(var(--primary)); width: ${Math.min(100, Math.round((resourceUsage()?.total_memory_used_bytes ?? 0) / (gpu.vram_bytes!) * 100))}%; transition: width 0.3s;`} />
+                                </div>
+                                <p class="muted" style="font-size: 0.75em; margin-top: 2px;">
+                                  VRAM: ~{formatBytes(resourceUsage()?.total_memory_used_bytes ?? 0)} used / {formatBytes(gpu.vram_bytes!)} total
+                                </p>
+                              </Show>
                             </article>
                           )}
                         </For>
+                      </Show>
+
+                      {/* GPU Acceleration Status */}
+                      <h4 style="margin-top: 1rem;">GPU Acceleration</h4>
+                      <dl class="details">
+                        <div><dt>Compiled support</dt><dd>{gpuSupported() ? <span class="text-emerald-400">Yes (CUDA/Metal)</span> : <span class="text-yellow-400">No — CPU-only build</span>}</dd></div>
+                        <div><dt>Enabled</dt><dd>{gpuSupported() && (editConfig()?.local_models.gpu?.enabled !== false) ? <span class="text-emerald-400">Active</span> : <span class="muted">Disabled</span>}</dd></div>
+                        <div><dt>Layer mode</dt><dd>{editConfig()?.local_models.gpu?.gpu_layers == null ? 'Auto-detect' : `Fixed: ${editConfig()?.local_models.gpu?.gpu_layers} layers`}</dd></div>
+                      </dl>
+                      <Show when={!gpuSupported()}>
+                        <p class="muted" style="font-size: 0.8em; margin-top: 4px;">
+                          To enable GPU acceleration, install a build compiled with CUDA (Windows/Linux) or Metal (macOS) support.
+                        </p>
                       </Show>
 
                       <Show when={resourceUsage()}>

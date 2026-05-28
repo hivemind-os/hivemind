@@ -52,6 +52,10 @@ pub struct InferenceParams {
     /// Repetition penalty multiplier (1.0 = no penalty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat_penalty: Option<f32>,
+    /// Number of model layers to offload to GPU. Overrides the global default.
+    /// `None` = use global setting, `Some(0)` = force CPU-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_layers: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

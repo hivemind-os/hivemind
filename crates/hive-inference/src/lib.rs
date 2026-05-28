@@ -31,6 +31,8 @@ pub mod runtime_manager;
 pub mod worker_proxy;
 pub mod worker_server;
 
+pub mod gpu;
+
 #[cfg(feature = "candle")]
 pub mod runtime_candle;
 #[cfg(feature = "llama-cpp")]
@@ -54,8 +56,10 @@ pub use registry::{
     InferenceParams, InstalledModel, LocalModelRegistry, ModelCapabilities, ModelRegistryStore,
     ModelStatus, RegistryError, SqliteModelRegistry,
 };
+pub use gpu::{estimate_layer_count, recommend_gpu_layers};
 pub use runtime::{
-    ChatMessage, InferenceError, InferenceOutput, InferenceRequest, InferenceRuntime, RuntimeInfo,
+    ChatMessage, InferenceError, InferenceOutput, InferenceRequest, InferenceRuntime,
+    ModelLoadOptions, RuntimeInfo,
 };
 pub use runtime_manager::RuntimeManager;
 pub use worker_proxy::{RuntimeWorkerProxy, WorkerConfig, WorkerState};

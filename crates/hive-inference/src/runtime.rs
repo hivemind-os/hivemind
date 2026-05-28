@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(all(feature = "candle", feature = "onnx", feature = "llama-cpp")))]
 use std::collections::HashMap;
 use std::path::Path;
-#[cfg(not(any(feature = "candle", feature = "onnx", feature = "llama-cpp")))]
+#[cfg(not(all(feature = "candle", feature = "onnx", feature = "llama-cpp")))]
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -104,6 +104,15 @@ pub enum InferenceError {
     Timeout { seconds: u64 },
 }
 
+/// Options for loading a model, including GPU acceleration settings.
+#[derive(Debug, Clone, Default)]
+pub struct ModelLoadOptions {
+    /// Number of layers to offload to GPU. 0 = CPU only, u32::MAX = all layers.
+    pub gpu_layers: u32,
+    /// Which GPU device to target (0-indexed).
+    pub main_gpu: u32,
+}
+
 /// Trait that each inference runtime (Candle, ONNX, llama.cpp) must implement.
 pub trait InferenceRuntime: Send + Sync {
     /// Which runtime kind this is.
@@ -117,6 +126,17 @@ pub trait InferenceRuntime: Send + Sync {
 
     /// Load a model from a local path into memory.
     fn load_model(&self, model_id: &str, model_path: &Path) -> Result<(), InferenceError>;
+
+    /// Load a model with GPU acceleration options. Default implementation
+    /// ignores the options and calls [`load_model`](Self::load_model).
+    fn load_model_with_options(
+        &self,
+        model_id: &str,
+        model_path: &Path,
+        _options: &ModelLoadOptions,
+    ) -> Result<(), InferenceError> {
+        self.load_model(model_id, model_path)
+    }
 
     /// Unload a previously loaded model.
     fn unload_model(&self, model_id: &str) -> Result<(), InferenceError>;

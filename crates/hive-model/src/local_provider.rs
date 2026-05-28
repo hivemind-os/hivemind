@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use hive_inference::{
-    ChatMessage, InferenceRequest, LocalModelRegistry, ModelRegistryStore, ModelStatus,
-    RuntimeManager,
+    ChatMessage, InferenceRequest, LocalModelRegistry, ModelLoadOptions, ModelRegistryStore,
+    ModelStatus, RuntimeManager,
 };
 
+use hive_contracts::config::GpuAccelerationConfig;
 use hive_contracts::ToolDefinition;
 
 use crate::{
@@ -22,6 +23,7 @@ pub struct LocalModelProvider {
     descriptor: ProviderDescriptor,
     registry: LocalModelRegistry,
     runtime_manager: Arc<RuntimeManager>,
+    gpu_config: GpuAccelerationConfig,
 }
 
 impl LocalModelProvider {
@@ -30,7 +32,12 @@ impl LocalModelProvider {
         registry: LocalModelRegistry,
         runtime_manager: Arc<RuntimeManager>,
     ) -> Self {
-        Self { descriptor, registry, runtime_manager }
+        Self { descriptor, registry, runtime_manager, gpu_config: GpuAccelerationConfig::default() }
+    }
+
+    pub fn with_gpu_config(mut self, config: GpuAccelerationConfig) -> Self {
+        self.gpu_config = config;
+        self
     }
 }
 
@@ -140,6 +147,7 @@ fn do_complete(
     registry: &LocalModelRegistry,
     runtime_manager: &RuntimeManager,
     request: &CompletionRequest,
+    gpu_config: &GpuAccelerationConfig,
 ) -> Result<CompletionResponse> {
     // 1. Look up the model in the registry
     let model =
@@ -154,8 +162,12 @@ fn do_complete(
 
     // 3. Load the model into the runtime if it isn't already
     if !runtime_manager.is_loaded(model_id) {
+        // Resolve effective GPU layers: per-model override > global config > auto-detect
+        let gpu_layers = resolve_gpu_layers(gpu_config, &model);
+        let options = ModelLoadOptions { gpu_layers, main_gpu: gpu_config.main_gpu.unwrap_or(0) };
+
         runtime_manager
-            .load_model(model_id, &model.local_path, runtime_kind)
+            .load_model_with_options(model_id, &model.local_path, runtime_kind, &options)
             .map_err(|e| anyhow!("failed to load model '{model_id}': {e}"))?;
     }
 
@@ -196,6 +208,38 @@ fn do_complete(
     })
 }
 
+/// Resolve the effective GPU layer count for a model.
+/// Priority: per-model override > global config > auto-detect from VRAM.
+fn resolve_gpu_layers(
+    gpu_config: &GpuAccelerationConfig,
+    model: &hive_inference::InstalledModel,
+) -> u32 {
+    if !gpu_config.enabled {
+        return 0;
+    }
+
+    // Per-model override takes precedence
+    if let Some(layers) = model.inference_params.gpu_layers {
+        return layers;
+    }
+
+    // Global explicit layer count
+    if let Some(layers) = gpu_config.gpu_layers {
+        return layers;
+    }
+
+    // Auto-detect: use VRAM heuristic
+    let hardware = hive_inference::detect_hardware();
+    let vram = hardware.gpus.first().and_then(|g| g.vram_bytes).unwrap_or(0);
+    if vram == 0 {
+        return 0;
+    }
+
+    let model_size = std::fs::metadata(&model.local_path).map(|m| m.len()).unwrap_or(0);
+    let n_layers = hive_inference::estimate_layer_count(model_size);
+    hive_inference::recommend_gpu_layers(model_size, n_layers, vram)
+}
+
 impl ModelProvider for LocalModelProvider {
     fn descriptor(&self) -> &ProviderDescriptor {
         &self.descriptor
@@ -212,12 +256,13 @@ impl ModelProvider for LocalModelProvider {
         let registry = self.registry.clone();
         let runtime_manager = Arc::clone(&self.runtime_manager);
         let request = request.clone();
+        let gpu_config = self.gpu_config.clone();
 
         let stream = async_stream::try_stream! {
             // Run the heavy blocking work (model load + inference) off the
             // tokio async runtime so we don't block the executor.
             let response = tokio::task::spawn_blocking(move || {
-                do_complete(&descriptor, &model_id, &registry, &runtime_manager, &request)
+                do_complete(&descriptor, &model_id, &registry, &runtime_manager, &request, &gpu_config)
             })
             .await
             .map_err(|e| anyhow!("local model task panicked: {e}"))??;
@@ -245,6 +290,7 @@ impl ModelProvider for LocalModelProvider {
             &self.registry,
             &self.runtime_manager,
             request,
+            &self.gpu_config,
         )
     }
 }

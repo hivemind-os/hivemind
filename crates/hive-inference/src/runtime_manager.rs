@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 
 use crate::runtime::{
     CandleRuntime, InferenceError, InferenceOutput, InferenceRequest, InferenceRuntime,
-    LlamaCppRuntime, OnnxRuntime,
+    LlamaCppRuntime, ModelLoadOptions, OnnxRuntime,
 };
 use crate::worker_proxy::{RuntimeWorkerProxy, WorkerConfig};
 use hive_core::InferenceRuntimeKind;
@@ -115,6 +115,62 @@ impl RuntimeManager {
         }
 
         if let Err(e) = runtime.load_model(model_id, path) {
+            self.loaded_models.lock().remove(model_id);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Loads a model with GPU acceleration options. Same eviction logic as
+    /// [`load_model`](Self::load_model) but passes `options` to the runtime.
+    pub fn load_model_with_options(
+        &self,
+        model_id: &str,
+        path: &Path,
+        kind: InferenceRuntimeKind,
+        options: &ModelLoadOptions,
+    ) -> Result<(), InferenceError> {
+        let runtime =
+            self.runtimes.get(&kind).ok_or_else(|| InferenceError::RuntimeUnavailable {
+                runtime: kind,
+                reason: "runtime not registered".into(),
+            })?;
+
+        if !runtime.is_available() {
+            return Err(InferenceError::RuntimeUnavailable {
+                runtime: kind,
+                reason: "runtime reports unavailable".into(),
+            });
+        }
+
+        // Evict if at capacity
+        {
+            let mut models = self.loaded_models.lock();
+            while models.len() >= self.max_loaded {
+                if let Some(evict_id) = models.keys().next().cloned() {
+                    let evict_kind = models[&evict_id];
+                    if let Some(rt) = self.runtimes.get(&evict_kind) {
+                        if let Err(e) = rt.unload_model(&evict_id) {
+                            tracing::warn!(
+                                model = %evict_id,
+                                error = %e,
+                                "failed to unload model during eviction"
+                            );
+                            return Err(InferenceError::Other(format!(
+                                "failed to unload model `{evict_id}` during eviction: {e}"
+                            )));
+                        }
+                    }
+                    models.remove(&evict_id);
+                    tracing::info!(evicted = %evict_id, "evicted model to stay within budget");
+                } else {
+                    break;
+                }
+            }
+            models.insert(model_id.to_string(), kind);
+        }
+
+        if let Err(e) = runtime.load_model_with_options(model_id, path, options) {
             self.loaded_models.lock().remove(model_id);
             return Err(e);
         }

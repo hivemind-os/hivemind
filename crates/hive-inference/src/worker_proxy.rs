@@ -8,7 +8,8 @@ use parking_lot::Mutex;
 
 use crate::ipc::{IpcMethod, IpcPayload, IpcRequest, IpcResponse, IpcResult};
 use crate::runtime::{
-    InferenceError, InferenceOutput, InferenceRequest, InferenceRuntime, RuntimeInfo,
+    InferenceError, InferenceOutput, InferenceRequest, InferenceRuntime, ModelLoadOptions,
+    RuntimeInfo,
 };
 use hive_core::InferenceRuntimeKind;
 
@@ -90,7 +91,8 @@ pub struct RuntimeWorkerProxy {
     cached_kind: Mutex<Option<InferenceRuntimeKind>>,
     /// Models that were loaded into the worker. On crash recovery the new
     /// worker must be told to re-load these so they remain available.
-    loaded_model_paths: Mutex<Vec<(String, PathBuf)>>,
+    /// Stores (model_id, model_path, gpu_options).
+    loaded_model_paths: Mutex<Vec<(String, PathBuf, ModelLoadOptions)>>,
 }
 
 impl RuntimeWorkerProxy {
@@ -137,6 +139,22 @@ impl RuntimeWorkerProxy {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit()); // worker logs go to daemon's stderr
 
+        // Inject CUDA runtime DLL path on Windows so the worker can find cudart/cublas.
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
+                let bin_x64 = PathBuf::from(&cuda_path).join("bin").join("x64");
+                if bin_x64.exists() {
+                    let current_path = std::env::var("PATH").unwrap_or_default();
+                    if !current_path.contains(bin_x64.to_str().unwrap_or("")) {
+                        let new_path = format!("{};{}", bin_x64.display(), current_path);
+                        cmd.env("PATH", &new_path);
+                        tracing::debug!(path = %bin_x64.display(), "injected CUDA bin\\x64 into worker PATH");
+                    }
+                }
+            }
+        }
+
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -163,14 +181,17 @@ impl RuntimeWorkerProxy {
         *self.crash_count.lock() = 0;
 
         // Re-load any models that were loaded before the worker crashed.
-        let models: Vec<(String, PathBuf)> = self.loaded_model_paths.lock().clone();
-        for (model_id, model_path) in &models {
+        let models: Vec<(String, PathBuf, ModelLoadOptions)> =
+            self.loaded_model_paths.lock().clone();
+        for (model_id, model_path, options) in &models {
             let req_id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let request = IpcRequest {
                 id: req_id,
                 method: IpcMethod::ModelLoad {
                     model_id: model_id.clone(),
                     model_path: model_path.clone(),
+                    gpu_layers: options.gpu_layers,
+                    main_gpu: options.main_gpu,
                 },
             };
             match self.send_and_receive(handle, &request) {
@@ -416,16 +437,27 @@ impl InferenceRuntime for RuntimeWorkerProxy {
     }
 
     fn load_model(&self, model_id: &str, model_path: &Path) -> Result<(), InferenceError> {
+        self.load_model_with_options(model_id, model_path, &ModelLoadOptions::default())
+    }
+
+    fn load_model_with_options(
+        &self,
+        model_id: &str,
+        model_path: &Path,
+        options: &ModelLoadOptions,
+    ) -> Result<(), InferenceError> {
         let method = IpcMethod::ModelLoad {
             model_id: model_id.to_string(),
             model_path: model_path.to_path_buf(),
+            gpu_layers: options.gpu_layers,
+            main_gpu: options.main_gpu,
         };
         self.call(method)?;
         // Track the model so we can re-load it if the worker crashes.
         {
             let mut paths = self.loaded_model_paths.lock();
-            if !paths.iter().any(|(id, _)| id == model_id) {
-                paths.push((model_id.to_string(), model_path.to_path_buf()));
+            if !paths.iter().any(|(id, _, _)| id == model_id) {
+                paths.push((model_id.to_string(), model_path.to_path_buf(), options.clone()));
             }
         }
         Ok(())
@@ -434,7 +466,7 @@ impl InferenceRuntime for RuntimeWorkerProxy {
     fn unload_model(&self, model_id: &str) -> Result<(), InferenceError> {
         let method = IpcMethod::ModelUnload { model_id: model_id.to_string() };
         self.call(method)?;
-        self.loaded_model_paths.lock().retain(|(id, _)| id != model_id);
+        self.loaded_model_paths.lock().retain(|(id, _, _)| id != model_id);
         Ok(())
     }
 

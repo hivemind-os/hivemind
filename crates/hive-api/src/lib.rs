@@ -2393,6 +2393,10 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/local-models/{model_id}/params", put(local_models::api_update_model_params))
         .route(
+            "/api/v1/local-models/{model_id}/gpu-recommendation",
+            get(local_models::api_gpu_recommendation),
+        )
+        .route(
             "/api/v1/scheduler/tasks",
             get(scheduler::list_scheduler_tasks).post(scheduler::create_scheduler_task),
         )

@@ -10,6 +10,8 @@ rust-version.workspace = true
 default = ["inference"]
 inference = ["hive-api/candle", "hive-api/llama-cpp", "hive-api/onnx"]
 service-manager = ["hive-core/service-manager"]
+cuda = ["hive-api/cuda"]
+metal = ["hive-api/metal"]
 
 [dependencies]
 anyhow.workspace = true

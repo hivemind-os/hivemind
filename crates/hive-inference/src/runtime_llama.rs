@@ -143,13 +143,26 @@ impl InferenceRuntime for LlamaCppRuntime {
         RuntimeInfo {
             kind: InferenceRuntimeKind::LlamaCpp,
             version: "b5000".to_string(),
-            supports_gpu: false, // GPU support requires CUDA/Vulkan features
+            supports_gpu: cfg!(any(feature = "cuda", feature = "metal")),
             loaded_model: loaded.keys().next().cloned(),
             memory_used_bytes: memory,
         }
     }
 
     fn load_model(&self, model_id: &str, model_path: &Path) -> Result<(), InferenceError> {
+        self.load_model_with_options(
+            model_id,
+            model_path,
+            &crate::runtime::ModelLoadOptions::default(),
+        )
+    }
+
+    fn load_model_with_options(
+        &self,
+        model_id: &str,
+        model_path: &Path,
+        options: &crate::runtime::ModelLoadOptions,
+    ) -> Result<(), InferenceError> {
         if !model_path.exists() {
             return Err(InferenceError::ModelFileNotFound(model_path.display().to_string()));
         }
@@ -171,11 +184,61 @@ impl InferenceRuntime for LlamaCppRuntime {
             reason: "Backend not initialized".to_string(),
         })?;
 
-        let model_params = LlamaModelParams::default();
+        #[allow(unused_mut)]
+        let mut model_params = LlamaModelParams::default();
+
+        // GPU offloading: only effective when compiled with cuda or metal feature
+        #[cfg(any(feature = "cuda", feature = "metal"))]
+        if options.gpu_layers > 0 {
+            model_params = model_params.with_n_gpu_layers(options.gpu_layers);
+            if options.main_gpu > 0 {
+                model_params = model_params.with_main_gpu(options.main_gpu as i32);
+            }
+            tracing::info!(
+                runtime = "llama.cpp",
+                model_id,
+                gpu_layers = options.gpu_layers,
+                main_gpu = options.main_gpu,
+                "loading model with GPU offloading"
+            );
+        }
+
+        #[cfg(not(any(feature = "cuda", feature = "metal")))]
+        if options.gpu_layers > 0 {
+            tracing::warn!(
+                runtime = "llama.cpp",
+                model_id,
+                "GPU layers requested but binary was compiled without GPU support; using CPU"
+            );
+        }
+
         let model_params = std::pin::pin!(model_params);
 
-        let model = LlamaModel::load_from_file(backend, model_path, &model_params)
-            .map_err(|e| InferenceError::LoadFailed(format!("Failed to load GGUF model: {e}")))?;
+        let model = match LlamaModel::load_from_file(backend, model_path, &model_params) {
+            Ok(m) => m,
+            Err(e) if options.gpu_layers > 0 => {
+                // GPU load failed — fall back to CPU-only
+                tracing::warn!(
+                    runtime = "llama.cpp",
+                    model_id,
+                    gpu_layers = options.gpu_layers,
+                    error = %e,
+                    "GPU model load failed, falling back to CPU-only"
+                );
+                let cpu_params = LlamaModelParams::default();
+                let cpu_params = std::pin::pin!(cpu_params);
+                LlamaModel::load_from_file(backend, model_path, &cpu_params).map_err(|e2| {
+                    InferenceError::LoadFailed(format!(
+                        "Failed to load GGUF model (GPU failed: {e}, CPU also failed: {e2})"
+                    ))
+                })?
+            }
+            Err(e) => {
+                return Err(InferenceError::LoadFailed(format!(
+                    "Failed to load GGUF model: {e}"
+                )));
+            }
+        };
 
         let memory_bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
 
@@ -189,6 +252,7 @@ impl InferenceRuntime for LlamaCppRuntime {
             runtime = "llama.cpp",
             model_id,
             path = %model_path.display(),
+            gpu_layers = options.gpu_layers,
             "model loaded"
         );
         Ok(())

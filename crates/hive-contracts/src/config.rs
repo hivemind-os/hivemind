@@ -601,6 +601,29 @@ pub struct LocalModelsConfig {
     /// When true, each inference runtime runs in an isolated child process.
     /// Protects the daemon from crashes in C++ FFI backends (llama.cpp, ONNX).
     pub isolate_runtimes: bool,
+    /// Global GPU acceleration settings for local model inference.
+    pub gpu: GpuAccelerationConfig,
+}
+
+/// Global GPU acceleration configuration for local model inference.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GpuAccelerationConfig {
+    /// Whether GPU offloading is enabled. Defaults to true (uses GPU when available).
+    pub enabled: bool,
+    /// Number of model layers to offload to GPU.
+    /// `None` = auto-detect based on available VRAM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_layers: Option<u32>,
+    /// Which GPU device to use (0-indexed). Relevant for multi-GPU systems.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_gpu: Option<u32>,
+}
+
+impl Default for GpuAccelerationConfig {
+    fn default() -> Self {
+        Self { enabled: true, gpu_layers: None, main_gpu: None }
+    }
 }
 
 impl Default for LocalModelsConfig {
@@ -612,6 +635,7 @@ impl Default for LocalModelsConfig {
             max_download_concurrent: 2,
             auto_evict: true,
             isolate_runtimes: true,
+            gpu: GpuAccelerationConfig::default(),
         }
     }
 }
