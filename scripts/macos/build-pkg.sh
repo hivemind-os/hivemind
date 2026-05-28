@@ -148,7 +148,7 @@ done
 echo "==> Building Tauri desktop app..."
 cd "$DESKTOP_DIR"
 npm ci --prefer-offline
-TAURI_BUILD_ARGS=(--target "$TARGET" --config src-tauri/tauri.macos-resources.conf.json --features service-manager,metal)
+TAURI_BUILD_ARGS=(--target "$TARGET" --config src-tauri/tauri.macos-resources.conf.json --features service-manager)
 if [ "$SIGN_IDENTITY" != "-" ]; then
     APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" npx tauri build "${TAURI_BUILD_ARGS[@]}"
 else

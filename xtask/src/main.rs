@@ -215,9 +215,15 @@ fn run_windows_build(root: &Path, target: &str) {
         "hive-cli",
         "-p",
         "hive-runtime-worker",
-        "--features",
-        "service-manager,cuda",
     ]);
+
+    // CUDA is only available for x86_64 Windows; ARM64 has no CUDA support.
+    let features = if target.starts_with("aarch64") {
+        "service-manager"
+    } else {
+        "service-manager,cuda"
+    };
+    cmd.args(["--features", features]);
 
     // llama.cpp ggml requires Clang for ARM targets (MSVC is not supported).
     // Switch to the Ninja generator with clang-cl when cross-compiling for ARM64.
@@ -267,6 +273,8 @@ fn run_windows_build(root: &Path, target: &str) {
             "build",
             "--target",
             target,
+            "--bundles",
+            "nsis",
             "--config",
             "src-tauri/tauri.windows-resources.conf.json",
             "--features",
