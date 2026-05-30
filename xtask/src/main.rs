@@ -201,7 +201,8 @@ fn stage_vc_redist(dest: &Path, target: &str) -> bool {
 fn run_windows_build(root: &Path, target: &str) {
     println!("==> Building Windows NSIS installer for {target}...");
 
-    // 1. Build daemon and CLI
+    // 1. Build daemon and CLI (without CUDA — the daemon delegates GPU inference
+    //    to the runtime-worker process and does not need CUDA kernels linked in).
     println!("  Building hive-daemon and hive-cli...");
     let mut cmd = std::process::Command::new("cargo");
     cmd.args([
@@ -213,17 +214,28 @@ fn run_windows_build(root: &Path, target: &str) {
         "hive-daemon",
         "-p",
         "hive-cli",
-        "-p",
-        "hive-runtime-worker",
+        "--features",
+        "service-manager",
     ]);
 
-    // CUDA is only available for x86_64 Windows; ARM64 has no CUDA support.
-    let features = if target.starts_with("aarch64") {
-        "service-manager"
+    let status = cmd.current_dir(root).status().expect("failed to run cargo build");
+    if !status.success() {
+        eprintln!("cargo build (daemon/cli) failed");
+        std::process::exit(1);
+    }
+
+    // 2. Build runtime-worker separately with GPU support.
+    //    CUDA is only available for x86_64 Windows; ARM64 has no CUDA support.
+    println!("  Building hive-runtime-worker...");
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.args(["build", "--release", "--target", target, "-p", "hive-runtime-worker"]);
+
+    let worker_features = if target.starts_with("aarch64") {
+        "default"
     } else {
-        "service-manager,cuda"
+        "default,cuda"
     };
-    cmd.args(["--features", features]);
+    cmd.args(["--features", worker_features]);
 
     // llama.cpp ggml requires Clang for ARM targets (MSVC is not supported).
     // Switch to the Ninja generator with clang-cl when cross-compiling for ARM64.
@@ -237,7 +249,7 @@ fn run_windows_build(root: &Path, target: &str) {
 
     let status = cmd.current_dir(root).status().expect("failed to run cargo build");
     if !status.success() {
-        eprintln!("cargo build failed");
+        eprintln!("cargo build (runtime-worker) failed");
         std::process::exit(1);
     }
 

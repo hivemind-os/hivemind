@@ -146,7 +146,7 @@ pub(crate) async fn api_gpu_recommendation(
     let model_size = std::fs::metadata(&model.local_path).map(|m| m.len()).unwrap_or(0);
     let estimated_layers = hive_inference::estimate_layer_count(model_size);
     let recommended = hive_inference::recommend_gpu_layers(model_size, estimated_layers, vram);
-    let gpu_supported = cfg!(feature = "cuda") || cfg!(feature = "metal");
+    let gpu_supported = !hardware.gpus.is_empty();
 
     Ok(Json(GpuRecommendation {
         model_id,

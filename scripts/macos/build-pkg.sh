@@ -100,8 +100,13 @@ sign_binary() {
 echo "==> Building HiveMind OS $VERSION for $TARGET (signing: ${SIGN_IDENTITY})"
 
 # 1. Build daemon and CLI first so they can be bundled into the .app.
+#    The daemon does not need metal/CUDA linked — it delegates GPU inference
+#    to the runtime-worker process.
 echo "==> Building hive-daemon and hive-cli..."
-cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli -p hive-runtime-worker --features service-manager,metal
+cargo build --release --target "$TARGET" -p hive-daemon -p hive-cli --features service-manager
+
+echo "==> Building hive-runtime-worker (with Metal)..."
+cargo build --release --target "$TARGET" -p hive-runtime-worker --features default,metal
 
 # 1b. Sign all CLI binaries.
 #
