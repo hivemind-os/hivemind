@@ -218,6 +218,12 @@ fn run_windows_build(root: &Path, target: &str) {
         "service-manager",
     ]);
 
+    // llama.cpp ggml requires Clang for ARM targets (MSVC is not supported).
+    // Switch to the Ninja generator with clang-cl when cross-compiling for ARM64.
+    if target.starts_with("aarch64") {
+        set_arm64_clang_env(&mut cmd, target);
+    }
+
     let status = cmd.current_dir(root).status().expect("failed to run cargo build");
     if !status.success() {
         eprintln!("cargo build (daemon/cli) failed");
@@ -237,14 +243,8 @@ fn run_windows_build(root: &Path, target: &str) {
     };
     cmd.args(["--features", worker_features]);
 
-    // llama.cpp ggml requires Clang for ARM targets (MSVC is not supported).
-    // Switch to the Ninja generator with clang-cl when cross-compiling for ARM64.
     if target.starts_with("aarch64") {
-        cmd.env("CMAKE_GENERATOR", "Ninja");
-        let target_env = target.replace('-', "_");
-        cmd.env(format!("CC_{target_env}"), "clang-cl");
-        cmd.env(format!("CXX_{target_env}"), "clang-cl");
-        cmd.env(format!("AR_{target_env}"), "llvm-lib");
+        set_arm64_clang_env(&mut cmd, target);
     }
 
     let status = cmd.current_dir(root).status().expect("failed to run cargo build");
@@ -308,6 +308,16 @@ fn run_windows_build(root: &Path, target: &str) {
     }
 
     println!("==> Windows installer built successfully");
+}
+
+/// Configure environment variables for cross-compiling to Windows ARM64.
+/// llama.cpp's ggml requires Clang (MSVC is not supported for ARM NEON).
+fn set_arm64_clang_env(cmd: &mut std::process::Command, target: &str) {
+    cmd.env("CMAKE_GENERATOR", "Ninja");
+    let target_env = target.replace('-', "_");
+    cmd.env(format!("CC_{target_env}"), "clang-cl");
+    cmd.env(format!("CXX_{target_env}"), "clang-cl");
+    cmd.env(format!("AR_{target_env}"), "llvm-lib");
 }
 
 fn build_daemon(args: &[String]) {
