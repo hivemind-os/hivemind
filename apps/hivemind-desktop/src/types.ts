@@ -635,6 +635,7 @@ export type HardwareSummary = {
     cpu_utilization: number;
   };
   gpu_supported: boolean;
+  gpu_runtime_error?: string;
 };
 
 export type PerModelUsage = {

@@ -255,6 +255,8 @@ const App = () => {
   const [hubSearchError, setHubSearchError] = createSignal<string | null>(null);
   const [hardwareInfo, setHardwareInfo] = createSignal<HardwareInfo | null>(null);
   const [gpuSupported, setGpuSupported] = createSignal(false);
+  const [gpuRuntimeError, setGpuRuntimeError] = createSignal<string | null>(null);
+  const [gpuBannerDismissed, setGpuBannerDismissed] = createSignal(false);
   const [resourceUsage, setResourceUsage] = createSignal<RuntimeResourceUsage | null>(null);
   const [storageBytes, setStorageBytes] = createSignal<number>(0);
   const [localModelView, setLocalModelView] = createSignal<'library' | 'search' | 'hardware'>('library');
@@ -2250,6 +2252,7 @@ const App = () => {
     if (hw.status === 'fulfilled') {
       setHardwareInfo(hw.value.hardware);
       setGpuSupported(hw.value.gpu_supported ?? false);
+      setGpuRuntimeError(hw.value.gpu_runtime_error ?? null);
       // HardwareSummary also contains usage data
       const u = hw.value.usage;
       setResourceUsage({
@@ -3031,6 +3034,41 @@ const App = () => {
 
       <ErrorBanner errorMessage={errorMessage} setErrorMessage={setErrorMessage} />
 
+      {/* GPU runtime missing banner */}
+      <Show when={gpuRuntimeError() && !gpuBannerDismissed()}>
+        <section class="rounded-md border border-yellow-500 bg-secondary p-3 mb-3 text-sm" data-testid="gpu-runtime-banner">
+          <div class="flex items-start gap-2">
+            <span class="flex-1">
+              <p class="mb-1 font-semibold text-yellow-400">⚠️ GPU acceleration unavailable</p>
+              <p class="text-muted-foreground">
+                An NVIDIA GPU was detected but the CUDA toolkit is not installed. The app will work without GPU acceleration, but local model inference will be CPU-only.
+              </p>
+            </span>
+            <button
+              class="shrink-0 cursor-pointer border-none bg-transparent p-0.5 text-muted-foreground hover:text-foreground"
+              onClick={() => setGpuBannerDismissed(true)}
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="mt-2 flex gap-2">
+            <button
+              class="text-xs px-2 py-1 rounded border border-primary text-primary hover:bg-primary/10 cursor-pointer"
+              onClick={() => void openExternal('https://developer.nvidia.com/cuda-downloads')}
+            >
+              Download CUDA Toolkit →
+            </button>
+            <button
+              class="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => setGpuBannerDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      </Show>
+
       {/* ── Flight Deck global toggle (top-right corner) ────────────── */}
       <button
         class="flight-deck-toggle flight-deck-global-toggle"
@@ -3292,6 +3330,7 @@ const App = () => {
               removeModel={removeModel}
               hardwareInfo={hardwareInfo}
               gpuSupported={gpuSupported}
+              gpuRuntimeError={gpuRuntimeError}
               resourceUsage={resourceUsage}
               hubSearchResults={hubSearchResults}
               hubSearchQuery={hubSearchQuery}

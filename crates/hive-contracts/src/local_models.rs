@@ -32,6 +32,10 @@ pub struct HardwareSummary {
     pub usage: RuntimeResourceUsage,
     /// Whether this daemon binary was compiled with GPU acceleration support.
     pub gpu_supported: bool,
+    /// If GPU hardware is detected but the runtime libraries (CUDA/Metal) are
+    /// unavailable, this contains an informational message with remediation steps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_runtime_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

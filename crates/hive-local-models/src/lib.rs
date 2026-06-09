@@ -576,10 +576,12 @@ pub async fn list_hub_repo_files(
 pub async fn get_hardware(State(service): State<Arc<LocalModelService>>) -> Json<HardwareSummary> {
     let hardware = service.hardware_info();
     let gpu_supported = !hardware.gpus.is_empty();
+    let gpu_runtime_error = if gpu_supported { check_gpu_runtime() } else { None };
     Json(HardwareSummary {
         hardware,
         usage: service.resource_usage(),
         gpu_supported,
+        gpu_runtime_error,
     })
 }
 
@@ -629,6 +631,46 @@ fn chrono_now() -> String {
     let y = if m <= 2 { y + 1 } else { y };
 
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{sec:02}.{millis:03}Z")
+}
+
+/// Check whether the GPU runtime libraries (CUDA on Windows/Linux, Metal on
+/// macOS) are available on this system.  Returns `None` if everything looks
+/// fine, or `Some(message)` with a human-readable explanation and download URL.
+fn check_gpu_runtime() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Check for the NVIDIA driver DLL (nvcuda.dll) which is always present
+        // when CUDA-capable drivers are installed.
+        unsafe extern "system" {
+            fn LoadLibraryExA(
+                lpLibFileName: *const u8,
+                hFile: *mut core::ffi::c_void,
+                dwFlags: u32,
+            ) -> *mut core::ffi::c_void;
+            fn FreeLibrary(hLibModule: *mut core::ffi::c_void) -> i32;
+        }
+        const LOAD_LIBRARY_AS_DATAFILE: u32 = 0x02;
+
+        let dll_name = b"nvcuda.dll\0";
+        let handle = unsafe {
+            LoadLibraryExA(dll_name.as_ptr(), std::ptr::null_mut(), LOAD_LIBRARY_AS_DATAFILE)
+        };
+        if handle.is_null() {
+            return Some(
+                "NVIDIA GPU driver not found. GPU acceleration requires the NVIDIA \
+                 CUDA Toolkit. Download it from: https://developer.nvidia.com/cuda-downloads"
+                    .to_string(),
+            );
+        }
+        unsafe {
+            FreeLibrary(handle);
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

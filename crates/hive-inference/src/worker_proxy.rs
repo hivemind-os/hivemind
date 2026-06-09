@@ -162,12 +162,50 @@ impl RuntimeWorkerProxy {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
+        // Suppress the Windows "DLL not found" system error dialog. Without this,
+        // a missing CUDA DLL (e.g. cublas64_12.dll) causes Windows to show a modal
+        // dialog that blocks the process and the entire app. Instead we detect the
+        // failure programmatically and report it to the user gracefully.
+        #[cfg(target_os = "windows")]
+        let _prev_error_mode = unsafe { suppress_dll_error_dialog() };
+
+        let spawn_result = cmd.spawn();
+
+        #[cfg(target_os = "windows")]
+        unsafe {
+            restore_error_mode(_prev_error_mode);
+        }
+
+        let mut child = spawn_result.map_err(|e| {
             InferenceError::WorkerCrashed(format!(
                 "failed to spawn worker binary '{}': {e}",
                 self.config.worker_binary.display()
             ))
         })?;
+
+        // Give the process a moment to fail if it can't load required DLLs.
+        // A missing DLL causes immediate exit (typically within milliseconds).
+        std::thread::sleep(Duration::from_millis(100));
+        if let Some(status) = child.try_wait().unwrap_or(None) {
+            let code = status.code().unwrap_or(-1);
+            // STATUS_DLL_NOT_FOUND = 0xC0000135 (3221225781 unsigned / -1073741515 signed)
+            let is_dll_error = code == -1073741515 || code as u32 == 0xC0000135;
+            let msg = if is_dll_error {
+                format!(
+                    "Runtime worker failed to start: required CUDA libraries not found. \
+                     GPU acceleration requires the NVIDIA CUDA Toolkit to be installed.\n\n\
+                     Download from: https://developer.nvidia.com/cuda-downloads\n\n\
+                     The application will continue without GPU acceleration."
+                )
+            } else {
+                format!(
+                    "Runtime worker exited immediately (code {code:#x}). \
+                     This may indicate missing libraries or a configuration issue."
+                )
+            };
+            tracing::warn!(%code, binary = %self.config.worker_binary.display(), "{msg}");
+            return Err(InferenceError::WorkerCrashed(msg));
+        }
 
         let stdin = child.stdin.take().ok_or_else(|| {
             InferenceError::WorkerCrashed("failed to capture worker stdin".into())
@@ -515,3 +553,31 @@ impl InferenceRuntime for RuntimeWorkerProxy {
 // (stdin/stdout). All mutable state is protected by parking_lot::Mutex.
 unsafe impl Send for RuntimeWorkerProxy {}
 unsafe impl Sync for RuntimeWorkerProxy {}
+
+// ---------------------------------------------------------------------------
+// Windows: suppress system error dialogs for missing DLLs
+// ---------------------------------------------------------------------------
+
+/// Suppress the Windows "missing DLL" system error dialog before spawning
+/// a child process. Returns the previous error mode so it can be restored.
+#[cfg(target_os = "windows")]
+unsafe fn suppress_dll_error_dialog() -> u32 {
+    const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+    const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+
+    unsafe extern "system" {
+        fn SetErrorMode(uMode: u32) -> u32;
+    }
+    unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) }
+}
+
+/// Restore the previous Windows error mode after spawning.
+#[cfg(target_os = "windows")]
+unsafe fn restore_error_mode(prev: u32) {
+    unsafe extern "system" {
+        fn SetErrorMode(uMode: u32) -> u32;
+    }
+    unsafe {
+        SetErrorMode(prev);
+    }
+}

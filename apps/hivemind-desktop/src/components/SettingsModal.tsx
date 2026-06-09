@@ -140,6 +140,7 @@ export interface SettingsModalProps {
   removeModel: (modelId: string) => Promise<void>;
   hardwareInfo: Accessor<HardwareInfo | null>;
   gpuSupported: Accessor<boolean>;
+  gpuRuntimeError: Accessor<string | null>;
   resourceUsage: Accessor<RuntimeResourceUsage | null>;
 
   // Hub search / install state
@@ -363,6 +364,7 @@ const SettingsModal = (props: SettingsModalProps) => {
   const removeModel = props.removeModel;
   const hardwareInfo = props.hardwareInfo;
   const gpuSupported = props.gpuSupported;
+  const gpuRuntimeError = props.gpuRuntimeError;
   const resourceUsage = props.resourceUsage;
   const hubSearchResults = props.hubSearchResults;
   const hubSearchQuery = props.hubSearchQuery;
@@ -1066,10 +1068,29 @@ const SettingsModal = (props: SettingsModalProps) => {
                             {/* GPU Acceleration */}
                             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid hsl(var(--border));">
                               <h4 style="margin: 0 0 8px 0; font-size: 13px;">GPU Acceleration</h4>
-                              <Show when={gpuSupported()} fallback={
-                                <p class="muted" style="font-size: 0.85em;">
-                                  GPU acceleration is not available. This build was compiled without GPU support (CUDA/Metal).
-                                </p>
+                              <Show when={gpuRuntimeError()}>
+                                <div style="background: hsl(var(--destructive) / 0.1); border: 1px solid hsl(var(--destructive) / 0.3); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px;">
+                                  <p style="font-size: 0.85em; margin: 0 0 6px 0; color: hsl(var(--destructive));">
+                                    ⚠️ GPU runtime libraries not found
+                                  </p>
+                                  <p style="font-size: 0.8em; margin: 0 0 6px 0;">
+                                    GPU hardware was detected but the required CUDA toolkit is not installed. GPU acceleration will not be available until the toolkit is installed.
+                                  </p>
+                                  <a
+                                    href="#"
+                                    onClick={(e) => { e.preventDefault(); openExternal('https://developer.nvidia.com/cuda-downloads'); }}
+                                    style="font-size: 0.8em; color: hsl(var(--primary)); text-decoration: underline; cursor: pointer;"
+                                  >
+                                    Download NVIDIA CUDA Toolkit →
+                                  </a>
+                                </div>
+                              </Show>
+                              <Show when={gpuSupported() && !gpuRuntimeError()} fallback={
+                                <Show when={!gpuRuntimeError()}>
+                                  <p class="muted" style="font-size: 0.85em;">
+                                    GPU acceleration is not available. No compatible GPU hardware detected.
+                                  </p>
+                                </Show>
                               }>
                                 <Switch checked={editConfig()!.local_models.gpu?.enabled ?? true} onChange={(checked) => updateLocalModels('gpu', { ...editConfig()!.local_models.gpu, enabled: checked })} class="flex items-center gap-2">
                                   <SwitchControl><SwitchThumb /></SwitchControl>
