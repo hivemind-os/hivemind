@@ -209,6 +209,7 @@ impl ModelRouterSamplingHandler {
     }
 
     /// Emit an audit event for a sampling request.
+    #[allow(clippy::too_many_arguments)]
     fn emit_audit(
         &self,
         server_id: &str,
@@ -302,17 +303,17 @@ impl ModelRouterSamplingHandler {
         let preview = params
             .messages
             .first()
-            .and_then(|m| match &m.content.raw {
+            .map(|m| match &m.content.raw {
                 McpRawContent::Text(t) => {
                     let text = &t.text;
                     if text.len() > 200 {
-                        Some(format!("{}…", &text[..200]))
+                        format!("{}…", &text[..200])
                     } else {
-                        Some(text.clone())
+                        text.clone()
                     }
                 }
-                McpRawContent::Image(_) => Some("[image]".to_string()),
-                McpRawContent::Resource(_) => Some("[resource]".to_string()),
+                McpRawContent::Image(_) => "[image]".to_string(),
+                McpRawContent::Resource(_) => "[resource]".to_string(),
             })
             .unwrap_or_default();
 
@@ -439,7 +440,7 @@ impl SamplingHandler for ModelRouterSamplingHandler {
 
             // ── Human-in-the-loop approval ───────────────────────
             if policy.requires_approval {
-                let (req_id, rx) = self.request_approval(&server_id, &params).map_err(|e| {
+                let (req_id, rx) = self.request_approval(&server_id, &params).inspect_err(|e| {
                     self.emit_audit(
                         &server_id,
                         message_count,
@@ -449,7 +450,6 @@ impl SamplingHandler for ModelRouterSamplingHandler {
                         false,
                         Some(&e.message),
                     );
-                    e
                 })?;
 
                 let timeout = std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS);
@@ -862,7 +862,7 @@ mod tests {
         // Approve it.
         assert!(handler.respond_to_approval(&id, true));
         // Receiver should get `true`.
-        assert_eq!(rx.await.unwrap(), true);
+        assert!(rx.await.unwrap());
     }
 
     #[tokio::test]
@@ -884,7 +884,7 @@ mod tests {
 
         // Deny it.
         assert!(handler.respond_to_approval(&id, false));
-        assert_eq!(rx.await.unwrap(), false);
+        assert!(!rx.await.unwrap());
     }
 
     #[tokio::test]

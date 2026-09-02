@@ -451,7 +451,7 @@ mod tests {
             let inner = self.inner.lock();
             let mut runs: Vec<TaskRun> =
                 inner.runs.iter().filter(|r| r.task_id == task_id).cloned().collect();
-            runs.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms));
+            runs.sort_by_key(|r| std::cmp::Reverse(r.started_at_ms));
             runs.truncate(limit);
             Ok(runs)
         }
@@ -558,7 +558,7 @@ mod tests {
             let mut inner = self.inner.lock();
             let mut task_runs: Vec<TaskRun> =
                 inner.runs.iter().filter(|r| r.task_id == task_id).cloned().collect();
-            task_runs.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms));
+            task_runs.sort_by_key(|r| std::cmp::Reverse(r.started_at_ms));
 
             let to_remove: std::collections::HashSet<String> =
                 task_runs.into_iter().skip(keep).map(|r| r.id.clone()).collect();

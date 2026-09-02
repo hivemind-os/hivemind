@@ -447,8 +447,10 @@ fn simple_hash(text: &str) -> u64 {
 mod tests {
     use super::*;
 
+    #[cfg(not(feature = "candle"))]
     use std::fs;
     use std::path::Path;
+    #[cfg(not(feature = "candle"))]
     use tempfile::tempdir;
 
     // Stub-only tests: these use fake model files that only work with stubs

@@ -299,7 +299,7 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
             shadow_mode: false,
         },
         tools_ctx: ToolsContext {
-            tools: tools,
+            tools,
             skill_catalog: None,
             knowledge_query_handler: None,
             tool_execution_mode: ToolExecutionMode::default(),
@@ -2234,20 +2234,19 @@ mod workflow {
     use async_trait::async_trait;
     use hive_loop::{
         InMemoryStore, ModelBackend, ModelRequest, ModelResponse, NullEventSink, ToolBackend,
-        ToolSchema, WfToolCall, WfToolResult, WorkflowDefinition, WorkflowEngine, WorkflowEvent,
-        WorkflowEventSink, WorkflowResult, WorkflowStatus, WorkflowStore,
+        ToolSchema, WfToolCall, WfToolResult, WorkflowDefinition, WorkflowEngine, WorkflowResult,
+        WorkflowStatus, WorkflowStore,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct WfMockModel {
         responses: tokio::sync::Mutex<Vec<ModelResponse>>,
-        call_count: AtomicUsize,
     }
 
     impl WfMockModel {
         fn new(responses: Vec<ModelResponse>) -> Self {
-            Self { responses: tokio::sync::Mutex::new(responses), call_count: AtomicUsize::new(0) }
+            Self { responses: tokio::sync::Mutex::new(responses) }
         }
 
         fn single(content: &str) -> Self {
@@ -2276,16 +2275,11 @@ mod workflow {
                 },
             ])
         }
-
-        fn calls(&self) -> usize {
-            self.call_count.load(Ordering::SeqCst)
-        }
     }
 
     #[async_trait]
     impl ModelBackend for WfMockModel {
         async fn complete(&self, _request: &ModelRequest) -> WorkflowResult<ModelResponse> {
-            self.call_count.fetch_add(1, Ordering::SeqCst);
             let mut responses = self.responses.lock().await;
             if responses.is_empty() {
                 Ok(ModelResponse {
@@ -2391,23 +2385,6 @@ mod workflow {
                     is_error: false,
                 })
             }
-        }
-    }
-
-    struct WfEventCollector {
-        events: tokio::sync::Mutex<Vec<WorkflowEvent>>,
-    }
-
-    impl WfEventCollector {
-        fn new() -> Self {
-            Self { events: tokio::sync::Mutex::new(vec![]) }
-        }
-    }
-
-    #[async_trait]
-    impl WorkflowEventSink for WfEventCollector {
-        async fn emit(&self, event: WorkflowEvent) {
-            self.events.lock().await.push(event);
         }
     }
 
@@ -2798,7 +2775,6 @@ mod agents {
     use hive_agents::{
         AgentMessage, AgentRole, AgentSpec, AgentStatus, AgentSupervisor, SupervisorEvent,
     };
-    use hive_loop::AgentOrchestrator;
 
     use tokio::sync::broadcast;
     use tokio::time::{timeout, Duration};

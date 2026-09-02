@@ -777,7 +777,7 @@ mod tests {
         std::fs::write(tmp.path().join("main.rs"), "fn main() {}\n").unwrap();
         std::fs::write(tmp.path().join("lib.py"), "def hello(): pass\n").unwrap();
         // A non-text file that should be excluded
-        std::fs::write(tmp.path().join("photo.png"), &[0x89, 0x50, 0x4E, 0x47]).unwrap();
+        std::fs::write(tmp.path().join("photo.png"), [0x89, 0x50, 0x4E, 0x47]).unwrap();
 
         let provider = CodeContextMap;
         let result = provider.build_context(tmp.path().to_str().unwrap());
@@ -791,8 +791,8 @@ mod tests {
     #[test]
     fn code_returns_empty_for_only_binary_files() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("photo.png"), &[0x89, 0x50]).unwrap();
-        std::fs::write(tmp.path().join("data.bin"), &[0x00, 0xFF]).unwrap();
+        std::fs::write(tmp.path().join("photo.png"), [0x89, 0x50]).unwrap();
+        std::fs::write(tmp.path().join("data.bin"), [0x00, 0xFF]).unwrap();
 
         let provider = CodeContextMap;
         let result = provider.build_context(tmp.path().to_str().unwrap());

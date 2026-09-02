@@ -169,7 +169,6 @@ async fn workflow_context_injected_into_session_agent_prompt() {
     // ── 6. Wait for the session agent to respond ───────────────────────
     wait_for(TIMEOUT, DEFAULT_POLL_INTERVAL, || {
         let shared_calls = shared_calls.clone();
-        let calls_before = calls_before;
         async move {
             if shared_calls.lock().unwrap().len() > calls_before {
                 Some(())

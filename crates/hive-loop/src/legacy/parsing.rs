@@ -184,7 +184,6 @@ fn extract_fenced(content: &str, start: &str, end: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn test_parse_xml_tool_call() {

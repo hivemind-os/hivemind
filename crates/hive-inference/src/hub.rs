@@ -644,14 +644,9 @@ mod tests {
 
         let mut hasher = Sha256::new();
         let mut file = tokio::fs::File::create(&dest_path).await.unwrap();
-        loop {
-            match response.chunk().await.unwrap() {
-                Some(bytes) => {
-                    file.write_all(&bytes).await.unwrap();
-                    hasher.update(&bytes);
-                }
-                None => break,
-            }
+        while let Some(bytes) = response.chunk().await.unwrap() {
+            file.write_all(&bytes).await.unwrap();
+            hasher.update(&bytes);
         }
         let sha256 = format!("{:x}", hasher.finalize());
 

@@ -133,7 +133,7 @@ async fn workflow_agent_question_routes_through_session() {
             let questions: Vec<Value> = resp.json().await.ok()?;
             questions
                 .into_iter()
-                .find(|q| q["text"].as_str().map_or(false, |t| t.contains("favorite color")))
+                .find(|q| q["text"].as_str().is_some_and(|t| t.contains("favorite color")))
         }
     })
     .await

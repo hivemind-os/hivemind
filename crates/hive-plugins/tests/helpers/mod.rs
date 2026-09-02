@@ -4,6 +4,8 @@
 //! process and wires up in-memory secret/store/notification backends so tests
 //! can exercise the full JSON-RPC round-trip without any external services.
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

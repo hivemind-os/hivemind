@@ -178,54 +178,12 @@ mod tests {
     use super::*;
     use crate::legacy::{LoopContext, ToolCall};
     use hive_classification::DataClass;
-    use hive_contracts::{
-        PermissionRule, SessionPermissions, ToolExecutionMode, WorkspaceClassification,
-    };
+    use hive_contracts::{SessionPermissions, ToolExecutionMode, WorkspaceClassification};
     use hive_tools::{Tool, ToolApproval, ToolDefinition, ToolRegistry};
     use serde_json::json;
     use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::Arc;
-
-    /// Minimal read tool for testing.
-    struct FakeReadTool(ToolDefinition);
-    impl FakeReadTool {
-        fn new() -> Self {
-            Self(ToolDefinition {
-                id: "filesystem.read".to_string(),
-                name: "Read".to_string(),
-                description: "mock".to_string(),
-                input_schema: json!({"type": "object"}),
-                output_schema: None,
-                channel_class: hive_classification::ChannelClass::LocalOnly,
-                side_effects: false,
-                approval: ToolApproval::Auto,
-                annotations: hive_tools::ToolAnnotations {
-                    title: "Read".to_string(),
-                    read_only_hint: Some(true),
-                    destructive_hint: None,
-                    idempotent_hint: None,
-                    open_world_hint: None,
-                },
-            })
-        }
-    }
-    impl Tool for FakeReadTool {
-        fn definition(&self) -> &ToolDefinition {
-            &self.0
-        }
-        fn execute(
-            &self,
-            _input: Value,
-        ) -> hive_tools::BoxFuture<'_, Result<ToolResult, hive_tools::ToolError>> {
-            Box::pin(async {
-                Ok(ToolResult {
-                    output: json!({"content": "file data"}),
-                    data_class: DataClass::Internal, // hardcoded — middleware should override
-                })
-            })
-        }
-    }
 
     fn make_context(wc: WorkspaceClassification, effective_dc: Arc<AtomicU8>) -> LoopContext {
         LoopContext {

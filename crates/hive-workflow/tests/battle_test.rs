@@ -2754,7 +2754,6 @@ steps:
     let mut handles = vec![];
     for &id in &ids {
         let e = engine.clone();
-        let id = id.clone();
         handles.push(tokio::spawn(async move {
             e.kill(id).await.unwrap();
         }));

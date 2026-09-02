@@ -394,11 +394,13 @@ async fn test_01_simple_one_shot_message() {
     // Verify A completed
     assert!(count_completed(&events, "a") > 0, "Agent A should complete");
     // Verify message was routed A→B
-    let msgs = orch.messages.lock();
-    assert!(
-        msgs.iter().any(|(to, _, from)| to == "b" && from == "a"),
-        "Expected message from A to B, got: {msgs:?}"
-    );
+    {
+        let msgs = orch.messages.lock();
+        assert!(
+            msgs.iter().any(|(to, _, from)| to == "b" && from == "a"),
+            "Expected message from A to B, got: {msgs:?}"
+        );
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -443,11 +445,13 @@ async fn test_02_bidirectional_feedback() {
     let _events = collect_events(&mut rx, 200, 300).await;
 
     // B should auto-reply feedback to A
-    let feedbacks = orch.feedbacks.lock();
-    assert!(
-        feedbacks.iter().any(|(to, _, from)| to == "a" && from == "b"),
-        "Expected feedback from B to A, got: {feedbacks:?}"
-    );
+    {
+        let feedbacks = orch.feedbacks.lock();
+        assert!(
+            feedbacks.iter().any(|(to, _, from)| to == "a" && from == "b"),
+            "Expected feedback from B to A, got: {feedbacks:?}"
+        );
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -489,17 +493,20 @@ async fn test_03_no_infinite_loop() {
     let _events = collect_events(&mut rx, 200, 300).await;
 
     // Should have exactly 1 task message (A→B) and 1 feedback (B→A)
-    let msgs = orch.messages.lock();
-    let a_to_b = msgs.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
-    assert_eq!(a_to_b, 1, "Expected exactly 1 message A→B, got {a_to_b}");
+    {
+        let msgs = orch.messages.lock();
+        let a_to_b = msgs.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
+        assert_eq!(a_to_b, 1, "Expected exactly 1 message A→B, got {a_to_b}");
 
-    let feedbacks = orch.feedbacks.lock();
-    let b_to_a = feedbacks.iter().filter(|(to, _, from)| to == "a" && from == "b").count();
-    assert_eq!(b_to_a, 1, "Expected exactly 1 feedback B→A, got {b_to_a}");
+        let feedbacks = orch.feedbacks.lock();
+        let b_to_a = feedbacks.iter().filter(|(to, _, from)| to == "a" && from == "b").count();
+        assert_eq!(b_to_a, 1, "Expected exactly 1 feedback B→A, got {b_to_a}");
 
-    // No feedback from A back to B (would indicate a loop)
-    let a_to_b_feedback = feedbacks.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
-    assert_eq!(a_to_b_feedback, 0, "A should NOT feedback back to B");
+        // No feedback from A back to B (would indicate a loop)
+        let a_to_b_feedback =
+            feedbacks.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
+        assert_eq!(a_to_b_feedback, 0, "A should NOT feedback back to B");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -547,10 +554,12 @@ async fn test_04_three_agent_chain() {
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let _events = collect_events(&mut rx, 300, 300).await;
 
-    let msgs = orch.messages.lock();
-    // Expect A→B and B→C messages
-    assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected message A→B");
-    assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "b"), "Expected message B→C");
+    {
+        let msgs = orch.messages.lock();
+        // Expect A→B and B→C messages
+        assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected message A→B");
+        assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "b"), "Expected message B→C");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -695,9 +704,11 @@ async fn test_07_parallel_fan_out() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let _events = collect_events(&mut rx, 300, 300).await;
 
-    let msgs = orch.messages.lock();
-    assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B message");
-    assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "a"), "Expected A→C message");
+    {
+        let msgs = orch.messages.lock();
+        assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B message");
+        assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "a"), "Expected A→C message");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -769,10 +780,12 @@ async fn test_09_feedback_preserves_sender() {
 
     tokio::time::sleep(Duration::from_millis(600)).await;
 
-    let feedbacks = orch.feedbacks.lock();
-    for (to, _msg, from) in feedbacks.iter() {
-        if to == "a" {
-            assert_eq!(from, "b", "Feedback to A should be from B");
+    {
+        let feedbacks = orch.feedbacks.lock();
+        for (to, _msg, from) in feedbacks.iter() {
+            if to == "a" {
+                assert_eq!(from, "b", "Feedback to A should be from B");
+            }
         }
     }
 
@@ -860,9 +873,11 @@ async fn test_11_sequential_messages_same_pair() {
 
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    let msgs = orch.messages.lock();
-    let a_to_b = msgs.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
-    assert!(a_to_b >= 1, "Expected at least 1 message A→B, got {a_to_b}");
+    {
+        let msgs = orch.messages.lock();
+        let a_to_b = msgs.iter().filter(|(to, _, from)| to == "b" && from == "a").count();
+        assert!(a_to_b >= 1, "Expected at least 1 message A→B, got {a_to_b}");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -935,9 +950,11 @@ async fn test_12_diamond_pattern() {
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    let msgs = orch.messages.lock();
-    assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
-    assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "a"), "Expected A→C");
+    {
+        let msgs = orch.messages.lock();
+        assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
+        assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "a"), "Expected A→C");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -1141,9 +1158,11 @@ async fn test_17_five_agent_chain() {
 
     tokio::time::sleep(Duration::from_millis(3000)).await;
 
-    let msgs = orch.messages.lock();
-    assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
-    assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "b"), "Expected B→C");
+    {
+        let msgs = orch.messages.lock();
+        assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
+        assert!(msgs.iter().any(|(to, _, from)| to == "c" && from == "b"), "Expected B→C");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -1202,9 +1221,11 @@ async fn test_18_concurrent_independent_conversations() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let msgs = orch.messages.lock();
-    assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
-    assert!(msgs.iter().any(|(to, _, from)| to == "d" && from == "c"), "Expected C→D");
+    {
+        let msgs = orch.messages.lock();
+        assert!(msgs.iter().any(|(to, _, from)| to == "b" && from == "a"), "Expected A→B");
+        assert!(msgs.iter().any(|(to, _, from)| to == "d" && from == "c"), "Expected C→D");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -1237,10 +1258,12 @@ async fn test_19_user_task_no_auto_reply() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // No messages or feedbacks should be sent (from="user" skips auto-reply)
-    let msgs = orch.messages.lock();
-    assert!(msgs.is_empty(), "No messages should be routed for user tasks");
-    let feedbacks = orch.feedbacks.lock();
-    assert!(feedbacks.is_empty(), "No feedbacks should be sent for user tasks");
+    {
+        let msgs = orch.messages.lock();
+        assert!(msgs.is_empty(), "No messages should be routed for user tasks");
+        let feedbacks = orch.feedbacks.lock();
+        assert!(feedbacks.is_empty(), "No feedbacks should be sent for user tasks");
+    }
 
     sup.kill_all().await.unwrap();
 }
@@ -1307,12 +1330,14 @@ async fn test_20_stress_fan_out_10_agents() {
 
     tokio::time::sleep(Duration::from_millis(3000)).await;
 
-    let msgs = orch.messages.lock();
-    let coord_msgs = msgs.iter().filter(|(_, _, from)| from == "coord").count();
-    assert!(
-        coord_msgs >= 10,
-        "Coordinator should have sent at least 10 messages, got {coord_msgs}"
-    );
+    {
+        let msgs = orch.messages.lock();
+        let coord_msgs = msgs.iter().filter(|(_, _, from)| from == "coord").count();
+        assert!(
+            coord_msgs >= 10,
+            "Coordinator should have sent at least 10 messages, got {coord_msgs}"
+        );
+    }
 
     // All workers should still be alive
     assert_eq!(sup.agent_count(), 11, "All 11 agents should be alive");

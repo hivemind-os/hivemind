@@ -191,12 +191,11 @@ impl RuntimeWorkerProxy {
             // STATUS_DLL_NOT_FOUND = 0xC0000135 (3221225781 unsigned / -1073741515 signed)
             let is_dll_error = code == -1073741515 || code as u32 == 0xC0000135;
             let msg = if is_dll_error {
-                format!(
-                    "Runtime worker failed to start: required CUDA libraries not found. \
+                "Runtime worker failed to start: required CUDA libraries not found. \
                      GPU acceleration requires the NVIDIA CUDA Toolkit to be installed.\n\n\
                      Download from: https://developer.nvidia.com/cuda-downloads\n\n\
                      The application will continue without GPU acceleration."
-                )
+                    .to_string()
             } else {
                 format!(
                     "Runtime worker exited immediately (code {code:#x}). \

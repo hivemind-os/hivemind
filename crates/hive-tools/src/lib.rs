@@ -3832,7 +3832,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_document_unsupported_binary() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("image.png"), &[0x89, 0x50, 0x4e, 0x47]).unwrap();
+        std::fs::write(dir.path().join("image.png"), [0x89, 0x50, 0x4e, 0x47]).unwrap();
         let tool = FileSystemReadDocumentTool::new(dir.path().to_path_buf());
         let result = tool.execute(json!({ "path": "image.png" })).await;
         assert!(result.is_err());
@@ -3877,10 +3877,10 @@ mod tests {
     #[tokio::test]
     async fn test_write_binary_overwrite_protection() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("existing.bin"), &[0x00]).unwrap();
+        std::fs::write(dir.path().join("existing.bin"), [0x00]).unwrap();
         let tool = FileSystemWriteBinaryTool::new(dir.path().to_path_buf());
         use base64::Engine;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&[0x01]);
+        let encoded = base64::engine::general_purpose::STANDARD.encode([0x01]);
         let result =
             tool.execute(json!({ "path": "existing.bin", "content_base64": encoded })).await;
         assert!(result.is_err());
@@ -3891,7 +3891,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_binary_with_overwrite() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("existing.bin"), &[0x00]).unwrap();
+        std::fs::write(dir.path().join("existing.bin"), [0x00]).unwrap();
         let tool = FileSystemWriteBinaryTool::new(dir.path().to_path_buf());
         use base64::Engine;
         let new_bytes: Vec<u8> = vec![0xAA, 0xBB, 0xCC];
@@ -3915,7 +3915,7 @@ mod tests {
     async fn test_list_with_metadata() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("hello.txt"), "some text content").unwrap();
-        std::fs::write(dir.path().join("data.bin"), &[0x00, 0x01, 0x02]).unwrap();
+        std::fs::write(dir.path().join("data.bin"), [0x00, 0x01, 0x02]).unwrap();
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
         let tool = FileSystemListTool::new(dir.path().to_path_buf());
         let result = tool.execute(json!({ "path": "." })).await.unwrap();
@@ -3927,14 +3927,14 @@ mod tests {
             if name == "hello.txt" {
                 assert_eq!(entry["kind"].as_str().unwrap(), "file");
                 assert!(entry["size"].as_u64().unwrap() > 0);
-                assert_eq!(entry["is_binary"].as_bool().unwrap(), false);
+                assert!(!entry["is_binary"].as_bool().unwrap());
             } else if name == "data.bin" {
                 assert_eq!(entry["kind"].as_str().unwrap(), "file");
                 assert_eq!(entry["size"].as_u64().unwrap(), 3);
-                assert_eq!(entry["is_binary"].as_bool().unwrap(), true);
+                assert!(entry["is_binary"].as_bool().unwrap());
             } else if name == "subdir" {
                 assert_eq!(entry["kind"].as_str().unwrap(), "dir");
-                assert_eq!(entry["is_binary"].as_bool().unwrap(), false);
+                assert!(!entry["is_binary"].as_bool().unwrap());
             }
         }
     }
@@ -4094,9 +4094,9 @@ mod tests {
     #[test]
     fn filtered_supports_glob_patterns() {
         let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(CalculatorTool::default()));
-        registry.register(Arc::new(DateTimeTool::default()));
-        registry.register(Arc::new(QuestionTool::default())); // core.ask_user
+        registry.register(Arc::new(CalculatorTool::default())).expect("register calculator");
+        registry.register(Arc::new(DateTimeTool::default())).expect("register datetime");
+        registry.register(Arc::new(QuestionTool::default())).expect("register question"); // core.ask_user
 
         let allowed = vec!["math.*".to_string()];
         let filtered = registry.filtered(&allowed);
@@ -4131,8 +4131,8 @@ mod tests {
     #[test]
     fn filtered_exact_match_still_works() {
         let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(CalculatorTool::default()));
-        registry.register(Arc::new(DateTimeTool::default()));
+        registry.register(Arc::new(CalculatorTool::default())).expect("register calculator");
+        registry.register(Arc::new(DateTimeTool::default())).expect("register datetime");
 
         let allowed = vec!["datetime.now".to_string()];
         let filtered = registry.filtered(&allowed);

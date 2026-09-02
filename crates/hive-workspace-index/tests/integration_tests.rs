@@ -454,8 +454,7 @@ async fn t15_reclass_updates_all_nodes() {
     drop(graph);
 
     // Reclassify
-    let mut new_class = WorkspaceClassification::default();
-    new_class.default = DataClass::Confidential;
+    let new_class = WorkspaceClassification::new(DataClass::Confidential);
     indexer.reclass_session("s1", new_class).await;
 
     let graph = KnowledgeGraph::open(&kg_path).unwrap();

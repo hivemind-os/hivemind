@@ -424,7 +424,7 @@ fn build_daemon_inner(args: &[String]) -> PathBuf {
 fn run_daemon(args: &[String]) {
     let binary = build_daemon_inner(args);
 
-    let gpu = args.iter().any(|a| a == "--gpu");
+    let _gpu = args.iter().any(|a| a == "--gpu");
 
     println!("==> Running hive-daemon...");
     let mut cmd = std::process::Command::new(&binary);

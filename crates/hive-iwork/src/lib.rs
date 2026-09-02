@@ -152,11 +152,12 @@ mod tests {
     fn make_snappy_iwa(raw: &[u8]) -> Vec<u8> {
         let compressed = snap::raw::Encoder::new().compress_vec(raw).expect("snappy compress");
         let len = compressed.len();
-        let mut out = Vec::new();
-        out.push(0u8); // chunk type 0
-        out.push((len & 0xFF) as u8);
-        out.push(((len >> 8) & 0xFF) as u8);
-        out.push(((len >> 16) & 0xFF) as u8);
+        let mut out = vec![
+            0u8, // chunk type 0
+            (len & 0xFF) as u8,
+            ((len >> 8) & 0xFF) as u8,
+            ((len >> 16) & 0xFF) as u8,
+        ];
         out.extend_from_slice(&compressed);
         out
     }
@@ -246,9 +247,7 @@ mod tests {
     #[test]
     fn extract_text_returns_none_for_empty_iwa() {
         // ZIP with an IWA file that has no TSWP.StorageArchive
-        let mut payload = Vec::new();
-        payload.push(0x08);
-        payload.push(0x01);
+        let payload = vec![0x08, 0x01];
 
         let mut mi = Vec::new();
         mi.push(0x08);

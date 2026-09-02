@@ -1490,7 +1490,7 @@ pub fn extract_context_limit(msg: &str) -> Option<u32> {
 
     if let Some(pos) = lower.find("max_tokens") {
         let after = &msg[pos + "max_tokens".len()..];
-        let after = after.trim_start_matches(|c: char| c == ':' || c == ' ');
+        let after = after.trim_start_matches([':', ' ']);
         if let Some(num_str) = after.split(|c: char| !c.is_ascii_digit()).next() {
             if let Ok(limit) = num_str.parse::<u32>() {
                 if limit > 0 {
@@ -3004,7 +3004,7 @@ mod tests {
 
     #[test]
     fn version_comparison_ordering() {
-        let mut versions = vec![
+        let mut versions = [
             ("gpt-5.1", parse_model_version("gpt-5.1")),
             ("gpt-5.4", parse_model_version("gpt-5.4")),
             ("gpt-5.2", parse_model_version("gpt-5.2")),
@@ -4036,10 +4036,6 @@ mod tests {
             }
         }
 
-        fn call_count(&self) -> u32 {
-            self.call_count.load(std::sync::atomic::Ordering::SeqCst)
-        }
-
         fn call_count_arc(&self) -> Arc<AtomicU32> {
             Arc::clone(&self.call_count)
         }
@@ -4263,19 +4259,19 @@ mod tests {
     fn retry_backoff_values_are_reasonable() {
         // Attempt 0 → ~5s (3.75s – 6.25s with jitter)
         let b0 = retry_backoff_ms(0);
-        assert!(b0 >= 3_500 && b0 <= 6_500, "attempt 0 backoff was {b0}ms");
+        assert!((3_500..=6_500).contains(&b0), "attempt 0 backoff was {b0}ms");
 
         // Attempt 1 → ~10s
         let b1 = retry_backoff_ms(1);
-        assert!(b1 >= 7_000 && b1 <= 13_000, "attempt 1 backoff was {b1}ms");
+        assert!((7_000..=13_000).contains(&b1), "attempt 1 backoff was {b1}ms");
 
         // Attempt 3 → capped at ~40s
         let b3 = retry_backoff_ms(3);
-        assert!(b3 >= 28_000 && b3 <= 52_000, "attempt 3 backoff was {b3}ms");
+        assert!((28_000..=52_000).contains(&b3), "attempt 3 backoff was {b3}ms");
 
         // Attempt 4 → still capped at ~40s
         let b4 = retry_backoff_ms(4);
-        assert!(b4 >= 28_000 && b4 <= 52_000, "attempt 4 backoff was {b4}ms");
+        assert!((28_000..=52_000).contains(&b4), "attempt 4 backoff was {b4}ms");
     }
 
     #[test]

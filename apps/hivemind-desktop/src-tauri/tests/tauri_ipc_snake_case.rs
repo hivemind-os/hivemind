@@ -28,10 +28,10 @@ fn all_tauri_commands_use_snake_case_rename() {
 
     for (line_no, line) in src.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("#[tauri::command") {
-            if !trimmed.contains("rename_all") || !trimmed.contains("snake_case") {
-                violations.push(format!("  line {}: {}", line_no + 1, trimmed));
-            }
+        if trimmed.starts_with("#[tauri::command")
+            && (!trimmed.contains("rename_all") || !trimmed.contains("snake_case"))
+        {
+            violations.push(format!("  line {}: {}", line_no + 1, trimmed));
         }
     }
 

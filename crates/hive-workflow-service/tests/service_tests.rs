@@ -54,65 +54,6 @@ output:
 "#
 }
 
-fn branching_definition_yaml() -> &'static str {
-    r#"
-name: branching-workflow
-version: "1.0"
-description: "Workflow with a branch"
-variables:
-  type: object
-  properties:
-    approved:
-      type: boolean
-      default: false
-steps:
-  - id: start
-    type: trigger
-    trigger:
-      type: manual
-      inputs:
-      - name: amount
-        type: number
-        required: true
-    outputs:
-      amount: "{{trigger.amount}}"
-    next: [check]
-
-  - id: check
-    type: control_flow
-    control:
-      kind: branch
-      condition: "{{steps.start.outputs.amount}} > 100"
-      then: [big]
-      else: [small]
-
-  - id: big
-    type: task
-    task:
-      kind: delay
-      duration_secs: 0
-    outputs:
-      label: "big"
-    next: [done]
-
-  - id: small
-    type: task
-    task:
-      kind: delay
-      duration_secs: 0
-    outputs:
-      label: "small"
-    next: [done]
-
-  - id: done
-    type: control_flow
-    control:
-      kind: end_workflow
-output:
-  label: "{{steps.big.outputs.label}}{{steps.small.outputs.label}}"
-"#
-}
-
 fn feedback_definition_yaml() -> &'static str {
     r#"
 name: user/feedback-workflow

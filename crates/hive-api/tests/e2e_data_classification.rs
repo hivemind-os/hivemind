@@ -127,7 +127,7 @@ async fn wait_for_approval(
         }
     })
     .await
-    .expect(&format!("timed out waiting for pending approval for tool '{tool_id}'"))
+    .unwrap_or_else(|_| panic!("timed out waiting for pending approval for tool '{tool_id}'"))
 }
 
 /// Respond to a pending tool approval.

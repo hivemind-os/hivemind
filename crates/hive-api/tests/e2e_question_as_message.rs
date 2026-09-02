@@ -106,7 +106,7 @@ async fn question_creates_message_in_snapshot() {
             let questions: Vec<Value> = resp.json().await.ok()?;
             questions
                 .into_iter()
-                .find(|q| q["text"].as_str().map_or(false, |t| t.contains("favorite color")))
+                .find(|q| q["text"].as_str().is_some_and(|t| t.contains("favorite color")))
         }
     })
     .await
@@ -219,7 +219,7 @@ async fn answered_question_updates_message() {
             let questions: Vec<Value> = resp.json().await.ok()?;
             questions
                 .into_iter()
-                .find(|q| q["text"].as_str().map_or(false, |t| t.contains("favorite color")))
+                .find(|q| q["text"].as_str().is_some_and(|t| t.contains("favorite color")))
         }
     })
     .await

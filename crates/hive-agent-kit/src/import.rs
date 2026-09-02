@@ -365,13 +365,16 @@ fn rewrite_workflow_id(yaml: &str) -> Result<String, AgentKitError> {
 mod tests {
     use super::*;
     use crate::export::export_kit;
+    use std::collections::HashMap;
     use std::io::{Cursor, Write};
     use std::sync::Mutex;
+
+    type SavedArchive = (String, Vec<u8>, HashMap<String, Vec<u8>>);
 
     /// In-memory saver for testing.
     struct MemPersonaSaver {
         existing: Vec<String>,
-        saved: Mutex<Vec<(String, Vec<u8>, HashMap<String, Vec<u8>>)>>,
+        saved: Mutex<Vec<SavedArchive>>,
     }
 
     impl MemPersonaSaver {
@@ -402,7 +405,7 @@ mod tests {
 
     struct MemWorkflowSaver {
         existing: Vec<String>,
-        saved: Mutex<Vec<(String, Vec<u8>, HashMap<String, Vec<u8>>)>>,
+        saved: Mutex<Vec<SavedArchive>>,
     }
 
     impl MemWorkflowSaver {

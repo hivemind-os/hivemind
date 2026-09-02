@@ -11117,11 +11117,8 @@ mod tests {
     fn make_snappy_iwa(raw: &[u8]) -> Vec<u8> {
         let compressed = snap::raw::Encoder::new().compress_vec(raw).expect("snappy compress");
         let len = compressed.len();
-        let mut out = Vec::new();
-        out.push(0u8);
-        out.push((len & 0xFF) as u8);
-        out.push(((len >> 8) & 0xFF) as u8);
-        out.push(((len >> 16) & 0xFF) as u8);
+        let mut out =
+            vec![0u8, (len & 0xFF) as u8, ((len >> 8) & 0xFF) as u8, ((len >> 16) & 0xFF) as u8];
         out.extend_from_slice(&compressed);
         out
     }
@@ -11192,7 +11189,6 @@ mod tests {
     fn make_iwork_zip_empty() -> Vec<u8> {
         let mut buf = Vec::new();
         {
-            use std::io::Write;
             let mut z = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
             let opts = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
@@ -11788,7 +11784,7 @@ mod tests {
 
         // Create the global MCP service with the server config.
         let mcp = Arc::new(hive_mcp::McpService::from_configs(
-            &[mcp_server_cfg.clone()],
+            std::slice::from_ref(&mcp_server_cfg),
             EventBus::new(32),
             Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
         ));

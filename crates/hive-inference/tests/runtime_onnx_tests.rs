@@ -167,7 +167,6 @@ mod onnx_tests {
     }
 
     #[test]
-    #[test]
     fn load_real_bge_onnx_model_and_embed() {
         let model_dir = match vendor_model_dir() {
             Some(d) => d,

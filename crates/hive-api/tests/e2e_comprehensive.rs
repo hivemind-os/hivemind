@@ -1989,7 +1989,7 @@ async fn e2e_concurrent_requests() {
     let c = client();
 
     let mut handles = Vec::new();
-    for i in 0..10 {
+    for _i in 0..10 {
         let url = format!("{base}/healthz");
         let c = c.clone();
         handles.push(tokio::spawn(async move {

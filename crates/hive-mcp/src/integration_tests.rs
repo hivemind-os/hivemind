@@ -97,6 +97,7 @@ impl MockServer {
         self
     }
 
+    #[allow(dead_code)]
     fn with_subscribe(mut self) -> Self {
         self.supports_subscribe = true;
         self
@@ -316,7 +317,7 @@ async fn inject_mock_into_session(
 #[tokio::test]
 async fn service_connect_and_discover_tools() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock =
         MockServer::new().with_tool("greet", "Say hello").with_tool("compute", "Run computation");
@@ -333,7 +334,7 @@ async fn service_connect_and_discover_tools() {
 #[tokio::test]
 async fn service_discover_resources() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new()
         .with_resource("file:///workspace/README.md", "README.md")
@@ -349,7 +350,7 @@ async fn service_discover_resources() {
 #[tokio::test]
 async fn service_call_tool_success() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new().with_tool("echo", "Echo tool");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
@@ -366,7 +367,7 @@ async fn service_call_tool_success() {
 #[tokio::test]
 async fn service_call_tool_server_returns_error() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new()
         .with_tool("fail_tool", "A tool that fails")
@@ -381,7 +382,7 @@ async fn service_call_tool_server_returns_error() {
 #[tokio::test]
 async fn service_call_tool_unknown_server() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let result = service.call_tool("nonexistent", "tool", serde_json::Map::new()).await;
     assert!(result.is_err());
@@ -396,7 +397,7 @@ async fn service_call_tool_unknown_server() {
 #[tokio::test]
 async fn service_call_tool_not_connected() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     // Don't inject any mock — server is in Disconnected state
     let result = service.call_tool("srv1", "tool", serde_json::Map::new()).await;
@@ -414,7 +415,7 @@ async fn service_call_tool_disabled_server() {
     let mut cfg = test_server_config("srv1");
     cfg.enabled = false;
     let service = mcp_service_with_servers(vec![cfg]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     // ensure_connected on a disabled server should fail
     let result = service.ensure_connected("srv1").await;
@@ -430,7 +431,7 @@ async fn service_call_tool_disabled_server() {
 #[tokio::test]
 async fn service_disconnect_and_verify_status() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new().with_tool("t1", "tool 1");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
@@ -474,7 +475,7 @@ async fn service_disconnect_all() {
 #[tokio::test]
 async fn service_ensure_connected_idempotent() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new().with_tool("t1", "tool 1");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
@@ -492,7 +493,7 @@ async fn service_ensure_connected_idempotent() {
 #[tokio::test]
 async fn service_read_resource_content() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new().with_resource("file:///test.txt", "test.txt");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
@@ -504,7 +505,7 @@ async fn service_read_resource_content() {
 #[tokio::test]
 async fn service_server_logs_after_injection() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     let mock = MockServer::new().with_tool("t1", "tool 1");
     let _server = inject_mock_into_service(&service, "srv1", mock).await;
@@ -519,7 +520,7 @@ async fn service_server_logs_after_injection() {
 #[tokio::test]
 async fn service_update_servers_adds_and_removes() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     // Initially one server
     assert_eq!(service.list_servers().await.len(), 1);
@@ -543,7 +544,7 @@ async fn service_update_servers_adds_and_removes() {
 
 #[tokio::test]
 async fn session_mcp_call_tool_delegates_to_inner() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -565,7 +566,7 @@ async fn session_mcp_call_tool_delegates_to_inner() {
 
 #[tokio::test]
 async fn session_mcp_call_tool_unknown_server() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -607,7 +608,7 @@ async fn session_mcp_disconnect_all_cleans_up() {
 
 #[tokio::test]
 async fn session_mcp_set_workspace_path() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -624,7 +625,7 @@ async fn session_mcp_set_workspace_path() {
 
 #[tokio::test]
 async fn session_mcp_list_resources_after_connect() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -644,7 +645,7 @@ async fn session_mcp_list_resources_after_connect() {
 
 #[tokio::test]
 async fn session_mcp_read_resource() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -662,7 +663,7 @@ async fn session_mcp_read_resource() {
 
 #[tokio::test]
 async fn session_mcp_independent_sessions() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
 
     let mgr1 = SessionMcpManager::from_configs(
@@ -710,7 +711,7 @@ async fn session_mcp_from_configs_subset() {
 
 #[tokio::test]
 async fn session_mcp_connect_and_disconnect_explicit() {
-    let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
+    let _service = mcp_service_with_servers(vec![test_server_config("srv1")]);
     let bus = EventBus::new(128);
     let mgr = SessionMcpManager::from_configs(
         "session-1".to_string(),
@@ -794,7 +795,7 @@ async fn session_mcp_forwards_python_env() {
 #[tokio::test]
 async fn catalog_discover_and_catalog_flow() {
     let service = mcp_service_with_servers(vec![test_server_config("srv1")]);
-    let bus = EventBus::new(128);
+    let _bus = EventBus::new(128);
 
     // Inject a connected mock with tools and resources
     let mock = MockServer::new()
@@ -1514,7 +1515,7 @@ async fn catalog_survives_restart_and_tools_register() {
     // ── Phase 1: initial discovery ─────────────────────────────────
     {
         let service = mcp_service_with_servers(vec![test_server_config(server_id)]);
-        let bus = EventBus::new(128);
+        let _bus = EventBus::new(128);
 
         let mock =
             MockServer::new().with_tool("alpha", "first tool").with_tool("beta", "second tool");

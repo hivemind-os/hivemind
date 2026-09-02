@@ -27,9 +27,9 @@ use hive_loop::{
     LoopExecutor, RoutingConfig, SecurityContext, ToolsContext,
 };
 use hive_model::{
-    Capability, CompletionChunk, CompletionMessage, CompletionRequest, CompletionResponse,
-    CompletionStream, FinishReason, MessageBlock, ModelProvider, ModelRouter, ModelSelection,
-    ProviderDescriptor, ProviderKind, RoutingDecision, ToolCallResponse,
+    Capability, CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream,
+    FinishReason, MessageBlock, ModelProvider, ModelRouter, ModelSelection, ProviderDescriptor,
+    ProviderKind, RoutingDecision, ToolCallResponse,
 };
 use hive_tools::{Tool, ToolError, ToolRegistry, ToolResult};
 
@@ -132,23 +132,6 @@ impl ScriptProvider {
         }
     }
 
-    /// A response with both code and a native tool call.
-    fn code_and_tool(python_code: &str, tool_name: &str, tool_args: Value) -> CompletionResponse {
-        let content = format!("```python\n{python_code}\n```");
-        CompletionResponse {
-            provider_id: "test-provider".to_string(),
-            model: "test-model".to_string(),
-            content,
-            tool_calls: vec![ToolCallResponse {
-                id: format!("call-{tool_name}"),
-                name: tool_name.to_string(),
-                arguments: tool_args,
-            }],
-            usage: None,
-            finish_reason: None,
-        }
-    }
-
     fn tool_call(name: &str, args: Value) -> CompletionResponse {
         CompletionResponse {
             provider_id: "test-provider".to_string(),
@@ -241,10 +224,6 @@ impl MockTool {
     fn with_response(self, value: Value) -> Self {
         *self.response.lock() = Some(value);
         self
-    }
-
-    fn recorded_inputs(&self) -> Vec<Value> {
-        self.recorded_inputs.lock().clone()
     }
 }
 
@@ -604,9 +583,7 @@ async fn code_act_writes_file_to_workspace() {
     let file_path = workspace_path.join("output.txt");
 
     // The Python code writes a file to the workspace
-    let python_code = format!(
-        "with open('output.txt', 'w') as f:\n    f.write('hello from codeact')\nprint('file written')"
-    );
+    let python_code = "with open('output.txt', 'w') as f:\n    f.write('hello from codeact')\nprint('file written')".to_string();
 
     let provider = ScriptProvider::new(vec![
         ScriptProvider::code_response("Writing file:", &python_code, ""),

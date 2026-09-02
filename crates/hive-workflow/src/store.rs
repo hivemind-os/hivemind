@@ -2121,7 +2121,7 @@ mod tests {
             id: inst.id,
             definition_name: inst.definition.name.clone(),
             definition_version: inst.definition.version.clone(),
-            status: inst.status.clone(),
+            status: inst.status,
             parent_session_id: inst.parent_session_id.clone(),
             parent_agent_id: inst.parent_agent_id.clone(),
             trigger_step_id: inst.trigger_step_id.clone(),
@@ -2190,10 +2190,8 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             let mut best: Option<(&(String, String), u64)> = None;
             for (key, order) in &inner.def_insert_order {
-                if key.0 == name {
-                    if best.is_none() || *order > best.unwrap().1 {
-                        best = Some((key, *order));
-                    }
+                if key.0 == name && (best.is_none() || *order > best.unwrap().1) {
+                    best = Some((key, *order));
                 }
             }
             match best {
@@ -2339,7 +2337,7 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             let mut items: Vec<&WorkflowInstance> = inner.instances.values().collect();
             if !filter.statuses.is_empty() {
-                items.retain(|i| filter.statuses.iter().any(|s| *s == i.status));
+                items.retain(|i| filter.statuses.contains(&i.status));
             }
             if !filter.definition_names.is_empty() {
                 items.retain(|i| filter.definition_names.contains(&i.definition.name));
@@ -2357,7 +2355,7 @@ mod tests {
                 items.retain(|i| i.definition.mode == *mode);
             }
             let total = items.len();
-            items.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+            items.sort_by_key(|i| std::cmp::Reverse(i.created_at_ms));
             let offset = filter.offset.unwrap_or(0);
             let limit = filter.limit.unwrap_or(usize::MAX);
             let page: Vec<WorkflowInstanceSummary> =
@@ -2590,7 +2588,7 @@ mod tests {
                     matches!(
                         inst.status,
                         WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Killed
-                    ) && inst.completed_at_ms.map_or(false, |t| t < cutoff)
+                    ) && inst.completed_at_ms.is_some_and(|t| t < cutoff)
                 })
                 .map(|(&id, _)| id)
                 .collect();
@@ -2955,7 +2953,7 @@ mod tests {
         // Delete version 2.0 -- parent is also removed.
         assert!(store.delete_definition("test-workflow", "2.0").unwrap());
         assert!(store.get_latest_definition("test-workflow").unwrap().is_none());
-        assert!(store.is_bundled("test-workflow").unwrap() == false);
+        assert!(!store.is_bundled("test-workflow").unwrap());
     }
 
     #[test]

@@ -399,14 +399,14 @@ async fn test_notification() {
     // Give async notification a moment
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let notifs = env.notifications.lock();
-    assert!(!notifs.is_empty(), "should have captured at least 1 notification");
+    {
+        let notifs = env.notifications.lock();
+        assert!(!notifs.is_empty(), "should have captured at least 1 notification");
 
-    let n = &notifs[0];
-    assert_eq!(n["title"].as_str().unwrap_or(""), "Test Alert");
-    assert_eq!(n["body"].as_str().unwrap_or(""), "Something happened");
-
-    drop(notifs);
+        let n = &notifs[0];
+        assert_eq!(n["title"].as_str().unwrap_or(""), "Test Alert");
+        assert_eq!(n["body"].as_str().unwrap_or(""), "Something happened");
+    }
     env.shutdown().await.unwrap();
 }
 
@@ -420,7 +420,7 @@ async fn test_host_info() {
 
     // Result should contain version, platform, capabilities
     let content = &result;
-    let obj = content.get("content").or(Some(content)).unwrap();
+    let obj = content.get("content").unwrap_or(content);
 
     // Platform should match the OS we're running on
     let platform = obj.get("platform").and_then(|v| v.as_str()).unwrap_or_default();

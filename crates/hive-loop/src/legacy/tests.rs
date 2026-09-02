@@ -100,7 +100,7 @@ impl AgentOrchestrator for MockAgentOrchestrator {
 
     fn get_agent_result(
         &self,
-        agent_id: String,
+        _agent_id: String,
     ) -> BoxFuture<'_, Result<(String, Option<String>), String>> {
         Box::pin(async move { Ok(("Done".to_string(), None)) })
     }
@@ -441,7 +441,7 @@ async fn sequential_ignores_tool_call_in_response() {
     router.register_provider(provider);
     let router = Arc::new(router);
 
-    let tools = Arc::new(ToolRegistry::new());
+    let _tools = Arc::new(ToolRegistry::new());
     let executor = LoopExecutor::new(Arc::new(SequentialStrategy));
     let context = LoopContext {
         conversation: ConversationContext {
@@ -647,7 +647,7 @@ async fn plan_then_execute_no_plan_returns_response() {
     router.register_provider(provider);
     let router = Arc::new(router);
 
-    let tools = Arc::new(ToolRegistry::new());
+    let _tools = Arc::new(ToolRegistry::new());
     let executor = LoopExecutor::new(Arc::new(PlanThenExecuteStrategy));
     let context = LoopContext {
         conversation: ConversationContext {

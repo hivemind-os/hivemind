@@ -870,5 +870,5 @@ steps:
 
     // Normal executed the real tool
     let real_calls = executor.tool_calls.lock().await;
-    assert!(real_calls.len() >= 1);
+    assert!(!real_calls.is_empty());
 }

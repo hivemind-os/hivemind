@@ -304,10 +304,10 @@ async fn workflow_agent_question_appears_in_both_sse_streams() {
 
     // Wait for the question in the interactions SSE snapshot.
     let interactions_snap = wait_for_sse_event(&mut interactions_rx, TIMEOUT, |ev| {
-        ev.get("interactions").and_then(|items| items.as_array()).map_or(false, |items| {
+        ev.get("interactions").and_then(|items| items.as_array()).is_some_and(|items| {
             items.iter().any(|item| {
                 item["type"].as_str() == Some("question")
-                    && item["text"].as_str().map_or(false, |t| t.contains("favorite color"))
+                    && item["text"].as_str().is_some_and(|t| t.contains("favorite color"))
             })
         })
     })
@@ -328,7 +328,7 @@ async fn workflow_agent_question_appears_in_both_sse_streams() {
         .iter()
         .find(|item| {
             item["type"].as_str() == Some("question")
-                && item["text"].as_str().map_or(false, |t| t.contains("favorite color"))
+                && item["text"].as_str().is_some_and(|t| t.contains("favorite color"))
         })
         .expect("question in snapshot");
 
@@ -379,7 +379,7 @@ async fn workflow_agent_question_propagates_interaction_counts() {
             let questions: Vec<Value> = resp.json().await.ok()?;
             questions
                 .into_iter()
-                .find(|q| q["text"].as_str().map_or(false, |t| t.contains("favorite color")))
+                .find(|q| q["text"].as_str().is_some_and(|t| t.contains("favorite color")))
         }
     })
     .await

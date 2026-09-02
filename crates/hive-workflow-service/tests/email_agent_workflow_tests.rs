@@ -173,10 +173,6 @@ impl MockTool {
         self
     }
 
-    fn recorded_inputs(&self) -> Vec<Value> {
-        self.recorded_inputs.lock().clone()
-    }
-
     fn inputs_handle(&self) -> Arc<ParkingMutex<Vec<Value>>> {
         Arc::clone(&self.recorded_inputs)
     }
@@ -213,7 +209,7 @@ struct FullStackExecutor {
     model_router: Arc<ArcSwap<ModelRouter>>,
     loop_executor: Arc<LoopExecutor>,
     /// LLM requests recorded by the ScriptProvider (for assertions).
-    llm_recorder: Arc<ParkingMutex<Vec<CompletionRequest>>>,
+    _llm_recorder: Arc<ParkingMutex<Vec<CompletionRequest>>>,
 }
 
 impl FullStackExecutor {
@@ -223,7 +219,7 @@ impl FullStackExecutor {
         loop_executor: Arc<LoopExecutor>,
         llm_recorder: Arc<ParkingMutex<Vec<CompletionRequest>>>,
     ) -> Self {
-        Self { tools, model_router, loop_executor, llm_recorder }
+        Self { tools, model_router, loop_executor, _llm_recorder: llm_recorder }
     }
 }
 
@@ -1267,8 +1263,7 @@ steps:
     // --- Wait for the workflow to complete ---
     // The trigger manager processes events asynchronously.
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(15);
-    let mut instance_id = None;
-    loop {
+    let id = loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Check if any instance was created for our definition
@@ -1280,8 +1275,7 @@ steps:
         let instances = &result.items;
         if let Some(inst) = instances.first() {
             if inst.status == WorkflowStatus::Completed || inst.status == WorkflowStatus::Failed {
-                instance_id = Some(inst.id.clone());
-                break;
+                break inst.id;
             }
         }
 
@@ -1290,9 +1284,7 @@ steps:
                 instances.iter().map(|i| format!("{}: {:?}", i.id, i.status)).collect();
             panic!("Timed out waiting for workflow to complete. Instances: {statuses:?}");
         }
-    }
-
-    let id = instance_id.unwrap();
+    };
     let inst = store.get_instance(id).unwrap().unwrap();
 
     // --- Assert: workflow completed successfully ---
@@ -1305,22 +1297,31 @@ steps:
     );
 
     // --- Assert: LLM received prompt with email content ---
-    let requests = llm_recorder.lock();
-    assert!(!requests.is_empty(), "LLM should have received at least one request");
-    let first_prompt = &requests[0].prompt;
-    assert!(
-        first_prompt.contains("sender@example.com"),
-        "prompt should contain sender: {first_prompt}"
-    );
-    assert!(first_prompt.contains("Need help"), "prompt should contain subject: {first_prompt}");
-    assert!(first_prompt.contains("C-5678"), "prompt should contain body content: {first_prompt}");
-    drop(requests);
+    {
+        let requests = llm_recorder.lock();
+        assert!(!requests.is_empty(), "LLM should have received at least one request");
+        let first_prompt = &requests[0].prompt;
+        assert!(
+            first_prompt.contains("sender@example.com"),
+            "prompt should contain sender: {first_prompt}"
+        );
+        assert!(
+            first_prompt.contains("Need help"),
+            "prompt should contain subject: {first_prompt}"
+        );
+        assert!(
+            first_prompt.contains("C-5678"),
+            "prompt should contain body content: {first_prompt}"
+        );
+    }
 
     // --- Assert: comm.send_external_message tool was called ---
-    let inputs = comm_send_inputs.lock();
-    assert_eq!(inputs.len(), 1, "comm.send_external_message should be called once");
-    assert_eq!(inputs[0]["connector_id"], "test-connector");
-    assert_eq!(inputs[0]["to"], "sender@example.com");
+    {
+        let inputs = comm_send_inputs.lock();
+        assert_eq!(inputs.len(), 1, "comm.send_external_message should be called once");
+        assert_eq!(inputs[0]["connector_id"], "test-connector");
+        assert_eq!(inputs[0]["to"], "sender@example.com");
+    }
 
     // Clean up
     tm.stop().await;

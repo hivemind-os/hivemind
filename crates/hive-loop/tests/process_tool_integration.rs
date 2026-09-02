@@ -36,7 +36,6 @@ use serde_json::json;
 struct ScriptProvider {
     descriptor: ProviderDescriptor,
     responses: Mutex<VecDeque<CompletionResponse>>,
-    prompts: Mutex<Vec<String>>,
 }
 
 impl ScriptProvider {
@@ -56,7 +55,6 @@ impl ScriptProvider {
                 available: true,
             },
             responses: Mutex::new(VecDeque::from(responses)),
-            prompts: Mutex::new(Vec::new()),
         }
     }
 
@@ -91,29 +89,6 @@ impl ScriptProvider {
             finish_reason: None,
         }
     }
-
-    /// Response with multiple tool calls.
-    fn multi_tool(calls: Vec<(&str, &str, serde_json::Value)>) -> CompletionResponse {
-        CompletionResponse {
-            provider_id: "mock".into(),
-            model: "test-model".into(),
-            content: String::new(),
-            tool_calls: calls
-                .into_iter()
-                .map(|(id, name, args)| ToolCallResponse {
-                    id: id.into(),
-                    name: name.into(),
-                    arguments: args,
-                })
-                .collect(),
-            usage: None,
-            finish_reason: None,
-        }
-    }
-
-    fn recorded_prompts(&self) -> Vec<String> {
-        self.prompts.lock().unwrap().clone()
-    }
 }
 
 impl ModelProvider for ScriptProvider {
@@ -123,10 +98,9 @@ impl ModelProvider for ScriptProvider {
 
     fn complete(
         &self,
-        request: &CompletionRequest,
+        _request: &CompletionRequest,
         selection: &ModelSelection,
     ) -> anyhow::Result<CompletionResponse> {
-        self.prompts.lock().unwrap().push(request.prompt.clone());
         let mut queue = self.responses.lock().unwrap();
         let mut resp = queue.pop_front().unwrap_or_else(|| CompletionResponse {
             provider_id: "mock".into(),
@@ -238,7 +212,7 @@ fn make_context(tools: Arc<ToolRegistry>, prompt: &str) -> LoopContext {
             shadow_mode: false,
         },
         tools_ctx: ToolsContext {
-            tools: tools,
+            tools,
             skill_catalog: None,
             knowledge_query_handler: None,
             tool_execution_mode: ToolExecutionMode::default(),

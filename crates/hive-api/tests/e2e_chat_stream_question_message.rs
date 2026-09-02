@@ -195,7 +195,7 @@ async fn chat_stream_delivers_question_message() {
                 .iter()
                 .find(|m| {
                     m["interaction_kind"].as_str() == Some("question")
-                        && m["content"].as_str().map_or(false, |c| c.contains("favorite color"))
+                        && m["content"].as_str().is_some_and(|c| c.contains("favorite color"))
                 })
                 .cloned()
         }
@@ -280,7 +280,7 @@ async fn multiple_questions_create_separate_messages() {
             let questions: Vec<Value> = resp.json().await.ok()?;
             questions
                 .into_iter()
-                .find(|q| q["text"].as_str().map_or(false, |t| t.contains("favorite color")))
+                .find(|q| q["text"].as_str().is_some_and(|t| t.contains("favorite color")))
         }
     })
     .await

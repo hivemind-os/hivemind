@@ -1352,7 +1352,7 @@ async fn test_loop_state_persistence() {
 
     // Verify LoopWaiting status serializes correctly
     let status = StepStatus::LoopWaiting;
-    let status_json = serde_json::to_value(&status).unwrap();
+    let status_json = serde_json::to_value(status).unwrap();
     assert_eq!(status_json, "loop_waiting");
     let deserialized_status: StepStatus = serde_json::from_value(status_json).unwrap();
     assert_eq!(deserialized_status, StepStatus::LoopWaiting);

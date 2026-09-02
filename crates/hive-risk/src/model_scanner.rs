@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn preferred_models_from_scanner_entries() {
-        let entries = vec![
+        let entries = [
             ScannerModelEntry { provider: "azure".into(), model: "gpt-4o-mini".into() },
             ScannerModelEntry { provider: "ollama-local".into(), model: "llama3".into() },
         ];

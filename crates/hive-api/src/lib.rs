@@ -3654,25 +3654,27 @@ mod tests {
 
     #[test]
     fn config_driven_router_snapshot_reflects_provider_bindings() {
-        let mut config = HiveMindConfig::default();
-        config.models = ModelsConfig {
-            providers: vec![ModelProviderConfig {
-                id: "openrouter".to_string(),
-                name: Some("OpenRouter".to_string()),
-                kind: ProviderKindConfig::OpenAiCompatible,
-                base_url: Some("http://127.0.0.1:43180".to_string()),
-                auth: ProviderAuthConfig::None,
-                models: vec!["test-model".to_string()],
-                capabilities: [CapabilityConfig::Chat].into_iter().collect(),
-                model_capabilities: Default::default(),
-                model_limits: std::collections::BTreeMap::new(),
-                channel_class: hive_classification::ChannelClass::Internal,
-                priority: 100,
-                enabled: true,
-                options: ProviderOptionsConfig::default(),
-            }],
-            request_timeout_secs: None,
-            stream_timeout_secs: None,
+        let config = HiveMindConfig {
+            models: ModelsConfig {
+                providers: vec![ModelProviderConfig {
+                    id: "openrouter".to_string(),
+                    name: Some("OpenRouter".to_string()),
+                    kind: ProviderKindConfig::OpenAiCompatible,
+                    base_url: Some("http://127.0.0.1:43180".to_string()),
+                    auth: ProviderAuthConfig::None,
+                    models: vec!["test-model".to_string()],
+                    capabilities: [CapabilityConfig::Chat].into_iter().collect(),
+                    model_capabilities: Default::default(),
+                    model_limits: std::collections::BTreeMap::new(),
+                    channel_class: hive_classification::ChannelClass::Internal,
+                    priority: 100,
+                    enabled: true,
+                    options: ProviderOptionsConfig::default(),
+                }],
+                request_timeout_secs: None,
+                stream_timeout_secs: None,
+            },
+            ..Default::default()
         };
         validate_hivemind_config(&config).expect("provider-backed config should validate");
 

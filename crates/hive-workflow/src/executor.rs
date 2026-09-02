@@ -3552,10 +3552,6 @@ mod tests {
         fn new() -> Self {
             Self { events: Mutex::new(Vec::new()) }
         }
-
-        async fn events(&self) -> Vec<WorkflowEvent> {
-            self.events.lock().await.clone()
-        }
     }
 
     #[async_trait]

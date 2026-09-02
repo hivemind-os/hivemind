@@ -147,7 +147,7 @@ async fn question_appears_in_interactions_sse_snapshot() {
             Ok(Some(interactions)) => {
                 for item in &interactions {
                     if item["type"].as_str() == Some("question")
-                        && item["text"].as_str().map_or(false, |t| t.contains("favorite color"))
+                        && item["text"].as_str().is_some_and(|t| t.contains("favorite color"))
                         && item["session_id"].as_str() == Some(session_id.as_str())
                     {
                         found_question = Some(item.clone());
