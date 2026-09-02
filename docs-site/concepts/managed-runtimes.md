@@ -78,6 +78,8 @@ node:
 | `base_packages` | *(see above)* | Packages pre-installed in every session's virtual environment |
 | `auto_detect_workspace_deps` | `true` | Automatically install dependencies from `requirements.txt` or `pyproject.toml` found in the workspace |
 
+Managed venvs are created with `uv venv --seed` so `python -m pip` works. uv omits pip unless seeded; skills and agents install packages with `python -m pip`, not `uv pip`.
+
 ### Node.js Options
 
 | Field | Default | Description |

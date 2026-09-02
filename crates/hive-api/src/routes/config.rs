@@ -311,7 +311,9 @@ pub(crate) async fn discover_provider_models(
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("task join error: {e}")))?
-    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("{e:#}")))?;
+    .map_err(|e| {
+        (StatusCode::BAD_GATEWAY, format!("failed to list models from the provider: {e:#}"))
+    })?;
 
     Ok(Json(models))
 }

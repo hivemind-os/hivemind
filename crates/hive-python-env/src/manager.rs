@@ -120,6 +120,11 @@ impl PythonEnvManager {
 
         // If venv already exists with the right Python, check the manifest.
         if python_path.exists() && self.manifest_matches(&venv_dir) {
+            if let Err(e) = self.ensure_pip(&uv_path, &python_path).await {
+                tracing::error!(error = %e, "existing Python environment is missing pip");
+                self.set_status(PythonEnvStatus::Failed { error: e.to_string() }).await;
+                return Err(e);
+            }
             let info = PythonEnvInfo { python_path, venv_path: venv_dir.clone(), uv_path };
             tracing::info!(venv = %venv_dir.display(), "existing Python environment is up-to-date");
             self.set_status(PythonEnvStatus::Ready {
@@ -148,15 +153,20 @@ impl PythonEnvManager {
         .await;
         tracing::info!(venv = %venv_dir.display(), "creating virtual environment");
 
-        // Create the venv.
+        // Create the venv. `--seed` installs pip/setuptools/wheel so agents can
+        // run `python -m pip` (uv venvs omit pip unless seeded).
         std::fs::create_dir_all(venv_dir.parent().unwrap_or(Path::new(".")))?;
+        let venv_dir_str = venv_dir.to_string_lossy().to_string();
         if let Err(e) = self
-            .run_uv(
-                &uv_path,
-                &["venv", &venv_dir.to_string_lossy(), "--python", &self.config.python_version],
-            )
+            .run_uv(&uv_path, &venv_create_args(&venv_dir_str, &self.config.python_version))
             .await
         {
+            self.set_status(PythonEnvStatus::Failed { error: e.to_string() }).await;
+            return Err(e);
+        }
+
+        if let Err(e) = self.ensure_pip(&uv_path, &python_path).await {
+            tracing::error!(error = %e, "managed venv is missing pip after creation");
             self.set_status(PythonEnvStatus::Failed { error: e.to_string() }).await;
             return Err(e);
         }
@@ -272,11 +282,13 @@ impl PythonEnvManager {
         // Create session venv if it doesn't exist.
         if !python_path.exists() {
             std::fs::create_dir_all(session_venv.parent().unwrap_or(Path::new(".")))?;
+            let session_venv_str = session_venv.to_string_lossy().to_string();
             self.run_uv(
                 &uv_path,
-                &["venv", &session_venv.to_string_lossy(), "--python", &self.config.python_version],
+                &venv_create_args(&session_venv_str, &self.config.python_version),
             )
             .await?;
+            self.ensure_pip(&uv_path, &python_path).await?;
         }
 
         // Install dependencies.
@@ -323,6 +335,38 @@ impl PythonEnvManager {
             std::fs::remove_dir_all(&venv_dir)?;
         }
         self.ensure_default_env().await
+    }
+
+    /// Ensure `python -m pip` works in this venv.
+    ///
+    /// `uv venv` without `--seed` has no pip. Skills and agents always call
+    /// `python -m pip install`, so a "ready" venv without pip looks healthy
+    /// and then fails in the field.
+    async fn ensure_pip(&self, uv_path: &Path, python_path: &Path) -> Result<(), PythonEnvError> {
+        if python_has_pip(python_path).await {
+            return Ok(());
+        }
+
+        tracing::warn!(
+            python = %python_path.display(),
+            "managed venv is missing pip; installing pip/setuptools/wheel"
+        );
+        let python_str = python_path.to_string_lossy().to_string();
+        self.run_uv(
+            uv_path,
+            &["pip", "install", "--python", &python_str, "pip", "setuptools", "wheel"],
+        )
+        .await?;
+
+        if python_has_pip(python_path).await {
+            return Ok(());
+        }
+
+        Err(PythonEnvError::UvCommand(
+            "managed Python venv has no pip (`python -m pip` failed) and seeding pip failed. \
+             Reinstall the Python environment from Settings."
+                .to_string(),
+        ))
     }
 
     /// Run a uv command and check its exit status.
@@ -400,4 +444,24 @@ impl PythonEnvManager {
             tracing::warn!("failed to write python env manifest: {e}");
         }
     }
+}
+
+/// `uv venv` arguments. `--seed` installs pip so `python -m pip` works.
+pub(crate) fn venv_create_args<'a>(venv_dir: &'a str, python_version: &'a str) -> Vec<&'a str> {
+    vec!["venv", venv_dir, "--python", python_version, "--seed"]
+}
+
+pub(crate) async fn python_has_pip(python_path: &Path) -> bool {
+    let mut cmd = tokio::process::Command::new(python_path);
+    cmd.args(["-m", "pip", "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    cmd.status().await.map(|s| s.success()).unwrap_or(false)
 }

@@ -126,9 +126,11 @@ models:
 
 The `azure-default` auth method uses the Azure credential chain — no API key required. It tries the following sources in order:
 
-1. **Managed Identity** — automatically available on Azure VMs, App Service, Azure Functions, AKS, and other Azure-hosted compute
+1. **Managed Identity** — used only when HiveMind is running on Azure-hosted compute (IMDS, App Service, Arc, or workload identity). It is skipped on laptops so local Fetch Models does not hang waiting for `169.254.169.254`.
 2. **Azure CLI** — for local development, authenticate with `az login`
 3. **Azure Developer CLI** — authenticate with `azd auth login`
+
+The desktop daemon must be able to run `az` / `azd` on its `PATH`. If you start HiveMind from the GUI rather than a terminal, sign in with `az login` in a shell that the daemon inherits, or use an API key instead.
 
 ::: tip Prerequisites for Azure Identity
 Your identity (managed identity or user account) must have the appropriate role assignment on the Azure AI resource, such as `Cognitive Services User` or `Cognitive Services Contributor`.

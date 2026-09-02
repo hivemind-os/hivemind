@@ -776,27 +776,14 @@ impl AgentRunner {
             return Arc::new(ToolRegistry::new());
         };
 
-        let all_tools_allowed = self.spec.allowed_tools.iter().any(|tool_id| tool_id == "*");
-
-        // If everything is allowed, return as-is
-        if all_tools_allowed {
+        // Persona YAML uses glob allowlists (`shell.*`, `filesystem.*`). Match
+        // those the same way session tool assembly does — exact ID lookup
+        // dropped `shell.execute` for the 3D-print CAD designer.
+        if self.spec.allowed_tools.iter().any(|tool_id| tool_id == "*") {
             return Arc::clone(base_tools);
         }
 
-        let mut filtered = ToolRegistry::new();
-
-        // Explicit tool allowlist
-        for tool_id in &self.spec.allowed_tools {
-            let Some(tool) = base_tools.get(tool_id) else {
-                debug!(agent = %self.spec.id, tool_id, "agent requested unknown tool");
-                continue;
-            };
-            if let Err(error) = filtered.register(tool) {
-                debug!(agent = %self.spec.id, tool_id, %error, "failed to register filtered tool");
-            }
-        }
-
-        Arc::new(filtered)
+        Arc::new(base_tools.filtered(&self.spec.allowed_tools))
     }
 
     fn placeholder_task_result(&self, content: &str) -> String {
@@ -1065,6 +1052,52 @@ mod tests {
         let definitions = filtered.list_definitions();
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].id, "allowed.tool");
+    }
+
+    #[test]
+    fn filter_tools_supports_glob_patterns() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(TestTool::new("shell.execute"))).unwrap();
+        registry.register(Arc::new(TestTool::new("filesystem.read"))).unwrap();
+        registry.register(Arc::new(TestTool::new("filesystem.write"))).unwrap();
+        registry.register(Arc::new(TestTool::new("datetime.now"))).unwrap();
+
+        let runner = make_runner(
+            AgentSpec {
+                id: "agent-cad".to_string(),
+                name: "CAD Designer".to_string(),
+                friendly_name: "cad".to_string(),
+                description: String::new(),
+                role: AgentRole::Coder,
+                model: None,
+                preferred_models: None,
+                loop_strategy: None,
+                tool_execution_mode: None,
+                system_prompt: "You are testing".to_string(),
+                allowed_tools: vec![
+                    "shell.*".to_string(),
+                    "filesystem.read".to_string(),
+                    "filesystem.write".to_string(),
+                ],
+                avatar: None,
+                color: None,
+                data_class: hive_classification::DataClass::Public,
+                keep_alive: false,
+                idle_timeout_secs: None,
+                tool_limits: None,
+                persona_id: None,
+                workflow_managed: true,
+                shadow_mode: false,
+            },
+            Arc::new(registry),
+        );
+
+        let filtered = runner.filter_tools();
+        let ids: Vec<String> = filtered.list_definitions().iter().map(|d| d.id.clone()).collect();
+        assert!(ids.contains(&"shell.execute".to_string()), "shell.* must match shell.execute");
+        assert!(ids.contains(&"filesystem.read".to_string()));
+        assert!(ids.contains(&"filesystem.write".to_string()));
+        assert!(!ids.contains(&"datetime.now".to_string()), "unlisted tools must be excluded");
     }
 
     #[test]

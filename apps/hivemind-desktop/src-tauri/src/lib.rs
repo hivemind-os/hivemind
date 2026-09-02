@@ -2638,10 +2638,24 @@ where
     B: Serialize,
     T: DeserializeOwned,
 {
+    blocking_post_json_timed(base_url, path, body, std::time::Duration::from_secs(30))
+}
+
+fn blocking_post_json_timed<B, T>(
+    base_url: &str,
+    path: &str,
+    body: B,
+    timeout: std::time::Duration,
+) -> Result<T, String>
+where
+    B: Serialize,
+    T: DeserializeOwned,
+{
     let url = format!("{base_url}{path}");
     // Serialize body once so we can retry on 401 without requiring Clone.
     let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
     let response = with_auth(client()?.post(&url))
+        .timeout(timeout)
         .header("content-type", "application/json")
         .body(body_bytes.clone())
         .send()
@@ -2649,6 +2663,7 @@ where
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         invalidate_daemon_token();
         let response = with_auth(client()?.post(&url))
+            .timeout(timeout)
             .header("content-type", "application/json")
             .body(body_bytes)
             .send()
@@ -3724,7 +3739,7 @@ async fn fetch_provider_models(
 ) -> Result<Vec<String>, String> {
     let daemon = daemon_url(None).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        blocking_post_json::<serde_json::Value, Vec<String>>(
+        blocking_post_json_timed::<serde_json::Value, Vec<String>>(
             &daemon,
             "/api/v1/config/providers/discover-models",
             serde_json::json!({
@@ -3733,6 +3748,7 @@ async fn fetch_provider_models(
                 "auth": auth_kind,
                 "base_url": base_url,
             }),
+            std::time::Duration::from_secs(45),
         )
     })
     .await

@@ -4114,6 +4114,21 @@ mod tests {
     }
 
     #[test]
+    fn filtered_shell_glob_matches_shell_execute() {
+        let mut registry = ToolRegistry::new();
+        let _ = registry.register(Arc::new(ShellCommandTool::default()));
+        let _ = registry.register(Arc::new(CalculatorTool::default()));
+
+        let filtered = registry.filtered(&["shell.*".to_string()]);
+        let ids: Vec<_> = filtered.list_definitions().iter().map(|d| d.id.clone()).collect();
+        assert!(
+            ids.contains(&"shell.execute".to_string()),
+            "persona allowlist 'shell.*' must include shell.execute"
+        );
+        assert!(!ids.contains(&"math.calculate".to_string()));
+    }
+
+    #[test]
     fn filtered_exact_match_still_works() {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(CalculatorTool::default()));

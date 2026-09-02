@@ -466,16 +466,14 @@ impl AgentSupervisor {
             // registry when no factory is configured or personas match.
             let (agent_tools, agent_skill_catalog) = self.resolve_persona_tools(&spec).await?;
 
-            // Resolve the actual tool list for this agent
-            let resolved_tools = if spec.allowed_tools.iter().any(|t| t == "*") {
-                agent_tools.list_definitions().iter().map(|d| d.id.clone()).collect()
-            } else {
-                spec.allowed_tools
-                    .iter()
-                    .filter(|t| agent_tools.get(t).is_some())
-                    .cloned()
-                    .collect()
-            };
+            // Resolve the actual tool list for this agent. Glob patterns in
+            // `allowed_tools` (e.g. `shell.*`) must expand to real tool IDs.
+            let resolved_tools = agent_tools
+                .filtered(&spec.allowed_tools)
+                .list_definitions()
+                .into_iter()
+                .map(|d| d.id)
+                .collect();
 
             let effective_permissions = agent_permissions.unwrap_or_else(|| {
                 if let Some(exec) = &self.execution {

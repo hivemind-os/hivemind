@@ -650,9 +650,7 @@ pub(crate) async fn api_mcp_sampling_approve(
     State(state): State<AppState>,
     Json(req): Json<SamplingApprovalRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let found = state
-        .sampling_handler
-        .respond_to_approval(&req.request_id, req.approved);
+    let found = state.sampling_handler.respond_to_approval(&req.request_id, req.approved);
 
     if !found {
         return Err((

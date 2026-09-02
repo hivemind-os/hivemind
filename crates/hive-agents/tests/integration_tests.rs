@@ -827,6 +827,58 @@ async fn test_allowed_tools_filters_persona_registry() {
 }
 
 #[tokio::test]
+async fn test_allowed_tools_glob_expands_to_matching_ids() {
+    let mut persona_tools = std::collections::HashMap::new();
+    persona_tools.insert(
+        "persona-cad".to_string(),
+        vec![
+            "shell.execute".to_string(),
+            "filesystem.read".to_string(),
+            "filesystem.write".to_string(),
+            "datetime.now".to_string(),
+        ],
+    );
+
+    let factory = Arc::new(MockPersonaToolFactory::new(persona_tools));
+
+    let sup = AgentSupervisor::with_executor_and_persona_factory(
+        128,
+        None,
+        Arc::new(LoopExecutor::new(Arc::new(ReActStrategy))),
+        Arc::new(ArcSwap::from_pointee(ModelRouter::new())),
+        Arc::new(ToolRegistry::new()),
+        Arc::new(Mutex::new(SessionPermissions::default())),
+        Arc::new(Mutex::new(Vec::new())),
+        None,
+        "session-1".to_string(),
+        std::path::PathBuf::from("/tmp/test"),
+        None,
+        None,
+        Some(factory.clone() as Arc<dyn hive_agents::PersonaToolFactory>),
+        Some("persona-a".to_string()),
+    );
+
+    let mut spec = make_spec("agent-cad", "CAD", AgentRole::Coder);
+    spec.persona_id = Some("persona-cad".to_string());
+    spec.allowed_tools = vec!["shell.*".to_string(), "filesystem.read".to_string()];
+
+    sup.spawn_agent(spec, None, None, None, None).await.unwrap();
+
+    let agents = sup.get_all_agents();
+    let resolved = &agents[0].tools;
+    assert!(
+        resolved.contains(&"shell.execute".to_string()),
+        "shell.* must expand to shell.execute, got {resolved:?}"
+    );
+    assert!(resolved.contains(&"filesystem.read".to_string()));
+    assert!(!resolved.contains(&"filesystem.write".to_string()));
+    assert!(!resolved.contains(&"datetime.now".to_string()));
+    assert!(!resolved.contains(&"shell.*".to_string()), "glob pattern itself is not a tool id");
+
+    sup.kill_all().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_spawn_agent_no_persona_uses_session_registry() {
     let mut session_registry = ToolRegistry::new();
     session_registry.register(Arc::new(TestToolSimple::new("session.tool"))).unwrap();

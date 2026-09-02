@@ -20,12 +20,15 @@
 //!
 //! Call [`configure_timeouts`] before issuing the first request if the default provider timeouts need to be overridden.
 
+pub(crate) mod azure_auth;
 pub mod local_provider;
 pub(crate) mod transport;
 pub(crate) mod transport_anthropic;
 pub(crate) mod transport_foundry;
 pub(crate) mod transport_openai;
 pub(crate) mod transport_utils;
+
+pub(crate) use azure_auth::{get_azure_token_blocking, AZURE_AI_SCOPE, AZURE_COGNITIVE_SCOPE};
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures_core::Stream;
@@ -663,180 +666,6 @@ async fn _get_copilot_token_async() -> Result<String> {
     let token = new_token.token.clone();
     *COPILOT_TOKEN_CACHE.lock() = Some(new_token);
     Ok(token)
-}
-
-// ---------------------------------------------------------------------------
-// Azure Default Credential token caching
-// ---------------------------------------------------------------------------
-
-/// Scope required for Azure AI / Cognitive Services inference endpoints.
-pub(crate) const AZURE_COGNITIVE_SCOPE: &str = "https://cognitiveservices.azure.com/.default";
-
-/// Scope required for Azure AI Foundry Projects API (deployment listing, etc.).
-const AZURE_AI_SCOPE: &str = "https://ai.azure.com/.default";
-
-/// Cached Azure AD bearer token with expiry.
-#[derive(Clone, Debug)]
-struct AzureTokenCache {
-    token: String,
-    /// Unix timestamp (seconds) when this token expires.
-    expires_at: u64,
-}
-
-/// Thread-safe cache for Azure AD tokens, keyed by scope.
-static AZURE_TOKEN_CACHE: std::sync::LazyLock<
-    parking_lot::Mutex<std::collections::HashMap<String, AzureTokenCache>>,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-
-/// Lazily-initialised Azure credential chain: tries ManagedIdentity, then
-/// Azure CLI, then Azure Developer CLI.
-static AZURE_CREDENTIAL: std::sync::LazyLock<
-    Result<Arc<dyn azure_core::credentials::TokenCredential>>,
-> = std::sync::LazyLock::new(|| {
-    use azure_core::credentials::TokenCredential;
-
-    // Build the list of credential sources individually.
-    // Each may succeed at construction but fail at token-acquisition time,
-    // so all are included and tried in sequence during get_token().
-    let mut sources: Vec<Arc<dyn TokenCredential>> = Vec::new();
-
-    if let Ok(c) = azure_identity::ManagedIdentityCredential::new(None) {
-        tracing::debug!("Azure credential chain: ManagedIdentityCredential available");
-        sources.push(c as Arc<dyn TokenCredential>);
-    }
-    if let Ok(c) = azure_identity::AzureCliCredential::new(None) {
-        tracing::debug!("Azure credential chain: AzureCliCredential available");
-        sources.push(c as Arc<dyn TokenCredential>);
-    }
-    if let Ok(c) = azure_identity::AzureDeveloperCliCredential::new(None) {
-        tracing::debug!("Azure credential chain: AzureDeveloperCliCredential available");
-        sources.push(c as Arc<dyn TokenCredential>);
-    }
-
-    if sources.is_empty() {
-        return Err(anyhow!(
-            "no Azure credential sources available (neither Managed Identity nor Azure CLI)"
-        ));
-    }
-
-    tracing::info!("Azure credential chain initialised with {} source(s)", sources.len());
-    Ok(Arc::new(AzureCredentialChain { sources }) as Arc<dyn TokenCredential>)
-});
-
-/// A simple credential chain that tries each source in order until one succeeds.
-struct AzureCredentialChain {
-    sources: Vec<Arc<dyn azure_core::credentials::TokenCredential>>,
-}
-
-impl std::fmt::Debug for AzureCredentialChain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AzureCredentialChain").field("sources_count", &self.sources.len()).finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl azure_core::credentials::TokenCredential for AzureCredentialChain {
-    async fn get_token(
-        &self,
-        scopes: &[&str],
-        options: Option<azure_core::credentials::TokenRequestOptions<'_>>,
-    ) -> azure_core::Result<azure_core::credentials::AccessToken> {
-        let mut last_error = None;
-        for source in &self.sources {
-            match source.get_token(scopes, options.clone()).await {
-                Ok(token) => return Ok(token),
-                Err(e) => {
-                    tracing::debug!("Azure credential source failed: {e}");
-                    last_error = Some(e);
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            azure_core::Error::with_message(
-                azure_core::error::ErrorKind::Credential,
-                "no credential sources available".to_string(),
-            )
-        }))
-    }
-}
-
-/// Acquire an Azure AD bearer token for the given scope, using a cached value
-/// when possible.
-///
-/// Tokens are refreshed when within 5 minutes of expiry.
-pub(crate) fn get_azure_token_blocking(scope: &str) -> Result<String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    {
-        let cache = AZURE_TOKEN_CACHE.lock();
-        if let Some(cached) = cache.get(scope) {
-            if cached.expires_at > now + 300 {
-                return Ok(cached.token.clone());
-            }
-        }
-    }
-
-    // Acquire a fresh token. get_token is async, so handle both
-    // inside-tokio and outside-tokio scenarios.
-    let access_token = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            tokio::task::block_in_place(|| handle.block_on(acquire_azure_token_async(scope)))?
-        }
-        Err(_) => {
-            let rt = tokio::runtime::Runtime::new()
-                .context("failed to create tokio runtime for Azure credential")?;
-            rt.block_on(acquire_azure_token_async(scope))?
-        }
-    };
-
-    let token = access_token.token.clone();
-    AZURE_TOKEN_CACHE.lock().insert(scope.to_string(), access_token);
-    Ok(token)
-}
-
-/// Acquire an Azure AD bearer token asynchronously for the given scope.
-#[allow(dead_code)]
-pub(crate) async fn get_azure_token_async(scope: &str) -> Result<String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    {
-        let cache = AZURE_TOKEN_CACHE.lock();
-        if let Some(cached) = cache.get(scope) {
-            if cached.expires_at > now + 300 {
-                return Ok(cached.token.clone());
-            }
-        }
-    }
-
-    let access_token = acquire_azure_token_async(scope).await?;
-    let token = access_token.token.clone();
-    AZURE_TOKEN_CACHE.lock().insert(scope.to_string(), access_token);
-    Ok(token)
-}
-
-/// Internal helper: call the credential chain and convert to our cache struct.
-async fn acquire_azure_token_async(scope: &str) -> Result<AzureTokenCache> {
-    let credential = AZURE_CREDENTIAL
-        .as_ref()
-        .map_err(|e| anyhow!("{e}"))
-        .context("Azure credential chain not available")?;
-
-    let response = credential
-        .get_token(&[scope], None)
-        .await
-        .map_err(|e| anyhow!("Azure token acquisition failed: {e}"))
-        .context("failed to acquire Azure token via credential chain")?;
-
-    let token = response.token.secret().to_string();
-    let expires_at = response.expires_on.unix_timestamp() as u64;
-
-    Ok(AzureTokenCache { token, expires_at })
 }
 
 /// Select the appropriate `ProviderTransport` for the given provider kind.

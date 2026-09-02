@@ -142,4 +142,18 @@ mod tests {
         assert!(url.contains("0.6.14"));
         assert!(url.starts_with("https://"));
     }
+
+    #[test]
+    fn venv_create_args_seeds_pip() {
+        let args = manager::venv_create_args("/tmp/venv", "3.12");
+        assert!(args.contains(&"--seed"), "uv venv must --seed pip for python -m pip");
+        assert!(args.contains(&"venv"));
+        assert!(args.contains(&"--python"));
+        assert!(args.contains(&"3.12"));
+    }
+
+    #[tokio::test]
+    async fn python_has_pip_is_false_for_missing_binary() {
+        assert!(!manager::python_has_pip(std::path::Path::new("/no/such/python")).await);
+    }
 }
