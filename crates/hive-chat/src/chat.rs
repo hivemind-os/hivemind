@@ -2137,6 +2137,8 @@ impl ChatService {
             None
         };
 
+        let resolved_persona = self.resolve_persona(persona_id.as_deref());
+
         let session_mcp_manager = {
             let persona_mcp_configs =
                 self.mcp_configs_for_persona(persona_id.as_deref().unwrap_or("system/general"));
@@ -2174,7 +2176,7 @@ impl ChatService {
                 canvas_store,
                 excluded_tools: None,
                 excluded_skills: None,
-                last_persona: None,
+                last_persona: Some(resolved_persona),
                 last_data_class: None,
                 title_pinned: false,
                 session_mcp: session_mcp_manager,
@@ -5897,7 +5899,13 @@ impl ChatService {
             return Ok(SendMessageResponse::Queued { session });
         }
 
-        let persona = self.resolve_persona(agent_id.as_deref());
+        let session_persona_id = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(session_id)
+                .and_then(|s| s.active_persona_id.clone().or_else(|| s.snapshot.persona_id.clone()))
+        };
+        let persona = self.resolve_persona(agent_id.as_deref().or(session_persona_id.as_deref()));
         // Persona patterns take priority; per-message selection is fallback.
         let preferred_models = persona.preferred_models.clone().or(request_preferred_models);
 
@@ -6686,6 +6694,9 @@ impl ChatService {
                                 );
                                 let _ = registry.register_or_replace(Arc::new(proxy));
                             }
+                        }
+                        if !pending.persona.allowed_tools.iter().any(|t| t == "*") {
+                            registry = registry.filtered(&pending.persona.allowed_tools);
                         }
                         session_tools = Arc::new(registry);
                     }
@@ -10803,8 +10814,12 @@ mod tests {
 
         assert!(tools.get("math.calculate").is_some());
         assert!(tools.get("filesystem.read").is_none());
-        // Built-in core.* tools are always available regardless of allowed_tools
         assert!(tools.get("core.ask_user").is_some());
+        assert!(
+            tools.get("core.spawn_agent").is_none(),
+            "privileged core tools must respect the persona allowlist"
+        );
+        assert!(tools.get("core.data_store").is_none(), "data_store must not be auto-included");
     }
 
     #[tokio::test]
@@ -10890,6 +10905,111 @@ mod tests {
         assert!(
             mcp_ids.contains(&"mcp.test-server.do_stuff"),
             "MCP tool must appear in list_definitions sent to the model, got: {mcp_ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_session_tools_mcp_requires_allowlist_glob() {
+        let tempdir = tempdir().expect("tempdir");
+        let catalog = hive_mcp::McpCatalogStore::with_path(tempdir.path().join("mcp_catalog.json"));
+        catalog
+            .upsert(
+                "test-server",
+                "ck-test-server",
+                ChannelClass::Internal,
+                vec![hive_contracts::McpToolInfo {
+                    name: "do_stuff".to_string(),
+                    description: "does stuff".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                    ui_meta: None,
+                }],
+                vec![],
+                vec![],
+            )
+            .await;
+        let session_mcp = Arc::new(hive_mcp::SessionMcpManager::from_configs(
+            "test-session".to_string(),
+            &[hive_core::McpServerConfig {
+                id: "test-server".to_string(),
+                enabled: true,
+                ..Default::default()
+            }],
+            EventBus::new(16),
+            Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
+        ));
+
+        let scheduler = || {
+            Arc::new(
+                hive_scheduler::SchedulerService::in_memory(
+                    EventBus::new(128),
+                    hive_scheduler::SchedulerConfig::default(),
+                )
+                .expect("test scheduler"),
+            )
+        };
+
+        let denied = build_session_tools(
+            tempdir.path().to_string_lossy().as_ref(),
+            &["filesystem.read".to_string()],
+            None,
+            "127.0.0.1:0",
+            None,
+            tempdir.path(),
+            Some(&catalog),
+            Some(&session_mcp),
+            Arc::new(hive_process::ProcessManager::new()),
+            Arc::new(hive_connectors::ConnectorRegistry::new()),
+            None,
+            None,
+            scheduler(),
+            None,
+            None,
+            Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
+            Arc::new(hive_contracts::DetectedShells::default()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            denied.get("mcp.test-server.do_stuff").is_none(),
+            "MCP tools must not bypass a filesystem-only allowlist"
+        );
+
+        let allowed = build_session_tools(
+            tempdir.path().to_string_lossy().as_ref(),
+            &["mcp.test-server.*".to_string()],
+            None,
+            "127.0.0.1:0",
+            None,
+            tempdir.path(),
+            Some(&catalog),
+            Some(&session_mcp),
+            Arc::new(hive_process::ProcessManager::new()),
+            Arc::new(hive_connectors::ConnectorRegistry::new()),
+            None,
+            None,
+            scheduler(),
+            None,
+            None,
+            Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig::default())),
+            Arc::new(hive_contracts::DetectedShells::default()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            allowed.get("mcp.test-server.do_stuff").is_some(),
+            "mcp.test-server.* must include cataloged tools"
         );
     }
 

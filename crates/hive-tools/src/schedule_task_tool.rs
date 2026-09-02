@@ -320,17 +320,9 @@ impl ScheduleTaskTool {
     }
 
     /// Check if a tool_id is in the session's allowed tool set.
-    /// Mirrors the logic in `ToolRegistry::filtered()`.
+    /// Mirrors [`crate::ToolRegistry::id_is_allowed`].
     fn is_tool_allowed(&self, tool_id: &str) -> bool {
-        // core.* and mcp.* are always allowed (same as ToolRegistry::filtered)
-        if tool_id.starts_with("core.") || tool_id.starts_with("mcp.") {
-            return true;
-        }
-        // "*" means all tools allowed
-        if self.allowed_tools.iter().any(|t| t == "*") {
-            return true;
-        }
-        self.allowed_tools.iter().any(|t| t == tool_id)
+        crate::ToolRegistry::id_is_allowed(tool_id, &self.allowed_tools)
     }
 
     /// Determine the effective approval level for a tool.

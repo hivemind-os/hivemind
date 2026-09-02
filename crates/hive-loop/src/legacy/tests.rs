@@ -10,8 +10,9 @@ use hive_model::{
     ProviderDescriptor,
 };
 use hive_tools::{
-    CalculatorTool, FileSystemListTool, FileSystemReadTool, KillAgentTool, ListAgentsTool,
-    ListPersonasTool, SignalAgentTool, SpawnAgentTool, Tool, ToolRegistry, ToolResult,
+    ActivateSkillTool, CalculatorTool, FileSystemListTool, FileSystemReadTool, KillAgentTool,
+    ListAgentsTool, ListPersonasTool, SignalAgentTool, SpawnAgentTool, Tool, ToolRegistry,
+    ToolResult,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -2881,4 +2882,148 @@ async fn execute_tool_call_without_token_runs_normally() {
     .await;
 
     assert!(result.is_ok(), "tool should execute normally without cancellation token");
+}
+
+#[tokio::test]
+async fn activate_skill_stages_scripts_and_rewrites_skill_dir_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("cadquery-modeling");
+    std::fs::create_dir_all(source.join("scripts")).unwrap();
+    std::fs::write(
+        source.join("SKILL.md"),
+        "---\nname: cadquery-modeling\ndescription: CAD\n---\n\n\
+         python \"<skill_dir>/scripts/render_model.py\" design.py\n",
+    )
+    .unwrap();
+    std::fs::write(source.join("scripts").join("render_model.py"), b"print('render')").unwrap();
+    std::fs::write(source.join("requirements.txt"), b"cadquery\n").unwrap();
+
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    let skill = hive_contracts::InstalledSkill {
+        manifest: hive_contracts::SkillManifest {
+            name: "cadquery-modeling".to_string(),
+            description: "CAD".to_string(),
+            license: None,
+            compatibility: None,
+            metadata: Default::default(),
+            allowed_tools: None,
+        },
+        local_path: source.to_string_lossy().to_string(),
+        source_id: "bundled".to_string(),
+        source_path: "cadquery-modeling".to_string(),
+        persona_id: "system/3d-print/cad-designer".to_string(),
+        audit: hive_contracts::SkillAuditResult {
+            model_used: "test".to_string(),
+            risks: vec![],
+            summary: "ok".to_string(),
+            audited_at_ms: 1,
+        },
+        enabled: true,
+        installed_at_ms: 1,
+        content_hash: String::new(),
+        pinned_commit: String::new(),
+    };
+    let mut evil = skill.clone();
+    evil.manifest.name = "foo/bar".to_string();
+    let catalog = Arc::new(hive_skills::SkillCatalog::new(vec![skill, evil]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(ActivateSkillTool::default())).expect("register activate skill");
+
+    let context = LoopContext {
+        conversation: ConversationContext {
+            session_id: "session-skill".to_string(),
+            message_id: "msg-skill".to_string(),
+            prompt: String::new(),
+            prompt_content_parts: vec![],
+            history: vec![],
+            conversation_journal: None,
+            initial_tool_iterations: 0,
+        },
+        routing: RoutingConfig {
+            required_capabilities: BTreeSet::new(),
+            preferred_models: None,
+            loop_strategy: None,
+            routing_decision: None,
+        },
+        security: SecurityContext {
+            data_class: DataClass::Internal,
+            permissions: Arc::new(parking_lot::Mutex::new(SessionPermissions::new())),
+            workspace_classification: None,
+            effective_data_class: Arc::new(AtomicU8::new(DataClass::Internal.to_i64() as u8)),
+            connector_service: None,
+            shadow_mode: false,
+        },
+        tools_ctx: ToolsContext {
+            tools: Arc::new(registry),
+            skill_catalog: Some(catalog),
+            knowledge_query_handler: None,
+            tool_execution_mode: ToolExecutionMode::default(),
+        },
+        agent: AgentContext {
+            persona: None,
+            agent_orchestrator: None,
+            personas: Vec::new(),
+            current_agent_id: None,
+            parent_agent_id: None,
+            workspace_path: Some(workspace.clone()),
+            keep_alive: false,
+            session_messaged: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        },
+        tool_limits: ToolLimitsConfig::default(),
+        code_act_config: CodeActConfig::default(),
+        session_registry: None,
+        preempt_signal: None,
+        cancellation_token: None,
+    };
+
+    let result = execute_tool_call(
+        &context,
+        ToolCall {
+            tool_id: "core.activate_skill".to_string(),
+            input: json!({ "name": "cadquery-modeling" }),
+        },
+        &[],
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("activate skill");
+
+    let content = result.output["content"].as_str().expect("content");
+    assert!(
+        content.contains(".skills/cadquery-modeling/scripts/render_model.py"),
+        "activation must rewrite <skill_dir> to the staged path, got: {content}"
+    );
+    assert!(!content.contains("<skill_dir>"), "placeholder must not remain: {content}");
+    assert!(
+        workspace.join(".skills/cadquery-modeling/scripts/render_model.py").is_file(),
+        "render script must be staged at .skills/<name>/scripts/"
+    );
+    assert!(
+        !workspace.join(".skills/cadquery-modeling/scripts/scripts/render_model.py").exists(),
+        "must not nest scripts/scripts"
+    );
+
+    let denied = execute_tool_call(
+        &context,
+        ToolCall {
+            tool_id: "core.activate_skill".to_string(),
+            input: json!({ "name": "foo/bar" }),
+        },
+        &[],
+        None,
+        None,
+        None,
+    )
+    .await;
+    let err = denied.expect_err("path-escape skill names must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid skill name") || msg.contains("foo/bar"),
+        "expected staging-name rejection, got: {msg}"
+    );
 }

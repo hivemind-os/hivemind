@@ -27,9 +27,12 @@ system_prompt: |
   - **Tips**: Any special considerations for this specific part/material combination
 loop_strategy: react
 allowed_tools:
-  - "3d-printer.*"
+  - "mcp.3d-printer.*"
   - "core.ask_user"
   - "web.search"
+  - "filesystem.list"
+  - "filesystem.glob"
+  - "filesystem.read"
 mcp_servers:
   - id: 3d-printer
     transport: stdio

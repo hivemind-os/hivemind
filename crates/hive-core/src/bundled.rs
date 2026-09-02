@@ -339,6 +339,12 @@ fn seed_bundled_skills(
             checksums,
             force,
         )?;
+        // Older seeders nested `scripts/` twice (`scripts/scripts/foo.py`).
+        // Drop that leftover so SKILL.md paths resolve.
+        let nested_scripts = target_skill_dir.join("scripts").join("scripts");
+        if nested_scripts.is_dir() {
+            let _ = fs::remove_dir_all(&nested_scripts);
+        }
         tracing::info!(persona_id, skill_name, "seeded bundled skill");
     }
 
@@ -396,18 +402,71 @@ fn write_bundled_dir_recursive(
     }
 
     for sub in dir.dirs() {
-        let rel = sub.path().strip_prefix(base).unwrap_or(sub.path());
-        let sub_target = target.join(rel);
-        write_bundled_dir_recursive(
-            sub,
-            base,
-            &sub_target,
-            persona_id,
-            skill_name,
-            checksums,
-            force,
-        )?;
+        // `include_dir` file paths are relative to the skill root (`base`), not
+        // the current subdirectory. Recursing with `target.join(rel)` nested
+        // folders (e.g. `scripts/scripts/render_model.py`). Keep `base` and
+        // `target` as the skill root so `rel` is joined once.
+        write_bundled_dir_recursive(sub, base, target, persona_id, skill_name, checksums, force)?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn seed_bundled_skills_do_not_nest_scripts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let personas = tmp.path().join("personas");
+        seed_bundled_personas(&personas).expect("seed bundled personas");
+
+        let cases: &[(&str, &str, &str)] = &[
+            ("system/3d-print/cad-designer", "cadquery-modeling", "scripts/render_model.py"),
+            ("system/3d-print/mesh-analyst", "mesh-analysis", "scripts/analyze_mesh.py"),
+            ("system/finance/tax-advisor", "pdf-ocr", "scripts/pdf_to_images.py"),
+        ];
+
+        for (persona_id, skill, rel) in cases {
+            let skill_dir = personas
+                .join(persona_id.replace('/', std::path::MAIN_SEPARATOR_STR))
+                .join("skills")
+                .join(skill);
+            let expected = skill_dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            assert!(expected.is_file(), "expected bundled script at {}", expected.display());
+            let nested = skill_dir
+                .join("scripts")
+                .join("scripts")
+                .join(PathBuf::from(rel).file_name().expect("script file name"));
+            assert!(
+                !nested.exists(),
+                "bundled seeder must not nest scripts at {}",
+                nested.display()
+            );
+        }
+    }
+
+    #[test]
+    fn reseed_removes_legacy_nested_scripts_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let personas = tmp.path().join("personas");
+        seed_bundled_personas(&personas).expect("seed");
+
+        let skill_dir = personas
+            .join("system")
+            .join("3d-print")
+            .join("cad-designer")
+            .join("skills")
+            .join("cadquery-modeling");
+        let nested_dir = skill_dir.join("scripts").join("scripts");
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(nested_dir.join("render_model.py"), b"stale").unwrap();
+        assert!(nested_dir.join("render_model.py").is_file());
+
+        seed_bundled_personas(&personas).expect("reseed");
+        assert!(!nested_dir.exists(), "reseed should delete leftover scripts/scripts");
+        assert!(skill_dir.join("scripts").join("render_model.py").is_file());
+    }
 }

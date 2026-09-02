@@ -35,6 +35,7 @@ pub struct RecordedCall {
     pub prompt: String,
     pub system_prompt: String,
     pub tool_names: Vec<String>,
+    pub tool_ids: Vec<String>,
 }
 
 /// A programmable mock LLM that returns scripted responses from per-persona
@@ -192,6 +193,7 @@ impl ModelProvider for ScriptedProvider {
             prompt: request.prompt.clone(),
             system_prompt: system_prompt.clone(),
             tool_names: request.tools.iter().map(|t| t.name.clone()).collect(),
+            tool_ids: request.tools.iter().map(|t| t.id.clone()).collect(),
         };
         state.calls.push(recorded.clone());
         // Also push to shared observer if attached.

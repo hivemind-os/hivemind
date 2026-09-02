@@ -177,6 +177,39 @@ pub struct ActivationResult {
     pub source_dir: Option<PathBuf>,
 }
 
+/// Returns an error if `name` cannot be used as a single workspace folder
+/// under `.skills/`.
+pub fn validate_skill_staging_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("skill name must not be empty".to_string());
+    }
+    if name.len() > 64 {
+        return Err("skill name is too long".to_string());
+    }
+    if name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.starts_with('.')
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("invalid skill name '{name}'"));
+    }
+    Ok(())
+}
+
+/// Rewrite skill body paths after staging into the session workspace.
+///
+/// Replaces the `<skill_dir>` token and the on-disk source directory with the
+/// workspace-relative staging path (`.skills/{name}`).
+pub fn rewrite_staged_skill_paths(content: &str, source_dir: &Path, relative_dir: &str) -> String {
+    let mut out = content.replace("<skill_dir>", relative_dir);
+    let abs = source_dir.to_string_lossy();
+    if !abs.is_empty() {
+        out = out.replace(abs.as_ref(), relative_dir);
+    }
+    out
+}
+
 /// Stage skill resource files into a target directory (typically inside the
 /// session workspace). Copies all non-hidden, non-SKILL.md files from
 /// `source_dir` into `target_dir`, preserving directory structure.
@@ -365,6 +398,37 @@ mod tests {
         // Files should exist at target
         assert!(target.join("requirements.txt").exists());
         assert!(target.join("scripts/render.py").exists());
+    }
+
+    #[test]
+    fn rewrite_staged_skill_paths_replaces_token_and_absolute_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("cadquery-modeling");
+        std::fs::create_dir_all(&source).unwrap();
+        let content = format!(
+            "python \"<skill_dir>/scripts/render_model.py\"\nSkill directory: {}",
+            source.display()
+        );
+        let rewritten = rewrite_staged_skill_paths(&content, &source, ".skills/cadquery-modeling");
+        assert!(
+            rewritten.contains("python \".skills/cadquery-modeling/scripts/render_model.py\""),
+            "token must be rewritten: {rewritten}"
+        );
+        assert!(
+            rewritten.contains("Skill directory: .skills/cadquery-modeling"),
+            "absolute source path must be rewritten: {rewritten}"
+        );
+        assert!(!rewritten.contains("<skill_dir>"), "placeholder must not remain");
+    }
+
+    #[test]
+    fn validate_skill_staging_name_rejects_path_escape() {
+        assert!(validate_skill_staging_name("cadquery-modeling").is_ok());
+        assert!(validate_skill_staging_name("../etc").is_err());
+        assert!(validate_skill_staging_name("foo/bar").is_err());
+        assert!(validate_skill_staging_name("foo\\bar").is_err());
+        assert!(validate_skill_staging_name("").is_err());
+        assert!(validate_skill_staging_name(".hidden").is_err());
     }
 
     #[test]

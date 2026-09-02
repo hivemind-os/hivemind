@@ -109,6 +109,10 @@ pub(super) async fn handle_activate_skill(
         }
     })?;
 
+    if let Err(detail) = hive_skills::validate_skill_staging_name(name) {
+        return Err(LoopError::ToolExecutionFailed { tool_id: call.tool_id.clone(), detail });
+    }
+
     if let Some(ref catalog) = context.tools_ctx.skill_catalog {
         match catalog.activate(name) {
             Some(result) => {
@@ -122,9 +126,10 @@ pub(super) async fn handle_activate_skill(
                     let target = workspace.join(".skills").join(name);
                     match hive_skills::stage_skill_resources(source_dir, &target) {
                         Ok(_) => {
-                            let abs_str = source_dir.to_string_lossy();
                             let relative = format!(".skills/{name}");
-                            content = content.replace(abs_str.as_ref(), &relative);
+                            content = hive_skills::rewrite_staged_skill_paths(
+                                &content, source_dir, &relative,
+                            );
                         }
                         Err(e) => {
                             tracing::warn!(

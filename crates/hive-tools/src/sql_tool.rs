@@ -105,6 +105,42 @@ impl DataStoreTool {
     }
 }
 
+fn blocked_sql_feature(query: &str) -> Option<&'static str> {
+    let mut s = query;
+    loop {
+        s = s.trim_start();
+        if s.starts_with("--") {
+            if let Some(pos) = s.find('\n') {
+                s = &s[pos + 1..];
+            } else {
+                return None;
+            }
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            if let Some(pos) = rest.find("*/") {
+                s = &rest[pos + 2..];
+            } else {
+                return None;
+            }
+        } else {
+            break;
+        }
+    }
+    let tokens: Vec<String> = s
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_ascii_uppercase())
+        .collect();
+    if tokens.iter().any(|t| t == "ATTACH" || t == "DETACH") {
+        return Some("ATTACH/DETACH");
+    }
+    if tokens.windows(2).any(|w| w[0] == "LOAD" && w[1] == "EXTENSION")
+        || tokens.iter().any(|t| t == "LOAD_EXTENSION")
+    {
+        return Some("load_extension");
+    }
+    None
+}
+
 fn is_returning_query(query: &str) -> bool {
     let mut s = query.trim();
     loop {
@@ -170,6 +206,12 @@ impl Tool for DataStoreTool {
             let query = input.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
                 ToolError::InvalidInput("missing required field `query`".to_string())
             })?;
+
+            if let Some(feature) = blocked_sql_feature(query) {
+                return Err(ToolError::InvalidInput(format!(
+                    "{feature} is not allowed in the session data store"
+                )));
+            }
 
             let params: Vec<Value> =
                 input.get("params").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -255,6 +297,21 @@ mod tests {
         let db_path = dir.path().join("test_store.db");
         let tool = DataStoreTool::new(db_path).expect("failed to create DataStoreTool");
         (dir, tool)
+    }
+
+    #[tokio::test]
+    async fn attach_database_is_rejected() {
+        let (_dir, tool) = setup_tool();
+        let err = tool
+            .execute(json!({ "query": "ATTACH DATABASE '/tmp/escape.db' AS other" }))
+            .await
+            .expect_err("ATTACH must be rejected");
+        assert!(err.to_string().to_ascii_uppercase().contains("ATTACH"), "got {err}");
+        let err = tool
+            .execute(json!({ "query": "SELECT load_extension('x')" }))
+            .await
+            .expect_err("load_extension must be rejected");
+        assert!(err.to_string().contains("load_extension") || err.to_string().contains("LOAD"));
     }
 
     #[tokio::test]

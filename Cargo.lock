@@ -4540,6 +4540,7 @@ dependencies = [
  "hive-workflow-service",
  "hive-workspace-index",
  "ignore",
+ "libc",
  "mime_guess",
  "parking_lot",
  "regex",

@@ -345,6 +345,27 @@ impl ToolRegistry {
         definitions
     }
 
+    /// Tools that stay available even when a persona allowlist omits them.
+    pub const ALWAYS_ON_TOOL_IDS: &'static [&'static str] =
+        &["core.ask_user", "core.activate_skill"];
+
+    /// Whether `tool_id` is permitted by an allowlist (globs, exact ids, `*`).
+    pub fn id_is_allowed(tool_id: &str, allowed_ids: &[String]) -> bool {
+        if allowed_ids.iter().any(|id| id == "*") {
+            return true;
+        }
+        if Self::ALWAYS_ON_TOOL_IDS.contains(&tool_id) {
+            return true;
+        }
+        allowed_ids.iter().any(|pattern| {
+            if pattern.contains('*') || pattern.contains('?') {
+                glob::Pattern::new(pattern).map(|p| p.matches(tool_id)).unwrap_or(false)
+            } else {
+                pattern == tool_id
+            }
+        })
+    }
+
     pub fn filtered(&self, allowed_ids: &[String]) -> Self {
         if allowed_ids.iter().any(|id| id == "*") {
             return self.clone();
@@ -353,17 +374,7 @@ impl ToolRegistry {
         let tools = self
             .tools
             .iter()
-            .filter(|(id, _)| {
-                id.starts_with("core.")
-                    || id.starts_with("mcp.")
-                    || allowed_ids.iter().any(|pattern| {
-                        if pattern.contains('*') || pattern.contains('?') {
-                            glob::Pattern::new(pattern).map(|p| p.matches(id)).unwrap_or(false)
-                        } else {
-                            pattern == id.as_str()
-                        }
-                    })
-            })
+            .filter(|(id, _)| Self::id_is_allowed(id, allowed_ids))
             .map(|(id, tool)| (id.clone(), tool.clone()))
             .collect();
 
@@ -2069,10 +2080,15 @@ impl Tool for ShellCommandTool {
                         );
                     }
                     Ok(hive_sandbox::SandboxedCommand::Passthrough) => {
-                        tracing::info!("sandbox unavailable, using passthrough");
+                        return Err(ToolError::ExecutionFailed(
+                            "sandbox is enabled but wrapping is unavailable on this platform"
+                                .to_string(),
+                        ));
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "sandbox_command failed, will run unsandboxed");
+                        return Err(ToolError::ExecutionFailed(format!(
+                            "sandbox wrapping failed: {e}"
+                        )));
                     }
                 }
                 Some(result)
@@ -2095,7 +2111,12 @@ impl Tool for ShellCommandTool {
                     }
                     c
                 }
-                _ => {
+                Some(_) => {
+                    return Err(ToolError::ExecutionFailed(
+                        "sandbox is enabled but wrapping is unavailable".to_string(),
+                    ));
+                }
+                None => {
                     let mut c = tokio::process::Command::new(&shell_program);
                     c.args([&shell_flag, &command]);
                     if let Some(ref dir) = working_dir {
@@ -2112,6 +2133,11 @@ impl Tool for ShellCommandTool {
 
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
+            cmd.kill_on_drop(true);
+            #[cfg(unix)]
+            {
+                cmd.process_group(0);
+            }
 
             #[cfg(target_os = "windows")]
             {
@@ -2119,56 +2145,10 @@ impl Tool for ShellCommandTool {
                 cmd.creation_flags(CREATE_NO_WINDOW);
             }
 
-            // Try to spawn. If the sandbox wrapper fails, fall back to unsandboxed.
-            let child = match cmd.spawn() {
-                Ok(child) => {
-                    tracing::debug!("command spawned successfully");
-                    child
-                }
-                Err(sandbox_err) if sandbox_result.as_ref().is_some_and(|r| r.is_ok()) => {
-                    tracing::warn!(
-                        error = %sandbox_err,
-                        error_kind = ?sandbox_err.kind(),
-                        raw_os_error = ?sandbox_err.raw_os_error(),
-                        command = %command,
-                        "sandboxed spawn failed, falling back to unsandboxed execution"
-                    );
-                    let mut fallback = if cfg!(target_os = "windows") {
-                        let mut c = tokio::process::Command::new("cmd");
-                        c.args(["/C", &command]);
-                        c
-                    } else {
-                        let mut c = tokio::process::Command::new("sh");
-                        c.args(["-c", &command]);
-                        c
-                    };
-                    if let Some(ref dir) = working_dir {
-                        fallback.current_dir(dir);
-                    }
-                    for (key, value) in self.env_vars.read().iter() {
-                        if !is_blocked_env_var(key) {
-                            fallback.env(key, value);
-                        }
-                    }
-                    fallback.stdout(std::process::Stdio::piped());
-                    fallback.stderr(std::process::Stdio::piped());
-
-                    #[cfg(target_os = "windows")]
-                    {
-                        const CREATE_NO_WINDOW: u32 = 0x08000000;
-                        fallback.creation_flags(CREATE_NO_WINDOW);
-                    }
-
-                    fallback.spawn().map_err(|e| {
-                        ToolError::ExecutionFailed(format!("failed to spawn command: {e}"))
-                    })?
-                }
-                Err(e) => {
-                    return Err(ToolError::ExecutionFailed(format!(
-                        "failed to spawn command: {e}"
-                    )));
-                }
-            };
+            let child = cmd
+                .spawn()
+                .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn command: {e}")))?;
+            let child_pid = child.id();
 
             let result =
                 tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
@@ -2189,9 +2169,19 @@ impl Tool for ShellCommandTool {
                     })
                 }
                 Ok(Err(e)) => Err(ToolError::ExecutionFailed(format!("command failed: {e}"))),
-                Err(_) => Err(ToolError::ExecutionFailed(format!(
-                    "command timed out after {timeout_secs} seconds"
-                ))),
+                Err(_) => {
+                    if let Some(pid) = child_pid {
+                        #[cfg(unix)]
+                        unsafe {
+                            libc::kill(-(pid as i32), libc::SIGKILL);
+                        }
+                        #[cfg(not(unix))]
+                        let _ = pid;
+                    }
+                    Err(ToolError::ExecutionFailed(format!(
+                        "command timed out after {timeout_secs} seconds"
+                    )))
+                }
             }
         })
     }
@@ -2259,33 +2249,7 @@ impl Tool for HttpRequestTool {
                 ToolError::InvalidInput("missing required field `url`".to_string())
             })?;
 
-            // Block requests to internal/private IP ranges (SSRF mitigation)
-            if let Some(host) = extract_host(url_str) {
-                let lower = host.to_lowercase();
-                if lower == "localhost"
-                    || lower == "127.0.0.1"
-                    || lower == "[::1]"
-                    || lower == "0.0.0.0"
-                    || lower.ends_with(".local")
-                    || lower == "metadata.google.internal"
-                    || lower.starts_with("169.254.")
-                    || lower.starts_with("10.")
-                    || lower.starts_with("192.168.")
-                {
-                    return Err(ToolError::ExecutionFailed(format!(
-                        "requests to internal/private addresses are blocked: {host}"
-                    )));
-                }
-                // Check 172.16.0.0/12 range
-                if let Ok(ip) = lower.parse::<std::net::Ipv4Addr>() {
-                    let octets = ip.octets();
-                    if octets[0] == 172 && (16..=31).contains(&octets[1]) {
-                        return Err(ToolError::ExecutionFailed(format!(
-                            "requests to internal/private addresses are blocked: {host}"
-                        )));
-                    }
-                }
-            }
+            url_must_not_be_blocked(url_str)?;
 
             let url = url_str;
 
@@ -2295,6 +2259,7 @@ impl Tool for HttpRequestTool {
 
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| {
                     ToolError::ExecutionFailed(format!("failed to build HTTP client: {e}"))
@@ -3321,23 +3286,76 @@ fn generate_tool_description(tool_name: &str, input_schema: &serde_json::Value) 
     }
 }
 
-/// Extract the host portion from a URL string without requiring the `url` crate.
-fn extract_host(url: &str) -> Option<&str> {
-    let after_scheme = url.split("://").nth(1)?;
-    let authority = after_scheme.split('/').next()?;
-    // Strip userinfo (user:pass@)
-    let host_port = authority.rsplit('@').next()?;
-    // Strip port
-    Some(host_port.split(':').next().unwrap_or(host_port))
+fn url_must_not_be_blocked(url_str: &str) -> Result<(), ToolError> {
+    let parsed = reqwest::Url::parse(url_str)
+        .map_err(|e| ToolError::InvalidInput(format!("invalid url: {e}")))?;
+    let host = parsed.host_str().unwrap_or("");
+    if host_is_blocked(host) {
+        return Err(ToolError::ExecutionFailed(format!(
+            "requests to internal/private addresses are blocked: {host}"
+        )));
+    }
+    Ok(())
+}
+
+fn host_is_blocked(host: &str) -> bool {
+    let host = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+    if host.is_empty()
+        || host == "localhost"
+        || host == "metadata.google.internal"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+    {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip_is_non_public(ip);
+    }
+    false
+}
+
+fn ip_is_non_public(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.octets()[0] == 0
+        }
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return ip_is_non_public(std::net::IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unicast_link_local()
+                || v6.is_unique_local()
+                || v6.is_unspecified()
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn unsandboxed_shell() -> ShellCommandTool {
+        ShellCommandTool::with_env(
+            Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(parking_lot::RwLock::new(hive_contracts::SandboxConfig {
+                enabled: false,
+                extra_read_paths: Vec::new(),
+                extra_write_paths: Vec::new(),
+                allow_network: true,
+            })),
+            None,
+            None,
+        )
+    }
+
     #[tokio::test]
     async fn test_shell_command_execute() {
-        let tool = ShellCommandTool::default();
+        let tool = unsandboxed_shell();
         let input = if cfg!(target_os = "windows") {
             json!({ "command": "cmd /c echo hello" })
         } else {
@@ -3349,6 +3367,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_shell_timeout_kills_child() {
+        let tool = unsandboxed_shell();
+        let marker = tempfile::tempdir().unwrap();
+        let alive = marker.path().join("alive");
+        let script = if cfg!(windows) {
+            format!("ping -n 8 127.0.0.1 >nul & echo still > {}", alive.display())
+        } else {
+            format!("sleep 8; echo still > {}", alive.display())
+        };
+        let started = std::time::Instant::now();
+        let result = tool.execute(json!({ "command": script, "timeout_secs": 1 })).await;
+        assert!(result.is_err(), "timeout should error");
+        assert!(started.elapsed() < std::time::Duration::from_secs(4));
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        assert!(!alive.exists(), "child must be killed so it cannot write after timeout");
+    }
+
+    #[tokio::test]
     async fn test_http_request_invalid_url() {
         let tool = HttpRequestTool::default();
         let input = json!({
@@ -3357,6 +3393,22 @@ mod tests {
         });
         let result = tool.execute(input).await;
         assert!(result.is_err(), "expected error for invalid URL");
+    }
+
+    #[tokio::test]
+    async fn test_http_request_blocks_loopback_and_link_local() {
+        let tool = HttpRequestTool::default();
+        for url in [
+            "http://127.0.0.1/",
+            "http://[::1]/",
+            "http://localhost/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/",
+            "http://192.168.1.1/",
+        ] {
+            let result = tool.execute(json!({ "method": "GET", "url": url })).await;
+            assert!(result.is_err(), "expected block for {url}, got {result:?}");
+        }
     }
 
     #[tokio::test]
@@ -4096,7 +4148,9 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(CalculatorTool::default())).expect("register calculator");
         registry.register(Arc::new(DateTimeTool::default())).expect("register datetime");
-        registry.register(Arc::new(QuestionTool::default())).expect("register question"); // core.ask_user
+        registry.register(Arc::new(QuestionTool::default())).expect("register question");
+        registry.register(Arc::new(ActivateSkillTool::default())).expect("register activate");
+        registry.register(Arc::new(SpawnAgentTool::default())).expect("register spawn");
 
         let allowed = vec!["math.*".to_string()];
         let filtered = registry.filtered(&allowed);
@@ -4107,8 +4161,12 @@ mod tests {
             ids.contains(&"math.calculate".to_string()),
             "math.calculate should match 'math.*'"
         );
-        // core.ask_user is auto-allowed
-        assert!(ids.contains(&"core.ask_user".to_string()), "core.* should be auto-allowed");
+        assert!(ids.contains(&"core.ask_user".to_string()), "core.ask_user stays always-on");
+        assert!(
+            !ids.contains(&"core.spawn_agent".to_string())
+                && !ids.iter().any(|id| id.starts_with("core.spawn")),
+            "privileged core.* tools must not be auto-allowed"
+        );
         // datetime.now should be filtered out
         assert!(!ids.contains(&"datetime.now".to_string()), "datetime.now should be filtered out");
     }

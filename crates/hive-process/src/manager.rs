@@ -343,8 +343,12 @@ impl ProcessManager {
                 Ok(hive_sandbox::SandboxedCommand::Wrapped { program, args, _temp_files }) => {
                     (program, args, _temp_files)
                 }
-                Ok(hive_sandbox::SandboxedCommand::Passthrough) | Err(_) => {
-                    (eff_shell.to_string(), vec![eff_flag.to_string(), command.to_string()], vec![])
+                Ok(hive_sandbox::SandboxedCommand::Passthrough) => {
+                    return Err("sandbox is enabled but wrapping is unavailable on this platform"
+                        .to_string());
+                }
+                Err(e) => {
+                    return Err(format!("sandbox wrapping failed: {e}"));
                 }
             }
         } else {

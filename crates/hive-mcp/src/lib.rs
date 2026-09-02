@@ -534,6 +534,20 @@ impl McpService {
                             (None, Some(status))
                         };
 
+                    let sandbox_required = use_sandbox
+                        && config.transport == McpTransportConfig::Stdio
+                        && match &config.sandbox {
+                            Some(ps) => ps.enabled,
+                            None => self.global_sandbox.read().enabled,
+                        };
+                    if sandbox_required && sandboxed.is_none() {
+                        return Err(McpServiceError::ConnectionFailed {
+                            server_id: sid.clone(),
+                            detail: "sandbox is enabled but wrapping failed; refusing unsandboxed MCP stdio"
+                                .to_string(),
+                        });
+                    }
+
                     // Store sandbox status on server state.
                     {
                         let mut servers = servers.write().await;
@@ -2329,11 +2343,13 @@ fn wrap_mcp_command(
             Some((program, args, _temp_files))
         }
         Ok(SandboxedCommand::Passthrough) => {
-            tracing::warn!("sandbox returned Passthrough — process will run unsandboxed");
+            tracing::error!("sandbox returned Passthrough — refusing to start MCP unsandboxed");
             None
         }
         Err(e) => {
-            tracing::warn!("sandbox wrapping failed for MCP server, running unsandboxed: {e}");
+            tracing::error!(
+                "sandbox wrapping failed for MCP server, refusing unsandboxed start: {e}"
+            );
             None
         }
     }
