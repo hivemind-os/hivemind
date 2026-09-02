@@ -143,12 +143,11 @@ impl SkillCatalog {
         let safe_name = escape_prompt_tags(name);
         let mut output = format!("<skill_content name=\"{safe_name}\">\n{safe_body}\n");
         if !resources.is_empty() {
-            output.push_str(&format!(
-                "\nSkill directory: {}\n\
+            output.push_str(
+                "\nSkill directory: <skill_dir>\n\
                  Relative paths in this skill are relative to the skill directory.\n\n\
                  <skill_resources>\n",
-                skill.local_path
-            ));
+            );
             for res in &resources {
                 output.push_str(&format!("  <file>{res}</file>\n"));
             }
@@ -199,15 +198,47 @@ pub fn validate_skill_staging_name(name: &str) -> Result<(), String> {
 
 /// Rewrite skill body paths after staging into the session workspace.
 ///
-/// Replaces the `<skill_dir>` token and the on-disk source directory with the
-/// workspace-relative staging path (`.skills/{name}`).
+/// Replaces the `<skill_dir>` token and on-disk source paths (raw, canonical,
+/// and macOS `/private` variants) with the workspace-relative staging path.
 pub fn rewrite_staged_skill_paths(content: &str, source_dir: &Path, relative_dir: &str) -> String {
     let mut out = content.replace("<skill_dir>", relative_dir);
-    let abs = source_dir.to_string_lossy();
-    if !abs.is_empty() {
-        out = out.replace(abs.as_ref(), relative_dir);
+    for abs in skill_source_path_strings(source_dir) {
+        out = out.replace(&abs, relative_dir);
     }
     out
+}
+
+fn skill_source_path_strings(source_dir: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut push = |p: &Path| {
+        let s = p.to_string_lossy().into_owned();
+        if !s.is_empty() && !paths.contains(&s) {
+            paths.push(s);
+        }
+    };
+    push(source_dir);
+    if let Ok(canon) = source_dir.canonicalize() {
+        push(&canon);
+    }
+    let extras: Vec<String> = paths
+        .iter()
+        .flat_map(|existing| {
+            let mut more = Vec::new();
+            if let Some(stripped) = existing.strip_prefix("/private") {
+                more.push(stripped.to_string());
+            } else if existing.starts_with("/var/") || existing.starts_with("/tmp/") {
+                more.push(format!("/private{existing}"));
+            }
+            more
+        })
+        .collect();
+    for s in extras {
+        if !s.is_empty() && !paths.contains(&s) {
+            paths.push(s);
+        }
+    }
+    paths.sort_by(|a, b| b.len().cmp(&a.len()));
+    paths
 }
 
 /// Stage skill resource files into a target directory (typically inside the
@@ -405,9 +436,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let source = tmp.path().join("cadquery-modeling");
         std::fs::create_dir_all(&source).unwrap();
+        let canon = source.canonicalize().unwrap();
         let content = format!(
-            "python \"<skill_dir>/scripts/render_model.py\"\nSkill directory: {}",
-            source.display()
+            "python \"<skill_dir>/scripts/render_model.py\"\nSkill directory: {}\nCanon: {}",
+            source.display(),
+            canon.display()
         );
         let rewritten = rewrite_staged_skill_paths(&content, &source, ".skills/cadquery-modeling");
         assert!(
@@ -418,7 +451,36 @@ mod tests {
             rewritten.contains("Skill directory: .skills/cadquery-modeling"),
             "absolute source path must be rewritten: {rewritten}"
         );
+        assert!(
+            rewritten.contains("Canon: .skills/cadquery-modeling"),
+            "canonical source path must be rewritten: {rewritten}"
+        );
         assert!(!rewritten.contains("<skill_dir>"), "placeholder must not remain");
+        assert!(
+            !rewritten.contains(&source.display().to_string()),
+            "raw install path must not remain: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains(&canon.display().to_string()),
+            "canonical install path must not remain: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn rewrite_staged_skill_paths_rewrites_macos_private_prefix() {
+        let source = Path::new("/var/folders/xx/cadquery-modeling");
+        let content = "Skill directory: /var/folders/xx/cadquery-modeling\n\
+             Also: /private/var/folders/xx/cadquery-modeling";
+        let rewritten = rewrite_staged_skill_paths(content, source, ".skills/cadquery-modeling");
+        assert!(
+            !rewritten.contains("/var/folders/xx/cadquery-modeling"),
+            "raw /var path must be rewritten: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains("/private/var/folders"),
+            "canonical /private path must be rewritten: {rewritten}"
+        );
+        assert!(rewritten.contains("Skill directory: .skills/cadquery-modeling"));
     }
 
     #[test]

@@ -122,6 +122,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -2172,8 +2173,15 @@ impl Tool for ShellCommandTool {
                 Err(_) => {
                     if let Some(pid) = child_pid {
                         #[cfg(unix)]
-                        unsafe {
-                            libc::kill(-(pid as i32), libc::SIGKILL);
+                        {
+                            let rc = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                            if rc != 0 {
+                                tracing::warn!(
+                                    pid,
+                                    error = %std::io::Error::last_os_error(),
+                                    "failed to signal process group after shell timeout"
+                                );
+                            }
                         }
                         #[cfg(not(unix))]
                         let _ = pid;
@@ -2249,22 +2257,22 @@ impl Tool for HttpRequestTool {
                 ToolError::InvalidInput("missing required field `url`".to_string())
             })?;
 
-            url_must_not_be_blocked(url_str)?;
-
-            let url = url_str;
+            let dns_pin = resolve_and_pin_url(url_str).await?;
 
             let method: reqwest::Method = method_str.parse().map_err(|_| {
                 ToolError::InvalidInput(format!("invalid HTTP method: {method_str}"))
             })?;
 
-            let client = reqwest::Client::builder()
+            let mut client_builder = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|e| {
-                    ToolError::ExecutionFailed(format!("failed to build HTTP client: {e}"))
-                })?;
-            let mut request = client.request(method, url);
+                .redirect(reqwest::redirect::Policy::none());
+            if let Some((domain, addrs)) = dns_pin {
+                client_builder = client_builder.resolve_to_addrs(&domain, &addrs);
+            }
+            let client = client_builder.build().map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to build HTTP client: {e}"))
+            })?;
+            let mut request = client.request(method, url_str);
 
             if let Some(headers_val) = input.get("headers").and_then(|v| v.as_object()) {
                 for (key, value) in headers_val {
@@ -3286,51 +3294,129 @@ fn generate_tool_description(tool_name: &str, input_schema: &serde_json::Value) 
     }
 }
 
-fn url_must_not_be_blocked(url_str: &str) -> Result<(), ToolError> {
-    let parsed = reqwest::Url::parse(url_str)
-        .map_err(|e| ToolError::InvalidInput(format!("invalid url: {e}")))?;
-    let host = parsed.host_str().unwrap_or("");
-    if host_is_blocked(host) {
-        return Err(ToolError::ExecutionFailed(format!(
-            "requests to internal/private addresses are blocked: {host}"
-        )));
-    }
-    Ok(())
+fn blocked_host_error(detail: &str) -> ToolError {
+    ToolError::ExecutionFailed(format!(
+        "requests to internal/private addresses are blocked: {detail}"
+    ))
 }
 
-fn host_is_blocked(host: &str) -> bool {
-    let host = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
-    if host.is_empty()
+fn host_name_blocked(host: &str) -> bool {
+    host.is_empty()
         || host == "localhost"
         || host == "metadata.google.internal"
         || host.ends_with(".localhost")
         || host.ends_with(".local")
-    {
-        return true;
-    }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return ip_is_non_public(ip);
-    }
-    false
 }
 
-fn ip_is_non_public(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.octets()[0] == 0
+fn deny_non_public_target(host: &str, ips: &[IpAddr]) -> Result<(), ToolError> {
+    if host_name_blocked(host) {
+        return Err(blocked_host_error(host));
+    }
+    for ip in ips {
+        if ip_is_non_public(*ip) {
+            return Err(blocked_host_error(&format!("{host} -> {ip}")));
         }
-        std::net::IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return ip_is_non_public(std::net::IpAddr::V4(v4));
+    }
+    Ok(())
+}
+
+/// Resolve `url_str`, reject non-public targets, and return DNS pins so the
+/// HTTP client cannot reconnect to a different address after the check.
+async fn resolve_and_pin_url(
+    url_str: &str,
+) -> Result<Option<(String, Vec<SocketAddr>)>, ToolError> {
+    let parsed = reqwest::Url::parse(url_str)
+        .map_err(|e| ToolError::InvalidInput(format!("invalid url: {e}")))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(ToolError::InvalidInput(format!("unsupported url scheme: {scheme}")));
+        }
+    }
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let host_key = host.trim_matches(|c| c == '[' || c == ']').to_string();
+
+    if host_name_blocked(&host_key) {
+        return Err(blocked_host_error(&host_key));
+    }
+
+    if let Ok(ip) = host_key.parse::<IpAddr>() {
+        deny_non_public_target(&host_key, &[ip])?;
+        return Ok(None);
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let looked_up: Vec<SocketAddr> = tokio::net::lookup_host((host_key.as_str(), port))
+        .await
+        .map_err(|e| {
+            ToolError::ExecutionFailed(format!("DNS resolution failed for {host_key}: {e}"))
+        })?
+        .collect();
+    if looked_up.is_empty() {
+        return Err(ToolError::ExecutionFailed(format!(
+            "DNS resolution returned no addresses for {host_key}"
+        )));
+    }
+    let ips: Vec<IpAddr> = looked_up.iter().map(|a| a.ip()).collect();
+    deny_non_public_target(&host_key, &ips)?;
+    let pin: Vec<SocketAddr> = ips.into_iter().map(|ip| SocketAddr::new(ip, 0)).collect();
+    Ok(Some((host_key, pin)))
+}
+
+fn ipv4_is_non_public(v4: Ipv4Addr) -> bool {
+    let o = v4.octets();
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.is_broadcast()
+        || v4.is_multicast()
+        || o[0] == 0
+        || (o[0] == 100 && o[1] >= 64 && o[1] <= 127) // 100.64.0.0/10 CGNAT
+        || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24 IETF protocol
+        || (o[0] == 192 && o[1] == 0 && o[2] == 2) // 192.0.2.0/24 TEST-NET-1
+        || (o[0] == 198 && o[1] == 51 && o[2] == 100) // 198.51.100.0/24 TEST-NET-2
+        || (o[0] == 203 && o[1] == 0 && o[2] == 113) // 203.0.113.0/24 TEST-NET-3
+        || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // 198.18.0.0/15 benchmarking
+        || o[0] >= 240 // 240.0.0.0/4 reserved
+}
+
+fn ipv6_embedded_ipv4(v6: Ipv6Addr) -> Option<Ipv4Addr> {
+    if let Some(v4) = v6.to_ipv4_mapped() {
+        return Some(v4);
+    }
+    if let Some(v4) = v6.to_ipv4() {
+        return Some(v4);
+    }
+    let o = v6.octets();
+    // NAT64 well-known prefix 64:ff9b::/96
+    if o[0] == 0x00
+        && o[1] == 0x64
+        && o[2] == 0xff
+        && o[3] == 0x9b
+        && o[4..12].iter().all(|b| *b == 0)
+    {
+        return Some(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
+    }
+    None
+}
+
+fn ip_is_non_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => ipv4_is_non_public(v4),
+        IpAddr::V6(v6) => {
+            if let Some(v4) = ipv6_embedded_ipv4(v6) {
+                return ipv4_is_non_public(v4);
             }
             v6.is_loopback()
                 || v6.is_unicast_link_local()
                 || v6.is_unique_local()
                 || v6.is_unspecified()
+                || v6.is_multicast()
+                || {
+                    let s = v6.segments();
+                    s[0] == 0x2001 && s[1] == 0xdb8 // 2001:db8::/32 documentation
+                }
         }
     }
 }
@@ -3374,14 +3460,19 @@ mod tests {
         let script = if cfg!(windows) {
             format!("ping -n 8 127.0.0.1 >nul & echo still > {}", alive.display())
         } else {
-            format!("sleep 8; echo still > {}", alive.display())
+            // Background grandchild writes independently of the shell. Killing
+            // only the shell (kill_on_drop) would still let this file appear.
+            format!("(sleep 2; echo still > '{}') & sleep 8", alive.display())
         };
         let started = std::time::Instant::now();
         let result = tool.execute(json!({ "command": script, "timeout_secs": 1 })).await;
         assert!(result.is_err(), "timeout should error");
         assert!(started.elapsed() < std::time::Duration::from_secs(4));
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        assert!(!alive.exists(), "child must be killed so it cannot write after timeout");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        assert!(
+            !alive.exists(),
+            "process group must be killed so a grandchild cannot write after timeout"
+        );
     }
 
     #[tokio::test]
@@ -3389,10 +3480,14 @@ mod tests {
         let tool = HttpRequestTool::default();
         let input = json!({
             "method": "GET",
-            "url": "http://invalid.test.localhost.example:1"
+            "url": "not a url"
         });
         let result = tool.execute(input).await;
         assert!(result.is_err(), "expected error for invalid URL");
+        assert!(
+            result.unwrap_err().to_string().contains("invalid url"),
+            "parse failures must not fall through to connect"
+        );
     }
 
     #[tokio::test]
@@ -3405,10 +3500,49 @@ mod tests {
             "http://169.254.169.254/latest/meta-data/",
             "http://10.0.0.1/",
             "http://192.168.1.1/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://100.64.0.1/",
         ] {
             let result = tool.execute(json!({ "method": "GET", "url": url })).await;
-            assert!(result.is_err(), "expected block for {url}, got {result:?}");
+            let err = result.expect_err(&format!("expected block for {url}"));
+            let msg = err.to_string();
+            assert!(msg.contains("blocked"), "guard must reject {url} before connect, got: {msg}");
         }
+    }
+
+    #[test]
+    fn ip_is_non_public_includes_cgnat_mapped_and_nat64() {
+        assert!(ip_is_non_public(IpAddr::from([127, 0, 0, 1])));
+        assert!(ip_is_non_public(IpAddr::from([10, 0, 0, 1])));
+        assert!(ip_is_non_public(IpAddr::from([100, 64, 0, 1])));
+        assert!(ip_is_non_public(IpAddr::from([169, 254, 169, 254])));
+        assert!(ip_is_non_public(IpAddr::from([0, 0, 0, 0])));
+        assert!(ip_is_non_public("::1".parse().unwrap()));
+        assert!(ip_is_non_public("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(ip_is_non_public("::ffff:10.0.0.1".parse().unwrap()));
+        let compatible = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0x7f00, 1);
+        assert!(ip_is_non_public(IpAddr::V6(compatible)));
+        let nat64 = Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0x7f00, 1);
+        assert!(ip_is_non_public(IpAddr::V6(nat64)));
+        assert!(!ip_is_non_public(IpAddr::from([1, 1, 1, 1])));
+        assert!(!ip_is_non_public("2606:4700:4700::1111".parse().unwrap()));
+    }
+
+    #[test]
+    fn deny_non_public_target_blocks_dns_to_loopback() {
+        let err = deny_non_public_target("evil.example", &[IpAddr::from([127, 0, 0, 1])])
+            .expect_err("hostname resolving to loopback must be blocked");
+        assert!(err.to_string().contains("blocked"), "got {err}");
+
+        let err = deny_non_public_target(
+            "evil.example",
+            &[IpAddr::from([1, 1, 1, 1]), IpAddr::from([10, 0, 0, 1])],
+        )
+        .expect_err("mixed public/private answers must be blocked");
+        assert!(err.to_string().contains("blocked"), "got {err}");
+
+        deny_non_public_target("example.com", &[IpAddr::from([1, 1, 1, 1])])
+            .expect("public A record must be allowed");
     }
 
     #[tokio::test]

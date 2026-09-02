@@ -1942,7 +1942,7 @@ async fn t65_privilege_check_rejects_disallowed_tool() {
     assert!(err.contains("not available"), "error should mention tool not available: {err}");
 }
 
-/// Privilege check: core.* tools are always allowed regardless of allowed_tools.
+/// Privilege check: only always-on core tools work with an empty allowlist.
 #[tokio::test]
 async fn t66_privilege_check_allows_core_tools() {
     let bus = EventBus::new(32);
@@ -1950,10 +1950,8 @@ async fn t66_privilege_check_allows_core_tools() {
         SchedulerService::in_memory(bus, hive_scheduler::SchedulerConfig::default()).expect("svc"),
     );
 
-    // Empty allowed list (but core.* should still be allowed)
     let tool = ScheduleTaskTool::new(svc, Some("session-core".into()), vec![], None);
 
-    // core.ask_user should be allowed (and since no executor → Auto approval)
     let result = hive_tools::Tool::execute(
         &tool,
         json!({
@@ -1968,28 +1966,43 @@ async fn t66_privilege_check_allows_core_tools() {
         }),
     )
     .await
-    .expect("core.* should always be allowed");
-
+    .expect("core.ask_user is always-on");
     assert_eq!(result.output["action"]["type"], "call_tool");
+
+    for privileged in ["core.spawn_agent", "core.data_store"] {
+        let err = hive_tools::Tool::execute(
+            &tool,
+            json!({
+                "operation": "create",
+                "name": format!("denied-{privileged}"),
+                "schedule": {"type": "once"},
+                "action": {
+                    "type": "call_tool",
+                    "tool_id": privileged,
+                    "arguments": {}
+                }
+            }),
+        )
+        .await
+        .expect_err("privileged core tool must not be schedulable on an empty allowlist");
+        assert!(
+            err.to_string().contains("not available"),
+            "{privileged} should be rejected, got {err}"
+        );
+    }
 }
 
-/// Privilege check: mcp.* tools are always allowed regardless of allowed_tools.
+/// Privilege check: MCP tools require an explicit allowlist (no mcp.* bypass).
 #[tokio::test]
-async fn t67_privilege_check_allows_mcp_tools() {
+async fn t67_privilege_check_rejects_mcp_tools_without_allowlist() {
     let bus = EventBus::new(32);
     let svc = Arc::new(
         SchedulerService::in_memory(bus, hive_scheduler::SchedulerConfig::default()).expect("svc"),
     );
 
-    let tool = ScheduleTaskTool::new(
-        svc,
-        Some("session-mcp".into()),
-        vec![], // empty, but mcp.* should still pass
-        None,
-    );
-
-    let result = hive_tools::Tool::execute(
-        &tool,
+    let denied = ScheduleTaskTool::new(svc.clone(), Some("session-mcp".into()), vec![], None);
+    let err = hive_tools::Tool::execute(
+        &denied,
         json!({
             "operation": "create",
             "name": "mcp-tool-task",
@@ -2002,8 +2015,33 @@ async fn t67_privilege_check_allows_mcp_tools() {
         }),
     )
     .await
-    .expect("mcp.* should always be allowed");
+    .expect_err("mcp.* must not be auto-allowed");
+    assert!(
+        err.to_string().contains("not available"),
+        "empty allowlist must reject MCP tools, got {err}"
+    );
 
+    let allowed = ScheduleTaskTool::new(
+        svc,
+        Some("session-mcp-glob".into()),
+        vec!["mcp.github.*".to_string()],
+        None,
+    );
+    let result = hive_tools::Tool::execute(
+        &allowed,
+        json!({
+            "operation": "create",
+            "name": "mcp-tool-task-allowed",
+            "schedule": {"type": "once"},
+            "action": {
+                "type": "call_tool",
+                "tool_id": "mcp.github.create_issue",
+                "arguments": {"title": "Test"}
+            }
+        }),
+    )
+    .await
+    .expect("mcp.github.* should allow mcp.github.create_issue");
     assert_eq!(result.output["action"]["type"], "call_tool");
 }
 

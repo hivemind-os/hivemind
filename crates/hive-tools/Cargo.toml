@@ -28,7 +28,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["hooks"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

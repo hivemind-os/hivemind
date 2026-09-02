@@ -3000,6 +3000,20 @@ async fn activate_skill_stages_scripts_and_rewrites_skill_dir_token() {
     );
     assert!(!content.contains("<skill_dir>"), "placeholder must not remain: {content}");
     assert!(
+        content.contains("Skill directory: .skills/cadquery-modeling"),
+        "skill directory line must use the staged path, got: {content}"
+    );
+    assert!(
+        !content.contains(&source.display().to_string()),
+        "raw install path must not leak into activation content: {content}"
+    );
+    if let Ok(canon) = source.canonicalize() {
+        assert!(
+            !content.contains(&canon.display().to_string()),
+            "canonical install path must not leak into activation content: {content}"
+        );
+    }
+    assert!(
         workspace.join(".skills/cadquery-modeling/scripts/render_model.py").is_file(),
         "render script must be staged at .skills/<name>/scripts/"
     );

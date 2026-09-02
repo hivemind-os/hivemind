@@ -339,8 +339,7 @@ fn seed_bundled_skills(
             checksums,
             force,
         )?;
-        // Older seeders nested `scripts/` twice (`scripts/scripts/foo.py`).
-        // Drop that leftover so SKILL.md paths resolve.
+        // Remove leftover nested scripts/scripts from older seeders.
         let nested_scripts = target_skill_dir.join("scripts").join("scripts");
         if nested_scripts.is_dir() {
             let _ = fs::remove_dir_all(&nested_scripts);
@@ -402,10 +401,7 @@ fn write_bundled_dir_recursive(
     }
 
     for sub in dir.dirs() {
-        // `include_dir` file paths are relative to the skill root (`base`), not
-        // the current subdirectory. Recursing with `target.join(rel)` nested
-        // folders (e.g. `scripts/scripts/render_model.py`). Keep `base` and
-        // `target` as the skill root so `rel` is joined once.
+        // include_dir paths are skill-root relative; always join onto the skill root.
         write_bundled_dir_recursive(sub, base, target, persona_id, skill_name, checksums, force)?;
     }
 

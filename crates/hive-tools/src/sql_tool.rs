@@ -96,6 +96,7 @@ impl DataStoreTool {
 
         let conn =
             Connection::open(&db_path).map_err(|e| format!("failed to open data store: {e}"))?;
+        install_data_store_authorizer(&conn);
 
         // Enable WAL mode for better concurrency
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
@@ -103,6 +104,19 @@ impl DataStoreTool {
 
         Ok(Self { definition: Self::tool_definition(), _db_path: db_path, conn: Mutex::new(conn) })
     }
+}
+
+fn install_data_store_authorizer(conn: &Connection) {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+        AuthAction::Attach { .. } | AuthAction::Detach { .. } => Authorization::Deny,
+        AuthAction::Function { function_name }
+            if function_name.eq_ignore_ascii_case("load_extension") =>
+        {
+            Authorization::Deny
+        }
+        _ => Authorization::Allow,
+    }));
 }
 
 fn blocked_sql_feature(query: &str) -> Option<&'static str> {
@@ -117,7 +131,7 @@ fn blocked_sql_feature(query: &str) -> Option<&'static str> {
             }
         } else if let Some(rest) = s.strip_prefix("/*") {
             if let Some(pos) = rest.find("*/") {
-                s = &rest[pos + 2..];
+                s = &s[pos + 2..];
             } else {
                 return None;
             }
@@ -132,6 +146,9 @@ fn blocked_sql_feature(query: &str) -> Option<&'static str> {
         .collect();
     if tokens.iter().any(|t| t == "ATTACH" || t == "DETACH") {
         return Some("ATTACH/DETACH");
+    }
+    if tokens.first().map(String::as_str) == Some("VACUUM") && tokens.iter().any(|t| t == "INTO") {
+        return Some("VACUUM INTO");
     }
     if tokens.windows(2).any(|w| w[0] == "LOAD" && w[1] == "EXTENSION")
         || tokens.iter().any(|t| t == "LOAD_EXTENSION")
@@ -306,12 +323,26 @@ mod tests {
             .execute(json!({ "query": "ATTACH DATABASE '/tmp/escape.db' AS other" }))
             .await
             .expect_err("ATTACH must be rejected");
-        assert!(err.to_string().to_ascii_uppercase().contains("ATTACH"), "got {err}");
+        assert!(
+            err.to_string().contains("ATTACH/DETACH is not allowed"),
+            "guard message missing: {err}"
+        );
         let err = tool
             .execute(json!({ "query": "SELECT load_extension('x')" }))
             .await
             .expect_err("load_extension must be rejected");
-        assert!(err.to_string().contains("load_extension") || err.to_string().contains("LOAD"));
+        assert!(
+            err.to_string().contains("load_extension is not allowed"),
+            "guard message missing: {err}"
+        );
+        let err = tool
+            .execute(json!({ "query": "VACUUM INTO '/tmp/escape.db'" }))
+            .await
+            .expect_err("VACUUM INTO must be rejected");
+        assert!(
+            err.to_string().contains("VACUUM INTO is not allowed"),
+            "guard message missing: {err}"
+        );
     }
 
     #[tokio::test]
