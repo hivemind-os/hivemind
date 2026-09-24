@@ -15,10 +15,6 @@ Pick the installer for your platform:
 
 All installers are available on the [GitHub Releases page](https://github.com/hivemind-os/hivemind/releases).
 
-::: warning The published installer lags these docs
-As of September 2026, the latest GitHub release is [v0.1.41](https://github.com/hivemind-os/hivemind/releases/tag/v0.1.41), published on 17 May 2026. The app in this repository is version 0.1.42, so a screen described here can be missing from the build you download. The links above follow whatever GitHub marks as the latest release.
-:::
-
 ## Install
 
 ::: code-group
