@@ -33,7 +33,7 @@ export default withMermaid(
       logo: "/logo.png",
 
       nav: [
-        { text: "Get Started", link: "/getting-started/quickstart" },
+        { text: "Get Started", link: "/getting-started/installation" },
         { text: "Use Cases", link: "/use-cases/" },
         { text: "Concepts", link: "/concepts/how-it-works" },
         { text: "Guides", link: "/guides/personas" },
@@ -251,7 +251,7 @@ export default withMermaid(
                 link: "/examples/custom-persona",
               },
               {
-                text: "Email Support Workflow",
+                text: "Email Support Agent",
                 link: "/examples/pr-review-workflow",
               },
               {

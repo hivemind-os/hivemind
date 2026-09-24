@@ -7536,18 +7536,27 @@ button.agent-icon-button:disabled {
   border: 2px solid hsl(var(--card));
 }
 
-.flight-deck-global-toggle {
+.global-corner-controls {
   position: fixed;
   top: 0.65rem;
   right: 0.75rem;
   z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
 }
 
-.status-global-toggle {
-  position: fixed;
-  top: 0.65rem;
-  right: 3rem;
-  z-index: 900;
+.flight-deck-global-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.flight-deck-toggle-label {
+  line-height: 1;
 }
 
 /* ── Confirmation dialog ── */

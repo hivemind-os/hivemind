@@ -40,7 +40,7 @@ To add a provider, click its card, enter the required credentials, and click **S
 
 ## Creating Personas
 
-Personas are the AI assistants you talk to. Each one has its own personality, instructions, and capabilities. Go to **Settings → Personas** and click **New Persona**.
+Personas are the AI assistants you talk to. Each one has its own personality, instructions, and capabilities. Click **Personas** in the sidebar, then click **New Persona**.
 
 ![The Persona editor form](/images/new-persona.png)
 
@@ -272,7 +272,7 @@ The **Chat** view is where you have direct conversations with your AI personas.
 
 ## The Flight Deck
 
-The **Flight Deck** is your mission control for everything that's currently running in HiveMind OS. Open it by clicking the **rocket button** (🚀) in the top-right corner of the app.
+The **Flight Deck** is your mission control for everything that's currently running in HiveMind OS. Open it from the **Flight Deck** button in the top-right corner, or press `Ctrl+Shift+F`.
 
 It gives you a global, real-time view of all active agents, workflows, and other system activity — so you always know what's happening and can step in when needed.
 

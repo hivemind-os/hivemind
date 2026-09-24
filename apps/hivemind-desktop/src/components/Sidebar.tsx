@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, on, Show, type Accessor, type Setter } from 'solid-js';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Plus, Settings, Search, Bot, Clock, GitBranch, MessageSquare, Compass, Home, FolderOpen, Trash2, Pencil, ChevronDown, LoaderCircle, Package } from 'lucide-solid';
+import { Plus, Settings, Search, Bot, Clock, GitBranch, MessageSquare, Compass, Home, FolderOpen, Trash2, Pencil, ChevronDown, LoaderCircle, Package, Users } from 'lucide-solid';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button,
   Switch, SwitchControl, SwitchThumb, SwitchLabel,
@@ -33,7 +33,8 @@ export interface SidebarProps {
   selectSession: (session_id: string) => Promise<void>;
   deleteSession: (session_id: string, scrubKb: boolean) => Promise<void>;
   renameSession: (session_id: string, title: string) => Promise<void>;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: 'personas' | 'general-appearance') => void;
+  settingsTab: Accessor<string>;
   onReorderSessions: (fromIndex: number, toIndex: number) => void;
   activeScreen: Accessor<'session' | 'bots' | 'scheduler' | 'workflows' | 'settings' | 'agent-kits'>;
   setActiveScreen: Setter<'session' | 'bots' | 'scheduler' | 'workflows' | 'settings' | 'agent-kits'>;
@@ -333,6 +334,20 @@ const Sidebar = (props: SidebarProps) => {
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  isActive={props.activeScreen() === 'settings' && props.settingsTab() === 'personas'}
+                  onClick={() => {
+                    props.onOpenSettings('personas');
+                    props.setActiveScreen('settings');
+                  }}
+                  size="sm"
+                  data-testid="sidebar-personas-btn"
+                >
+                  <Users size={16} />
+                  <span>Personas</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
                   isActive={props.activeScreen() === 'bots'}
                   onClick={() => props.setActiveScreen(props.activeScreen() === 'bots' ? 'session' : 'bots')}
                   size="sm"
@@ -361,8 +376,8 @@ const Sidebar = (props: SidebarProps) => {
                   <span>Workflows</span>
                 </SidebarMenuButton>
                 <SidebarMenuAction
-                  showOnHover
-                  aria-label="Manage workflow definitions"
+                  aria-label="Workflow definitions"
+                  title="Workflow definitions"
                   data-testid="wf-definitions-toggle"
                   onClick={(e: MouseEvent) => {
                     e.stopPropagation();
@@ -385,8 +400,11 @@ const Sidebar = (props: SidebarProps) => {
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={props.activeScreen() === 'settings'}
-                  onClick={() => { props.setActiveScreen('settings'); props.onOpenSettings(); }}
+                  isActive={props.activeScreen() === 'settings' && props.settingsTab() !== 'personas'}
+                  onClick={() => {
+                    props.onOpenSettings(props.settingsTab() === 'personas' ? 'general-appearance' : undefined);
+                    props.setActiveScreen('settings');
+                  }}
                   size="sm"
                   data-testid="sidebar-settings-btn"
                 >

@@ -311,7 +311,7 @@ Open the **Workflows** page to see all active and completed instances:
 - **Live updates** — the page updates in real time as steps complete
 
 ::: tip Flight Deck
-For a global view of all running workflows and agents in one place, open the **Flight Deck** — click the 🚀 rocket button in the top-right corner. See the [No-Code Guide](/guides/no-code-guide#the-flight-deck) for details.
+For a global view of all running workflows and agents in one place, open the **Flight Deck** from the button in the top-right corner, or press `Ctrl+Shift+F`. See the [No-Code Guide](/guides/no-code-guide#the-flight-deck) for details.
 :::
 
 ### Responding to Gates

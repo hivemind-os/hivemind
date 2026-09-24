@@ -43,7 +43,7 @@ You can connect multiple email accounts if you handle support from more than one
 
 A [persona](/glossary#persona) tells the AI *how* to behave. Think of it as hiring a virtual employee and giving them their job description.
 
-1. Click **Settings** in the sidebar, then click **Personas**.
+1. Click **Personas** in the sidebar.
 2. Click **New Persona**.
 3. Fill in the fields:
 
@@ -146,7 +146,7 @@ Not every email needs an auto-reply. Consider refining the prompt to handle diff
 ### When the AI Gets It Wrong
 
 It will happen — and that's okay. When you spot an incorrect reply:
-1. Click **Settings** in the sidebar, then click **Personas**, and refine the system prompt with more specific instructions.
+1. Click **Personas** in the sidebar, and refine the system prompt with more specific instructions.
 2. Update your product manual with the missing information.
 3. The next reply will be better. The AI learns from the documents you give it, so better docs mean better answers.
 

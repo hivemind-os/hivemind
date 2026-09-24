@@ -63,7 +63,7 @@ Skills are portable knowledge packs that add domain expertise, procedures, and r
 
 ## Creating and Managing Personas
 
-Open **Settings → Personas** to manage your collection:
+Click **Personas** in the sidebar to manage your collection:
 
 1. **Create from scratch** — Click *New Persona*, fill in the fields, and save. Your persona appears under the `user/` namespace.
 2. **Start from a template** — Use an existing persona as a starting point and customise from there.

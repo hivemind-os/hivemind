@@ -10,8 +10,8 @@ hero:
     alt: HiveMind OS
   actions:
     - theme: brand
-      text: Get Started →
-      link: /getting-started/quickstart
+      text: Download
+      link: /getting-started/installation
     - theme: alt
       text: Why HiveMind OS?
       link: /concepts/how-it-works
@@ -73,12 +73,12 @@ Most AI tools are cloud services that hold your data hostage. HiveMind OS flips 
 
 ## Get Started in 2 Minutes
 
-1. **Download** the desktop app for your platform
+1. **[Download](/getting-started/installation)** the desktop app for your platform
 2. **Open it** — the Setup Wizard walks you through connecting an AI model
 3. **Start chatting** — ask it anything, or set up your first automation
 
 ::: tip 🚀 New here?
-The [Quickstart Guide](/getting-started/quickstart) walks you through setup and your first automation in under 5 minutes.
+[Install the app](/getting-started/installation), then follow the [Quickstart](/getting-started/quickstart) for setup and a first automation.
 :::
 
 ::: info 💼 Business user?

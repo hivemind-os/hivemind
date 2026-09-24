@@ -1,5 +1,5 @@
 import { For } from 'solid-js';
-import { Bot, Wrench, Layers, Plug, Sparkles } from 'lucide-solid';
+import { Bot, Wrench, Layers, Plug, Sparkles, GitBranch, Rocket } from 'lucide-solid';
 import { Button } from '~/ui';
 
 export interface TourStepProps {
@@ -10,23 +10,33 @@ export interface TourStepProps {
 const FEATURES = [
   {
     icon: Bot,
-    title: 'Personas & Skills',
-    description: 'Switch between specialized AI personas, each with their own capabilities, tools, and knowledge.',
+    title: 'Personas',
+    description: 'Open Personas in the sidebar. Each persona has its own instructions, tools, and skills.',
   },
   {
-    icon: Wrench,
-    title: 'MCP Tool Integrations',
-    description: 'Extend HiveMind OS with Model Context Protocol servers — connect to databases, APIs, and development tools.',
+    icon: GitBranch,
+    title: 'Workflows and bots',
+    description: 'Workflows, Bots, and Scheduler are in the sidebar. The gear on Workflows opens saved definitions.',
   },
   {
-    icon: Layers,
-    title: 'Multi-Provider Routing',
-    description: 'Seamlessly route requests across multiple AI providers based on capability, cost, and priority.',
+    icon: Rocket,
+    title: 'Flight Deck',
+    description: 'The Flight Deck button at the top right shows running agents, workflows, and the knowledge graph.',
   },
   {
     icon: Plug,
-    title: 'Connectors & Channels',
-    description: 'Integrate with email, calendar, chat platforms, and more — HiveMind OS works where you work.',
+    title: 'Connectors',
+    description: 'Settings, then Agents & Automation, then Connectors. That covers email, calendar, and chat.',
+  },
+  {
+    icon: Layers,
+    title: 'Models',
+    description: 'Settings, then AI & Models, is where you add providers and choose how requests are routed.',
+  },
+  {
+    icon: Wrench,
+    title: 'MCP tools',
+    description: 'Inside a session, the MCP tab connects servers for databases, APIs, and other tools.',
   },
 ];
 

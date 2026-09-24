@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://hivemind-os.io">Documentation</a> |
+  <a href="https://hivemind-os.io/getting-started/installation">Download</a> |
   <a href="https://hivemind-os.io/getting-started/quickstart">Quickstart</a> |
   <a href="https://hivemind-os.io/getting-started/installation">Installation</a> |
   <a href="https://hivemind-os.io/plugin-development/">Plugin Development</a>

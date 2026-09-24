@@ -3069,18 +3069,8 @@ const App = () => {
         </section>
       </Show>
 
-      {/* ── Flight Deck global toggle (top-right corner) ────────────── */}
-      <button
-        class="flight-deck-toggle flight-deck-global-toggle"
-        data-testid="flight-deck-toggle"
-        onClick={() => setFlightDeckOpen(true)}
-        title="Flight Deck (Ctrl+Shift+F)"
-      >
-        <Rocket size={16} />
-        <Show when={flightDeckNeedsAttention()}>
-          <span class="flight-deck-toggle-badge" />
-        </Show>
-      </button>
+      {/* ── Status and Flight Deck (top-right corner) ────────────── */}
+      <div class="global-corner-controls">
 
       {/* ── User status toggle (next to Flight Deck) ────────────── */}
       {(() => {
@@ -3161,6 +3151,20 @@ const App = () => {
         </>;
       })()}
 
+      <button
+        class="flight-deck-toggle flight-deck-global-toggle"
+        data-testid="flight-deck-toggle"
+        onClick={() => setFlightDeckOpen(true)}
+        title="Flight Deck (Ctrl+Shift+F)"
+      >
+        <Rocket size={16} />
+        <span class="flight-deck-toggle-label">Flight Deck</span>
+        <Show when={flightDeckNeedsAttention()}>
+          <span class="flight-deck-toggle-badge" />
+        </Show>
+      </button>
+      </div>
+
       <SidebarProvider
         open={sidebarOpen()}
         onOpenChange={setSidebarOpen}
@@ -3181,7 +3185,12 @@ const App = () => {
             selectSession={(id) => { setActiveScreen('session'); return selectSession(id); }}
             deleteSession={deleteSession}
             renameSession={renameSession}
-            onOpenSettings={() => { void loadEditConfig(); void loadToolDefinitions(); }}
+            settingsTab={settingsTab}
+            onOpenSettings={(tab) => {
+              if (tab) setSettingsTab(tab);
+              void loadEditConfig();
+              void loadToolDefinitions();
+            }}
             onReorderSessions={reorderSessions}
             activeScreen={activeScreen}
             setActiveScreen={setActiveScreen}

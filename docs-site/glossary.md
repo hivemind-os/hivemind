@@ -4,6 +4,18 @@ Quick reference for terms used throughout the HiveMind OS documentation. If you'
 
 ---
 
+## AFK
+
+Away From Keyboard. When your status is Away or Do Not Disturb, questions and approval requests are forwarded to a channel you choose, such as Slack, Discord, or email. Set your status from the colored dot at the top of the window. Configure the channel in **Settings → Agents & Automation → AFK / Status**.
+
+**See also:** [AFK Mode](/guides/afk-mode)
+
+## Agent Kit
+
+A portable `.agentkit` file that packages personas, workflows, skills, and attachments so you can share or move an agent setup. Open **Agent Kits** in the sidebar. The file does not include credentials, conversation history, or the knowledge graph.
+
+**See also:** [Agent Kits](/guides/agent-kits)
+
 ## Agent Stage
 
 A live dashboard in HiveMind OS where you can watch your bots working. Each bot appears as a card showing what it's doing, and you can respond to questions or approve actions directly.
@@ -37,6 +49,12 @@ The background service that powers HiveMind OS. It runs quietly on your computer
 A pause point in a workflow where the AI stops and asks you a question before continuing. Great for approvals, reviews, or any step where you want to stay in the loop.
 
 **See also:** [Workflows Guide](/guides/workflows)
+
+## Flight Deck
+
+The panel opened from the **Flight Deck** button at the top right of the window, or with `Ctrl+Shift+F`. It shows agents and workflows that are running, and it is where you browse the knowledge graph.
+
+**See also:** [No-Code Guide → Flight Deck](/guides/no-code-guide#the-flight-deck)
 
 ## Knowledge Graph
 
@@ -77,6 +95,24 @@ A TypeScript package that extends HiveMind OS with new connector capabilities �
 An AI service that supplies the language models your personas use to think and respond. Examples include Anthropic (Claude), OpenAI (GPT), GitHub Copilot, and Ollama (local, free).
 
 **See also:** [Configure Providers Guide](/guides/configure-providers)
+
+## Scheduler
+
+The sidebar page for work that runs on a timer. The timing is a cron expression. The workflow designer can fill that expression in for you.
+
+**See also:** [Scheduling](/guides/scheduling)
+
+## Skill
+
+A folder of instructions and reference files that teaches a persona how to approach a kind of task. Skills belong to a persona. Tools are separate: a tool is an action the persona can call, and a skill is the procedure for when and how to call it.
+
+**See also:** [Skills](/guides/skills)
+
+## Spatial Canvas
+
+An experimental session layout. Each message is a card on a 2D canvas, instead of one transcript running down the page. Choose **Spatial Canvas** when you create a session.
+
+**See also:** [Spatial Chat](/guides/spatial-chat)
 
 ## System Prompt
 

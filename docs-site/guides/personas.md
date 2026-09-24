@@ -4,7 +4,7 @@ This guide walks you through creating, configuring, and managing personas in Hiv
 
 ## Creating a Persona from Scratch
 
-1. Open **Settings → Personas → New Persona**
+1. Click **Personas** in the sidebar, then **New Persona**
 2. Fill in identity fields: **Name**, **Description**, **Avatar** (emoji or image URL), **Color** (hex)
 3. Write the **system prompt** (see [tips below](#writing-effective-system-prompts))
 4. Set **model preferences** — pick a primary model and optional fallbacks
@@ -17,7 +17,7 @@ This guide walks you through creating, configuring, and managing personas in Hiv
 
 ## Creating from a Template
 
-1. In **Settings → Personas**, click **Browse Templates**
+1. Click **Personas** in the sidebar, then **Browse Templates**
 2. Pick a template and click **Use Template** — this pre-fills every field
 3. Customise the name, prompt, tools, or models to fit your use case
 4. Click **Save** to create your copy under `user/`

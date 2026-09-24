@@ -1,12 +1,13 @@
 # Slash Commands
 
-Slash commands are shortcuts you can type directly in the HiveMind OS chat input. Press `/` to see available commands.
+Slash commands are typed at the start of the chat box. A matching list opens as you type.
 
 ## Command Reference
 
 | Command | Alias | Description | Example |
 |---|---|---|---|
-| `/prompt` | `/p` | Invoke a persona's prompt template | `/prompt audit-directory` |
+| `/prompt` | `/p` | Fill in a prompt template from the current persona | `/prompt audit-directory` |
+| `/workflow` | `/wf` | Launch a chat workflow in the current session | `/workflow morning-brief` |
 
 ## Details
 
@@ -24,6 +25,17 @@ When invoked, HiveMind OS looks up the template by ID on the current persona, re
 ::: tip
 Define prompt templates in your persona YAML under the `prompts` field. Each template has an `id`, `name`, `template` (Handlebars string), and optional `input_schema` for parameters. See the [Prompt Templates Reference](/reference/prompt-templates) for full syntax details.
 :::
+
+### /workflow
+
+List chat workflows and launch one in the current session.
+
+```
+/workflow
+/wf morning-brief
+```
+
+Type `/workflow` or `/wf`, then part of the workflow name. Pick a row to open the launch dialog. The list only includes workflows that can run from chat. If none are available, the list stays hidden.
 
 ## Other Capabilities
 

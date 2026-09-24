@@ -10,7 +10,7 @@ HiveMind OS works like chatting with a knowledgeable friend — one who can rese
 
 **Try this:**
 
-1. Click **Chat** in the sidebar.
+1. Click **Sessions** in the sidebar.
 2. At the top of the chat, open the **persona picker** dropdown and select **General**.
 3. Type a question in the message box — anything you're curious about. For example:
 
@@ -55,10 +55,9 @@ Personas are like specialized assistants you can switch between. The built-in **
 
 **Try this:**
 
-1. Open **Settings** (gear icon in the bottom of the sidebar).
-2. Go to **Personas**.
-3. Click **New Persona**.
-4. Fill in the details:
+1. Click **Personas** in the sidebar.
+2. Click **New Persona**.
+3. Fill in the details:
    - **Name:** Email Helper
    - **Description:** Writes and polishes professional emails
    - **Avatar / Color:** Pick any color you like
@@ -69,7 +68,7 @@ You are a professional email writing assistant. Help me draft, edit, and reply t
 Keep the tone friendly but professional. Always suggest a subject line.
 ```
 
-5. Click **Save**.
+4. Click **Save**.
 
 **What to expect:** Your new **Email Helper** persona appears in the persona picker dropdown in the Chat view. Select it anytime you need help drafting an email, and it will follow the style instructions you gave it. You can create as many personas as you like for different tasks.
 
@@ -88,7 +87,7 @@ Workflows are pre-built automations that come with HiveMind OS. They handle mult
 **Try this:**
 
 1. In the sidebar, find the **Workflows** section.
-2. Click the **⚙ gear icon** next to "Workflows" — this opens the **workflow definitions** view (clicking "Workflows" itself shows running instances, so look for the gear icon).
+2. Click the **gear** on the Workflows row. That opens workflow definitions. Clicking the Workflows label itself shows running instances.
 3. Browse the list of bundled workflows. Find one like **Plan & Implement** (under `system/software/plan-and-implement`).
 4. Click the **Launch** button on the workflow card.
 5. A **wizard overlay** appears — walk through each step, filling in the required inputs (e.g., a description of what you want to plan).

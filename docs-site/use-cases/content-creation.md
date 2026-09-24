@@ -29,7 +29,7 @@ That's it — no connectors required for basic content creation. You'll chat dir
 
 A [persona](/glossary#persona) shapes *how* the AI writes. By creating a dedicated Content Writer, every piece of content will match your brand's voice.
 
-1. Click **Settings** in the sidebar, then click **Personas**.
+1. Click **Personas** in the sidebar.
 2. Click **New Persona**.
 3. Fill in the fields:
 
